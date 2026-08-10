@@ -1,10 +1,6 @@
 import { encode } from "@msgpack/msgpack";
 import { MIN_EFFECT_BUFFER_SIZE } from "../../runtime/constants.js";
-import type {
-  DefaultAdapterHttpClientResponse,
-  DefaultAdapterHttpRequest,
-  NodeReadableWithRead,
-} from "./types.js";
+import type { NodeReadableWithRead } from "./types.js";
 
 export const WEB_CRYPTO_MAX_BYTES_PER_CALL = 65_536;
 export const MAX_TIMER_DELAY_MILLIS = 2_147_483_647;
@@ -166,98 +162,6 @@ const payloadFitsEffectTransport = ({
   } catch {
     return false;
   }
-};
-
-export const fsTransportOverflowError = ({
-  opName,
-  effectBufferSize,
-}: {
-  opName: string;
-  effectBufferSize: number;
-}): Record<string, unknown> =>
-  hostError(
-    `Default fs adapter ${opName} response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or read a smaller payload.`
-  );
-
-export const fsSuccessPayload = ({
-  opName,
-  value,
-  effectBufferSize,
-}: {
-  opName: string;
-  value: unknown;
-  effectBufferSize: number;
-}): Record<string, unknown> => {
-  const payload = hostOk(value);
-  if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
-    return payload;
-  }
-  return fsTransportOverflowError({ opName, effectBufferSize });
-};
-
-export const httpClientTransportOverflowError = ({
-  effectBufferSize,
-}: {
-  effectBufferSize: number;
-}): Record<string, unknown> =>
-  hostError(
-    `Default http-client adapter response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or request a smaller payload.`
-  );
-
-export const httpClientSuccessPayload = ({
-  response,
-  effectBufferSize,
-}: {
-  response: DefaultAdapterHttpClientResponse;
-  effectBufferSize: number;
-}): Record<string, unknown> => {
-  const payload = hostOk({
-    status: response.status,
-    reason: response.reason,
-    headers: response.headers.map((header) => ({
-      name: header.name,
-      value: header.value,
-    })),
-    body: Array.from(response.body.values()),
-  });
-  if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
-    return payload;
-  }
-  return httpClientTransportOverflowError({ effectBufferSize });
-};
-
-export const httpServerAcceptTransportOverflowError = ({
-  effectBufferSize,
-}: {
-  effectBufferSize: number;
-}): Record<string, unknown> =>
-  hostError(
-    `Default http-server adapter accept response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or configure max_body_bytes lower.`
-  );
-
-export const httpServerAcceptSuccessPayload = ({
-  request,
-  effectBufferSize,
-}: {
-  request: DefaultAdapterHttpRequest;
-  effectBufferSize: number;
-}): Record<string, unknown> => {
-  const payload = hostOk({
-    request_id: request.requestId,
-    method: request.method,
-    path: request.path,
-    query: request.query ?? null,
-    headers: request.headers.map((header) => ({
-      name: header.name,
-      value: header.value,
-    })),
-    body: Array.from(request.body.values()),
-    body_streaming: request.bodyStreaming ?? false,
-  });
-  if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
-    return payload;
-  }
-  return httpServerAcceptTransportOverflowError({ effectBufferSize });
 };
 
 export const maxTransportSafeHttpServerChunkBytes = ({

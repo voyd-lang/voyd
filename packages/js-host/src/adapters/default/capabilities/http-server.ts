@@ -1,8 +1,5 @@
 import {
   globalRecord,
-  hostError,
-  hostOk,
-  httpServerAcceptSuccessPayload,
   maxTransportSafeHttpServerChunkBytes,
   isRecord,
   readField,
@@ -44,13 +41,34 @@ class HttpServerPayloadTooLargeError extends Error {
   readonly code = HTTP_SERVER_PAYLOAD_TOO_LARGE_ERROR_CODE;
 }
 
-const httpServerErrorPayload = (error: unknown): Record<string, unknown> => {
+const httpServerResult = <T>(value: T): Record<string, unknown> => ({
+  ok: true,
+  value,
+  error_code: 0,
+  error_message: "",
+});
+
+const httpServerErrorPayload = <T>(
+  error: unknown,
+  value: T,
+): Record<string, unknown> => {
   const code = toNumberOrUndefined(readField(error, "code"));
-  return hostError(
-    error instanceof Error ? error.message : String(error),
-    code === undefined ? 1 : Math.trunc(code)
-  );
+  return {
+    ok: false,
+    value,
+    error_code: code === undefined ? 1 : Math.trunc(code),
+    error_message: error instanceof Error ? error.message : String(error),
+  };
 };
+
+const emptyPendingRequest = (): Record<string, unknown> => ({
+  request_id: 0,
+  method: "GET",
+  path: "/",
+  headers: [],
+  body: new Uint8Array(),
+  body_streaming: false,
+});
 
 type PendingNodeResponse = {
   response: NodeHttpServerResponse;
@@ -1882,9 +1900,9 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
         try {
           const serverId = await httpServerSource.listen(decodeConfig(payload));
           registerResourceCleanup?.(() => httpServerSource.close(serverId));
-          return tail(hostOk(serverId));
+          return tail(httpServerResult(serverId));
         } catch (error) {
-          return tail(hostError(error instanceof Error ? error.message : String(error)));
+          return tail(httpServerErrorPayload(error, 0));
         }
       },
     });
@@ -1901,11 +1919,31 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
             throw new Error("http server accept requires a server id");
           }
           const request = await httpServerSource.accept(Math.trunc(parsedServerId));
-          const payload = httpServerAcceptSuccessPayload({
-            request,
-            effectBufferSize,
-          });
-          if (readField(payload, "ok") === false) {
+          const requestBytes =
+            request.body.byteLength +
+            new TextEncoder().encode(request.method).byteLength +
+            new TextEncoder().encode(request.path).byteLength +
+            new TextEncoder().encode(request.query ?? "").byteLength +
+            request.headers.reduce(
+              (total, header) =>
+                total +
+                new TextEncoder().encode(header.name).byteLength +
+                new TextEncoder().encode(header.value).byteLength,
+              0,
+            );
+          const requestValue = {
+            request_id: request.requestId,
+            method: request.method,
+            path: request.path,
+            ...(request.query === undefined ? {} : { query: request.query }),
+            headers: request.headers.map((header) => ({
+              name: header.name,
+              value: header.value,
+            })),
+            body: request.body,
+            body_streaming: request.bodyStreaming ?? false,
+          };
+          if (requestBytes > effectBufferSize) {
             await httpServerSource.respond({
               requestId: request.requestId,
               status: 413,
@@ -1915,10 +1953,18 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
                 "request exceeds effect transport buffer"
               ),
             });
+            return resume(
+              httpServerErrorPayload(
+                new Error(
+                  `Default http-server adapter accept response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or configure max_body_bytes lower.`,
+                ),
+                emptyPendingRequest(),
+              ),
+            );
           }
-          return resume(payload);
+          return resume(httpServerResult(requestValue));
         } catch (error) {
-          return resume(httpServerErrorPayload(error));
+          return resume(httpServerErrorPayload(error, emptyPendingRequest()));
         }
       },
     });
@@ -1938,13 +1984,15 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
             Math.trunc(parsedRequestId)
           );
           return resume(
-            hostOk({
-              chunk: Array.from(result.chunk.values()),
-              done: result.done,
-            })
+            httpServerResult({ chunk: result.chunk, done: result.done }),
           );
         } catch (error) {
-          return resume(httpServerErrorPayload(error));
+          return resume(
+            httpServerErrorPayload(error, {
+              chunk: new Uint8Array(),
+              done: true,
+            }),
+          );
         }
       },
     });
@@ -1957,9 +2005,9 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
       handler: async ({ tail }, payload) => {
         try {
           await httpServerSource.respond(decodeResponsePayload(payload));
-          return tail(hostOk());
+          return tail(httpServerResult(null));
         } catch (error) {
-          return tail(hostError(error instanceof Error ? error.message : String(error)));
+          return tail(httpServerErrorPayload(error, null));
         }
       },
     });
@@ -1972,9 +2020,9 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
       handler: async ({ tail }, payload) => {
         try {
           await httpServerSource.startResponse(decodeResponseHeadPayload(payload));
-          return tail(hostOk());
+          return tail(httpServerResult(null));
         } catch (error) {
-          return tail(hostError(error instanceof Error ? error.message : String(error)));
+          return tail(httpServerErrorPayload(error, null));
         }
       },
     });
@@ -1987,9 +2035,9 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
       handler: async ({ tail }, payload) => {
         try {
           await httpServerSource.writeResponse(decodeResponseChunkPayload(payload));
-          return tail(hostOk());
+          return tail(httpServerResult(null));
         } catch (error) {
-          return tail(hostError(error instanceof Error ? error.message : String(error)));
+          return tail(httpServerErrorPayload(error, null));
         }
       },
     });
@@ -2006,9 +2054,9 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
             throw new Error("http server finish response requires a request id");
           }
           await httpServerSource.finishResponse(Math.trunc(parsedRequestId));
-          return resume(hostOk());
+          return resume(httpServerResult(null));
         } catch (error) {
-          return resume(hostError(error instanceof Error ? error.message : String(error)));
+          return resume(httpServerErrorPayload(error, null));
         }
       },
     });
@@ -2025,9 +2073,9 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
             throw new Error("http server close requires a server id");
           }
           await httpServerSource.close(Math.trunc(parsedServerId));
-          return tail(hostOk());
+          return tail(httpServerResult(null));
         } catch (error) {
-          return tail(hostError(error instanceof Error ? error.message : String(error)));
+          return tail(httpServerErrorPayload(error, null));
         }
       },
     });

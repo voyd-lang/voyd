@@ -6,11 +6,8 @@
 
 use std::error::{ HostError, panic }
 use std::bytes::{ ByteBuffer, Bytes }
-use std::host_dto::HostDto
 use std::http::self as http
 use std::http::wire::self as wire
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
 use std::shared_cell::SharedCell
@@ -74,16 +71,35 @@ obj RespondRequestState {
   streamed: bool
 }
 
+pub obj ServerConfigDto {
+  api port: i32,
+  api host?: String,
+  api max_body_bytes?: i32,
+  api max_pending_requests?: i32,
+  api response_timeout_millis?: i32,
+  api stream_request_bodies?: bool
+}
+
+pub obj RespondRequestDto {
+  api request_id: i32,
+  api response: wire::ResponseDto
+}
+
+pub obj ChunkRequestDto {
+  api request_id: i32,
+  api chunk: Bytes
+}
+
 /// Dynamically scoped response-stream request used by `stream`.
 @effect(id: "voyd.std.http.response-stream")
 pub eff ResponseStream
-  begin_stream(resume, response: MsgPack) -> MsgPack
-  finish_stream(resume, payload: MsgPack) -> MsgPack
+  begin_stream(resume, response: wire::ResponseDto) -> Unit
+  finish_stream(resume) -> Unit
 
 /// Dynamically scoped writer available while a response stream is open.
 @effect(id: "voyd.std.http.response-writer")
 pub eff ResponseWriter
-  write_chunk(tail, chunk: MsgPack) -> MsgPack
+  write_chunk(tail, chunk: Bytes) -> wire::HttpResult<Unit>
 
 impl Server
   fn raw_id(self) -> i32
@@ -106,21 +122,21 @@ impl ServeTaskPolicy
 @effect(id: "voyd.std.http.server")
 pub eff HttpServer
   /// Starts a server and returns a server id.
-  listen_raw(tail, payload: MsgPack) -> MsgPack
+  listen_raw(tail, payload: ServerConfigDto) -> wire::HttpResult<i32>
   /// Suspends until a request is available or the server closes.
-  accept_raw(resume, server_id: i32) -> MsgPack
+  accept_raw(resume, server_id: i32) -> wire::HttpResult<wire::PendingRequestDto>
   /// Reads the next chunk for a streaming request.
-  read_request_raw(resume, request_id: i32) -> MsgPack
+  read_request_raw(resume, request_id: i32) -> wire::HttpResult<wire::RequestChunkDto>
   /// Sends one response for a request handle.
-  respond_raw(tail, payload: MsgPack) -> MsgPack
+  respond_raw(tail, payload: RespondRequestDto) -> wire::HttpResult<Unit>
   /// Starts a streaming response for a request handle.
-  start_response_raw(tail, payload: MsgPack) -> MsgPack
+  start_response_raw(tail, payload: RespondRequestDto) -> wire::HttpResult<Unit>
   /// Writes one streaming response chunk.
-  write_response_raw(tail, payload: MsgPack) -> MsgPack
+  write_response_raw(tail, payload: ChunkRequestDto) -> wire::HttpResult<Unit>
   /// Finishes a streaming response.
-  finish_response_raw(resume, request_id: i32) -> MsgPack
+  finish_response_raw(resume, request_id: i32) -> wire::HttpResult<Unit>
   /// Closes a server and releases host resources.
-  close_raw(tail, server_id: i32) -> MsgPack
+  close_raw(tail, server_id: i32) -> wire::HttpResult<Unit>
 
 impl ServerConfig
   /// Creates a server configuration with common defaults.
@@ -160,7 +176,7 @@ fn rebox_optional_bool(value: Option<bool>) -> Option<bool>
 
 /// Starts a host HTTP server.
 pub fn listen(config: ServerConfig): HttpServer -> Result<Server, HostError>
-  match(wire::decode_i32_result(HttpServer::listen_raw(encode_config(config))))
+  match(wire::decode_result(HttpServer::listen_raw(encode_config(config))))
     Ok<i32> { value }:
       Ok<Server> { value: Server { id: value } }
     Err<HostError> { error }:
@@ -238,17 +254,17 @@ impl RequestBody
     if plan.kind == 1:
       return Ok<Option<Bytes>> { value: Some<Bytes> { value: plan.buffered } }
 
-    match(wire::decode_request_chunk_result(HttpServer::read_request_raw(self.handle.raw_id())))
+    match(wire::decode_result(HttpServer::read_request_raw(self.handle.raw_id())))
       Err<HostError> { error }:
         Err<HostError> { error: error }
-      Ok<(Bytes, bool)> { value }:
+      Ok<wire::RequestChunkDto> { value }:
         self.state.with_mut((~state) =>
-          state.done = value.1
+          state.done = value.done
         )
-        if value.0.is_empty() and value.1:
+        if value.chunk.is_empty() and value.done:
           Ok<Option<Bytes>> { value: None {} }
         else:
-          Ok<Option<Bytes>> { value: Some<Bytes> { value: value.0 } }
+          Ok<Option<Bytes>> { value: Some<Bytes> { value: value.chunk } }
 
   /// Buffers all remaining chunks while preserving the host body limit.
   api fn read_all(self): HttpServer -> Result<Bytes, HostError>
@@ -271,14 +287,14 @@ pub fn respond(
   handle: RequestHandle,
   response: http::Response
 ): HttpServer -> Result<Unit, HostError>
-  wire::decode_unit_result(HttpServer::respond_raw(encode_respond_payload(handle, response)))
+  wire::decode_result(HttpServer::respond_raw(encode_respond_payload(handle, response)))
 
 /// Starts a response without ending its body.
 pub fn start_response(
   handle: RequestHandle,
   response: http::Response
 ): HttpServer -> Result<Unit, HostError>
-  wire::decode_unit_result(HttpServer::start_response_raw(encode_respond_payload(handle, response.empty())))
+  wire::decode_result(HttpServer::start_response_raw(encode_respond_payload(handle, response.empty())))
 
 /// Writes a chunk to an open response stream with host backpressure.
 pub fn write_response(
@@ -287,11 +303,11 @@ pub fn write_response(
 ): HttpServer -> Result<Unit, HostError>
   if chunk.len() > 16384:
     return stream_chunk_too_large()
-  wire::decode_unit_result(HttpServer::write_response_raw(encode_chunk_payload(handle, chunk)))
+  wire::decode_result(HttpServer::write_response_raw(encode_chunk_payload(handle, chunk)))
 
 /// Finishes an open response stream.
 pub fn finish_response(handle: RequestHandle): HttpServer -> Result<Unit, HostError>
-  wire::decode_unit_result(HttpServer::finish_response_raw(handle.raw_id()))
+  wire::decode_result(HttpServer::finish_response_raw(handle.raw_id()))
 
 /// Produces a streaming response from an ordinary Web handler.
 ///
@@ -303,14 +319,14 @@ pub fn stream(
 ): (ResponseStream, open) -> http::Response
   let _ = ResponseStream::begin_stream(wire::encode_response(response.empty()))
   body()
-  let _ = ResponseStream::finish_stream(msgpack::make_null())
+  let _ = ResponseStream::finish_stream()
   response
 
 /// Writes one byte chunk from a streaming response producer.
 pub fn write(chunk: Bytes): ResponseWriter -> Result<Unit, HostError>
   if chunk.len() > 16384:
     return stream_chunk_too_large()
-  wire::decode_unit_result(ResponseWriter::write_chunk(wire::encode_bytes(chunk)))
+  wire::decode_result(ResponseWriter::write_chunk(chunk))
 
 fn stream_chunk_too_large() -> Result<Unit, HostError>
   Err<HostError> {
@@ -322,7 +338,7 @@ fn stream_chunk_too_large() -> Result<Unit, HostError>
 
 /// Closes a server.
 pub fn close(server: Server): HttpServer -> Result<Unit, HostError>
-  wire::decode_unit_result(HttpServer::close_raw(server.raw_id()))
+  wire::decode_result(HttpServer::close_raw(server.raw_id()))
 
 /// Listens and handles each accepted request according to `policy`.
 ///
@@ -475,59 +491,35 @@ fn respond_request(
             Err<HostError> { error: error }
           Ok<Unit>:
             state.streamed = true
-            resume(msgpack::make_null())
+            resume(Unit {})
   ResponseWriter::write_chunk(tail, payload):
-    match(wire::decode_body(payload))
-      Err<HostError> { error }:
-        tail(encode_unit_result(Err<HostError> { error: error }))
-      Ok<http::Body> { value }:
-        tail(encode_unit_result(write_response(handle, value.as_bytes())))
-  ResponseStream::finish_stream(resume, _payload):
+    tail(encode_unit_result(write_response(handle, payload)))
+  ResponseStream::finish_stream(resume):
     match(finish_response(handle))
       Err<HostError> { error }:
         Err<HostError> { error: error }
       Ok<Unit>:
-        resume(msgpack::make_null())
+        resume(Unit {})
 
-fn encode_config(config: ServerConfig): () -> MsgPack
-  HostDto::init()
-    .set("port", msgpack::make_i32(config.port))
-    .set("host", wire::encode_optional_string(config.host))
-    .set("max_body_bytes", wire::encode_optional_i32(config.max_body_bytes))
-    .set("max_pending_requests", wire::encode_optional_i32(config.max_pending_requests))
-    .set("response_timeout_millis", wire::encode_optional_i32(config.response_timeout_millis))
-    .set("stream_request_bodies", encode_optional_bool(config.stream_request_bodies))
-    .pack()
+fn encode_config(config: ServerConfig): () -> ServerConfigDto
+  ServerConfigDto {
+    port: config.port,
+    host: config.host,
+    max_body_bytes: config.max_body_bytes,
+    max_pending_requests: config.max_pending_requests,
+    response_timeout_millis: config.response_timeout_millis,
+    stream_request_bodies: config.stream_request_bodies
+  }
 
-fn encode_optional_bool(value: Option<bool>) -> MsgPack
-  match(value)
-    Some<bool> { value }:
-      msgpack::make_bool(value)
-    None:
-      msgpack::make_null()
-
-fn encode_unit_result(result: Result<Unit, HostError>) -> MsgPack
-  match(result)
-    Ok<Unit>:
-      HostDto::init()
-        .set("ok", msgpack::make_bool(true))
-        .pack()
-    Err<HostError> { error }:
-      HostDto::init()
-        .set("ok", msgpack::make_bool(false))
-        .set("code", msgpack::make_i32(error.code))
-        .set("message", msgpack::make_string(error.message))
-        .pack()
+fn encode_unit_result(result: Result<Unit, HostError>) -> wire::HttpResult<Unit>
+  wire::encode_result(result, Unit {})
 
 
-fn encode_respond_payload(handle: RequestHandle, response: http::Response): () -> MsgPack
-  HostDto::init()
-    .set("request_id", msgpack::make_i32(handle.raw_id()))
-    .set("response", wire::encode_response(response))
-    .pack()
+fn encode_respond_payload(handle: RequestHandle, response: http::Response): () -> RespondRequestDto
+  RespondRequestDto {
+    request_id: handle.raw_id(),
+    response: wire::encode_response(response)
+  }
 
-fn encode_chunk_payload(handle: RequestHandle, chunk: Bytes): () -> MsgPack
-  HostDto::init()
-    .set("request_id", msgpack::make_i32(handle.raw_id()))
-    .set("chunk", wire::encode_bytes(chunk))
-    .pack()
+fn encode_chunk_payload(handle: RequestHandle, chunk: Bytes): () -> ChunkRequestDto
+  ChunkRequestDto { request_id: handle.raw_id(), chunk: chunk }

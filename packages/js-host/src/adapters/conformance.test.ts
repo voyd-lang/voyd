@@ -285,11 +285,13 @@ describe.each(["node"] as const)(
         kind: "tail",
         value: {
           ok: true,
+          error_code: 0,
+          error_message: "",
           value: {
             status: 200,
             reason: "OK",
             headers: [{ name: "content-type", value: "text/plain" }],
-            body: [104, 101, 108, 108, 111],
+            body: Uint8Array.from([104, 101, 108, 108, 111]),
           },
         },
       });
@@ -312,12 +314,12 @@ describe.each(["node"] as const)(
           body: [],
           redirect_policy: { kind: "follow", max_redirects: 20 },
         })
-      ).resolves.toEqual({
+      ).resolves.toMatchObject({
         kind: "tail",
         value: {
           ok: false,
-          code: 2,
-          message: "fetch request timed out or was aborted",
+          error_code: 2,
+          error_message: "fetch request timed out or was aborted",
         },
       });
 

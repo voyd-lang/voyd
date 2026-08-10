@@ -1,93 +1,29 @@
 # V-499 user-facing changes
 
-This is the living record of user-facing changes made while implementing
-`docs/proposals/encoding-and-vx-dto.md`. The implementation is one breaking
-change. Compatibility aliases and deprecated forms are intentionally omitted.
+V-499 is an intentionally breaking replacement of the old MessagePack-specific
+host boundary with compiler-derived DTO plans and a negotiated host transport.
+The language is pre-adoption, so removed surfaces have no compatibility layer.
 
-## Implemented
+## Changes
 
-- `Bytes` is a distinct automatic DTO primitive and appears as `BytesShape` in
-  reified type shapes.
-- `DataValue` includes `DataBytes`.
-- `std::data::encode<T>` converts an eligible value into its provider-neutral
-  `DataValue` representation.
-- `std::data` defines balanced `DataWriter` and pull-based `DataReader`
-  contracts, with explicit depth, byte, and collection-size limit types.
-  `DataValueWriter` and `DataValueReader` provide checked tree bridges for
-  callers that need an explicit neutral value.
-- DTO decoding rejects unknown fields by default. Callers must explicitly use
-  `IgnoreUnknownFields` for forward-compatible input.
-- `std::data::CustomDto<T, Representation>` defines one provider-neutral DTO
-  representation for exceptional nominal types. Its fallible read operation
-  validates representation invariants with `CustomDtoError`.
-- Compiler-generated DTO traversal, boundary shapes, schema fingerprints, and
-  JavaScript host adapters use the declared `CustomDto` representation. The
-  custom type itself never becomes a second wire shape.
-- The `@boundary` and `@serializer` attributes are removed. Automatic DTO plans
-  and `CustomDto` representations are the only typed boundary contracts.
-- Export, effect, and external-package DTO schemas carry stable SHA-256
-  fingerprints at every typed payload position.
-- Every closed eligible type now has one cached `AutoDtoPlan` in
-  `ProgramCodegenView`. Shape reification, schema metadata, fingerprints, and
-  generated traversal consume that canonical plan.
-- Compiler DTO tree traversal is provider-neutral and requires an explicit
-  concrete tree provider. The default MessagePack roles are isolated behind
-  the selected host-transport provider instead of being a traversal fallback.
-- MessagePack provider roles use the
-  `voyd.std.host-transport.msgpack.*` compiler-contract namespace. The former
-  boundary-specific contract namespace is removed.
-- Wasm modules declare host ABI v2, their DTO schema ABI, and the selected
-  transport. The JavaScript host rejects missing or incompatible transport
-  metadata before running user code.
-- Export metadata includes a stable numeric identity. Export calls, effectful
-  results, child-task continuations, and retained callbacks use complete
-  versioned frames; transport adapters no longer expose unframed value codecs.
-- The JavaScript SDK can register host transport adapters through
-  `transportAdapters`.
-- Serialized export calls use versioned invocation and completion frames with
-  export identity, normalized outcomes, and schema fingerprints.
-- Synchronous external-package calls use the same module transport frames and
-  validate interface, function, argument, and result schema identities.
-- Effect requests and outcomes use framed transport with stable effect and
-  operation identity, signature hash, resume kind, and typed payload
-  fingerprints. This also covers asynchronous external-package calls.
-- Structured logging sends a typed `LogEvent` DTO. Log fields remain typed
-  until the host adapter receives the event.
-- Secure random byte requests return `Bytes` directly. Hosts provide a binary
-  payload instead of an array of MessagePack integer values.
-- Environment effects exchange typed request and result DTOs. Host adapters no
-  longer receive or return MessagePack envelopes for environment operations.
-- File-system effects exchange typed paths, binary `Bytes`, requests, and
-  result DTOs. Filesystem error categories remain explicit without HostDto or
-  MessagePack wrappers.
-- Retained callback invocations and non-effectful callback completions use
-  invocation-scoped frames. Effectful callbacks use the same framed effect
-  request/outcome loop.
-- Generated TypeScript adapter contracts represent `Bytes` as `Uint8Array`;
-  generated WIT represents it as `list<u8>`.
-- OpenAPI shape rendering represents `Bytes` as a binary string.
-- `ByteBuffer.push` traps when given an integer outside `0...255`; invalid
-  values can no longer be silently truncated during encoding.
-- `std::msgpack::encode<T>` returns immutable `Bytes`, and
-  `std::msgpack::decode<T>` decodes immutable bytes into a checked DTO value.
-  Parsed-tree byte conversion remains available as `encode_value_bytes` and
-  `decode_value_bytes`.
-- `MsgPackWriter` and `MsgPackReader` implement the provider-neutral data
-  contracts directly over immutable MessagePack bytes, including balanced
-  containers and allocation-free value skipping.
-- Typed MessagePack encoding and decoding now use those byte streams and no
-  longer construct an intermediate parsed `MsgPack` tree.
-- `std::json::encode<T>` produces compact JSON and rejects `i64` values outside
-  JavaScript's exact integer range. `Bytes` requires an explicit application
-  representation in JSON.
-- `JsonWriter` implements the provider-neutral data writer contract directly
-  over compact UTF-8 JSON output. Typed JSON encoding no longer constructs an
-  intermediate `JsonValue` tree.
-- `JsonReader` implements the provider-neutral pull-reader contract directly
-  over JSON source text. Typed JSON source decoding validates against the
-  requested shape without constructing an intermediate `JsonValue` tree.
+- Public exports, external imports, effects, and retained callbacks use the
+  framed host ABI v2 protocol. Host adapters must declare a compatible
+  transport provider before user code runs.
+- Export, import, effect, and callback values use compiler-derived DTO shapes
+  and schema fingerprints. Plain JavaScript values remain the SDK surface.
+- `Bytes` is a first-class DTO primitive and crosses JavaScript boundaries as
+  `Uint8Array`.
+- Typed JSON and MessagePack APIs share the provider-neutral data reader and
+  writer contract. Their typed paths stream directly instead of constructing a
+  `DataValue` tree first.
+- `CustomDto<T>` can define a type's boundary representation and conversion
+  functions. The representation participates in the canonical DTO plan.
+- The `@boundary` and `@serializer` annotations have been removed.
+- Standard host effects for logging, randomness, environment variables,
+  filesystems, and HTTP now use typed request and result values. Adapter authors
+  receive and return those values instead of MessagePack envelope objects.
+- HTTP and filesystem byte bodies are `Uint8Array` values in JavaScript host
+  adapters.
 
-## Planned replacements
-
-- Remove public MessagePack boundary helpers and compiler contracts.
-- Replace raw VX MessagePack payloads with typed plans and final wire lowering.
+This record will be extended as the remaining obsolete boundary and VX APIs are
+removed.

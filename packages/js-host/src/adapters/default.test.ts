@@ -561,13 +561,13 @@ describe("registerDefaultHostAdapters", () => {
 
     const listDir = getHandler("voyd.std.fs", "list_dir");
     const rootResult = await listDir(tailContinuation, "/");
-    expect(rootResult).toEqual({
+    expect(rootResult).toMatchObject({
       kind: "tail",
       value: { ok: true, value: ["/tmp", "/var"] },
     });
 
     const nestedResult = await listDir(tailContinuation, "/tmp/");
-    expect(nestedResult).toEqual({
+    expect(nestedResult).toMatchObject({
       kind: "tail",
       value: { ok: true, value: ["/tmp/child"] },
     });
@@ -899,11 +899,13 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: {
         ok: true,
+        error_code: 0,
+        error_message: "",
         value: {
           status: 201,
           reason: "Created",
           headers: [{ name: "content-type", value: "text/plain" }],
-          body: [104, 101, 108, 108, 111],
+          body: Uint8Array.from([104, 101, 108, 108, 111]),
         },
       },
     });
@@ -957,12 +959,12 @@ describe("registerDefaultHostAdapters", () => {
         timeout_millis: 5,
       }
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       kind: "tail",
       value: {
         ok: false,
-        code: 2,
-        message: "fetch request timed out or was aborted",
+        error_code: 2,
+        error_message: "fetch request timed out or was aborted",
       },
     });
   });
@@ -1014,12 +1016,12 @@ describe("registerDefaultHostAdapters", () => {
       { url: "https://example.test/first", redirect: "manual" },
       { url: "https://example.test/second", redirect: "manual" },
     ]);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       kind: "tail",
       value: {
         ok: false,
-        code: 1,
-        message: "http redirect limit exceeded (1)",
+        error_code: 1,
+        error_message: "http redirect limit exceeded (1)",
       },
     });
   });
@@ -1235,12 +1237,12 @@ describe("registerDefaultHostAdapters", () => {
         timeout_millis: 5,
       }
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       kind: "tail",
       value: {
         ok: false,
-        code: 1,
-        message: "http client timeout_millis requires AbortController support",
+        error_code: 1,
+        error_message: "http client timeout_millis requires AbortController support",
       },
     });
   });
@@ -1283,7 +1285,7 @@ describe("registerDefaultHostAdapters", () => {
 
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -1326,7 +1328,7 @@ describe("registerDefaultHostAdapters", () => {
 
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -1380,7 +1382,7 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: false,
-        code: 1,
+        error_code: 1,
       },
     });
     expect(responses).toEqual([
@@ -1438,7 +1440,7 @@ describe("registerDefaultHostAdapters", () => {
     });
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -1528,7 +1530,7 @@ describe("registerDefaultHostAdapters", () => {
           },
         }
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "write_response_raw")(
         tailContinuation,
@@ -1537,7 +1539,7 @@ describe("registerDefaultHostAdapters", () => {
           chunk: Array.from(new TextEncoder().encode("data: one\n\n")),
         }
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await expect(firstChunk).resolves.toBe("data: one\n\n");
     await expect(
       getHandler("voyd.std.http.server", "write_response_raw")(
@@ -1547,13 +1549,13 @@ describe("registerDefaultHostAdapters", () => {
           chunk: Array.from(new TextEncoder().encode("data: two\n\n")),
         }
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "finish_response_raw")(
         tailContinuation,
         requestId
       )
-    ).resolves.toEqual({ kind: "resume", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "resume", value: { ok: true } });
     await expect(responsePromise).resolves.toEqual({
       status: 200,
       contentType: "text/event-stream",
@@ -1564,7 +1566,7 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("finishes cleanly after a streamed response write detects disconnect", async () => {
@@ -1643,20 +1645,23 @@ describe("registerDefaultHostAdapters", () => {
       )
     ).resolves.toMatchObject({
       kind: "tail",
-      value: { ok: false, message: "client disconnected during streamed response" },
+      value: {
+        ok: false,
+        error_message: "client disconnected during streamed response",
+      },
     });
     await expect(
       getHandler("voyd.std.http.server", "finish_response_raw")(
         tailContinuation,
         requestId
       )
-    ).resolves.toEqual({ kind: "resume", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "resume", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("finishes cleanly when a client disconnects after the final stream write", async () => {
@@ -1730,7 +1735,7 @@ describe("registerDefaultHostAdapters", () => {
           chunk: Array.from(new TextEncoder().encode("data: final\n\n")),
         }
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await disconnected;
 
     await expect(
@@ -1738,13 +1743,13 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         requestId
       )
-    ).resolves.toEqual({ kind: "resume", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "resume", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("closes an abandoned started response without corrupting streamed bytes", async () => {
@@ -1835,7 +1840,7 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("accepts node request headers before consuming a streamed request body", async () => {
@@ -1899,7 +1904,7 @@ describe("registerDefaultHostAdapters", () => {
         ok: true,
         value: {
           path: "/stream-upload",
-          body: [],
+          body: new Uint8Array(),
           body_streaming: true,
         },
       },
@@ -2136,7 +2141,7 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: false,
-        message: "request 7 already has a body read in progress",
+        error_message: "request 7 already has a body read in progress",
       },
     });
     expect(readRequest).toHaveBeenCalledOnce();
@@ -2161,7 +2166,7 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: false,
-        message: "request 7 has no open request body stream",
+        error_message: "request 7 has no open request body stream",
       },
     });
 
@@ -2169,7 +2174,7 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: true,
-        value: { chunk: [2], done: true },
+        value: { chunk: Uint8Array.from([2]), done: true },
       },
     });
     expect(readRequest).toHaveBeenCalledTimes(2);
@@ -2243,14 +2248,14 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: false,
-        message: "request 8 has no open request body stream",
+        error_message: "request 8 has no open request body stream",
       },
     });
     await expect(read(tailContinuation, 8)).resolves.toMatchObject({
       kind: "resume",
       value: {
         ok: false,
-        message: "request 8 has no open request body stream",
+        error_message: "request 8 has no open request body stream",
       },
     });
     expect(readRequest).toHaveBeenCalledOnce();
@@ -2324,7 +2329,7 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: false,
-        message: `request ${requestId} has no open request body stream`,
+        error_message: `request ${requestId} has no open request body stream`,
       },
     });
     await getHandler("voyd.std.http.server", "close_raw")(
@@ -2408,7 +2413,7 @@ describe("registerDefaultHostAdapters", () => {
           method: "POST",
           path: "/deno",
           query: "x=1",
-          body: [104, 105],
+          body: Uint8Array.from([104, 105]),
         },
       },
     });
@@ -2422,7 +2427,7 @@ describe("registerDefaultHostAdapters", () => {
           body: [111, 107],
         },
       })
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -2431,7 +2436,7 @@ describe("registerDefaultHostAdapters", () => {
     await expect(response.text()).resolves.toBe("ok");
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -2509,7 +2514,7 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("clears web response stream timeouts when the server closes", async () => {
@@ -2584,7 +2589,7 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await expect(bodyPromise).resolves.toBe("data: partial\n\n");
     expect(clearTimeoutSpy).toHaveBeenCalledTimes(clearedBeforeClose + 1);
     clearTimeoutSpy.mockRestore();
@@ -2663,20 +2668,20 @@ describe("registerDefaultHostAdapters", () => {
       )
     ).resolves.toMatchObject({
       kind: "tail",
-      value: { ok: false, message: "client disconnected" },
+      value: { ok: false, error_message: "client disconnected" },
     });
     await expect(
       getHandler("voyd.std.http.server", "finish_response_raw")(
         tailContinuation,
         requestId
       )
-    ).resolves.toEqual({ kind: "resume", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "resume", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("finishes cleanly when a web client disconnects after the final stream write", async () => {
@@ -2750,7 +2755,7 @@ describe("registerDefaultHostAdapters", () => {
           chunk: Array.from(new TextEncoder().encode("data: final\n\n")),
         }
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await expect(firstChunk).resolves.toMatchObject({ done: false });
     await reader.cancel(new Error("client disconnected"));
 
@@ -2759,13 +2764,13 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         requestId
       )
-    ).resolves.toEqual({ kind: "resume", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "resume", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("omits Deno/Bun web response bodies for null-body statuses", async () => {
@@ -2814,7 +2819,7 @@ describe("registerDefaultHostAdapters", () => {
           body: [],
         },
       })
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -2823,7 +2828,7 @@ describe("registerDefaultHostAdapters", () => {
     await expect(response.text()).resolves.toBe("");
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -2875,7 +2880,7 @@ describe("registerDefaultHostAdapters", () => {
         value: {
           method: "GET",
           path: "/bun",
-          body: [],
+          body: new Uint8Array(),
         },
       },
     });
@@ -2889,7 +2894,7 @@ describe("registerDefaultHostAdapters", () => {
           body: [98, 117, 110],
         },
       })
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -2898,7 +2903,7 @@ describe("registerDefaultHostAdapters", () => {
     await expect(response.text()).resolves.toBe("bun");
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
