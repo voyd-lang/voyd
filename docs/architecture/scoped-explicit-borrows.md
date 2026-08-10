@@ -80,11 +80,34 @@ fn inspect<T>(value: Borrow<T>) -> i32
 The compiler defines its scope, escape, alias, and runtime-representation rules.
 Programs cannot construct it as an ordinary value.
 
+`Borrow` is an unshadowable compiler-known type name with exactly one type
+argument. A package cannot declare another type named `Borrow`.
+
 The parser must remove all special-case handling for `borrow T`. This includes
 removing `borrow` as a contextual prefix operator and removing its custom
 generic-inner-type parsing. `Borrow<T>` must use the same generic type syntax as
 other type constructors. Backwards compatibility for `borrow T` is not
 required.
+
+The compiler checks legal occurrences after expanding type aliases. The only
+legal type occurrence is `Borrow<T>` as the complete type of a callable input
+parameter. This includes an input inside a nested function type:
+
+```voyd
+fn run<T, R>(value: T, body: fn(value: Borrow<T>) : () -> R) -> R
+```
+
+The function value does not contain an active borrow. It may be stored, passed,
+returned, or named by a type alias. A borrow becomes active only when that
+callable is invoked.
+
+An active local alias may also have type `Borrow<T>` when it is initialized from
+an active borrowed parameter or projection. Every other normalized occurrence
+is rejected. In particular, an active borrow cannot be a result, object or
+aggregate field, tuple or union member, module value, or ordinary generic
+argument. A stored function type whose input is `Borrow<T>` remains legal
+because the stored value is a callable, not an active borrow.
+`Borrow<Borrow<T>>` is always rejected.
 
 ### Limit `Borrow<T>` to scoped parameters
 
@@ -119,6 +142,98 @@ cell.with((bytes) =>
   checksum(bytes)
 )
 ```
+
+### Form and activate scoped borrows
+
+A plain `T` argument implicitly forms shared access when the selected parameter
+type is exactly `Borrow<T>`. `Borrow` is invariant: the inner type must match
+after normal alias expansion and type inference. Borrow formation does not
+perform subtype, trait-object, or other representation-changing widening. The
+argument may be an existing place or a temporary. A temporary remains alive
+until the call returns.
+
+The loan covers the argument place and every source-derived alias reached from
+that place. For an object handle, this includes the referenced allocation. A
+projection may narrow the covered place, but it does not erase the loan's
+origin.
+
+Calls use the existing safe evaluation order:
+
+1. evaluate the receiver and explicit arguments in source order;
+2. evaluate omitted defaults in parameter order;
+3. perform static checks and required runtime identity guards;
+4. activate parameter access;
+5. run the callable;
+6. end parameter access when the callable returns.
+
+A `Borrow<T>` parameter remains active for the full invocation. Local aliases
+and projections end no later than that invocation. This full-invocation rule is
+intentional: scoped borrowing does not require last-use lifetime inference.
+
+Passing `Borrow<T>` to another `Borrow<T>` parameter creates a nested shared
+reborrow. Nested shared reborrows are allowed. Passing a borrowed value to a
+plain `T` parameter is rejected, including concrete parameters, callback
+parameters, overloads, defaults, imports, and callable adaptation. A callable
+with a plain `T` input cannot satisfy a callable type with a `Borrow<T>` input,
+and the reverse adaptation is also rejected. The borrowed-receiver rule below
+is the only exception.
+
+### Form exclusive scoped borrows
+
+`~value: Borrow<T>` means exclusive scoped access to the borrowed place. It is
+the replacement for `~value: borrow T`.
+
+Exclusive scoped access may be formed only from:
+
+- an existing exclusive `~T` place;
+- an existing `~Borrow<T>` capability through an exclusive reborrow; or
+- a successful compiler-known `SharedCell<T>` exclusive guard.
+
+A shared `Borrow<T>` can never be upgraded to `~Borrow<T>`. An exclusive
+capability may create a shared `Borrow<T>` reborrow. While either shared or
+exclusive reborrow is active, the parent exclusive capability is suspended.
+It becomes usable again after the nested call returns.
+
+An exclusive scoped parameter may rebind or mutate its value according to the
+normal `~T` rules. For a `val`, updates are written back to the borrowed place.
+For an object, field mutation affects the borrowed allocation and rebinding
+updates the borrowed handle slot.
+
+### Keep the `SharedCell<T>` callback contract
+
+`SharedCell<T>` will use these public signatures:
+
+```voyd
+impl<T> SharedCell<T>
+  api fn with<R>(
+    self,
+    body: fn(value: Borrow<T>) : () -> R
+  ): () -> R
+
+  api fn with_mut<R>(
+    self,
+    body: fn(~value: Borrow<T>) : () -> R
+  ): () -> R
+
+  api fn try_with<R>(
+    self,
+    body: fn(value: Borrow<T>) : () -> R
+  ): () -> Result<R, SharedCellBorrowError>
+
+  api fn try_with_mut<R>(
+    self,
+    body: fn(~value: Borrow<T>) : () -> R
+  ): () -> Result<R, SharedCellBorrowError>
+```
+
+The runtime guard begins before the callback and ends after it returns. Shared
+callbacks may nest. Any overlap involving an exclusive callback fails through
+the existing panic or `Result` behavior.
+
+An exclusive callback may rebind the stored value. When it returns, the cell
+writes the updated `val` or object handle back to its slot before ending the
+guard. The callback result must be independent under the projection rules
+below; generic `R` cannot hide an active borrow.
 
 ### Remove borrowed results
 
@@ -196,6 +311,54 @@ fn leak(value: Borrow<Box>) -> Holder
 A borrow may not be stored in an object, structural value, tuple, union,
 module binding, `SharedCell`, or other storage that can outlive the scope.
 
+### Preserve scoped origins through projections
+
+Every alias-preserving projection or operation derived from `Borrow<T>` keeps
+the same scoped origin. Its declared field or element type does not erase that
+origin.
+
+```voyd
+obj Wrapper {
+  inner: Box
+}
+
+fn leak(value: Borrow<Wrapper>) -> Box
+  value.inner
+// error: value.inner is still scoped to value
+```
+
+This rule applies to:
+
+- object fields and nested fields;
+- array and container elements;
+- tuples, structural values, destructuring, and pattern bindings;
+- callable fields and closures stored inside borrowed data;
+- method and operator results; and
+- object handles inside a copied `val` or other aggregate.
+
+Local type inference must preserve the scoped origin. Wrapping, copying,
+destructuring, generic substitution, overload resolution, and callable
+adaptation must not erase it.
+
+A proven independent copy may leave the scope as a plain value:
+
+- primitives and scalars are independent copies;
+- a `val`, tuple, or structural value is independent only when none of its
+  result paths contains a mutable object, mutable storage handle, closure, or
+  other alias whose later use could observe or mutate the borrowed origin; and
+- a newly allocated object is independent only when its reachable result paths
+  do not retain such an alias derived from the borrowed origin.
+
+A reference-bearing result may still be independent when its ordinary type
+contract guarantees stable immutable backing that the result retains directly.
+`StringSlice` is the current example. Sharing immutable retained storage does
+not provide later access to mutable borrowed state. This is an ordinary type
+contract, not a borrowed-result exception.
+
+A whole `val` containing an object handle is therefore not automatically
+independent. The compiler may copy out its scalar fields, but copying a mutable
+object handle preserves the scoped origin.
+
 ### Keep ordinary generics borrow-free
 
 A borrowed value may not instantiate an ordinary generic parameter:
@@ -210,8 +373,8 @@ cell.with((value) =>
 // error: Borrow<T> cannot be used as ordinary T
 ```
 
-Generic helpers that accept scoped access must spell `Borrow<T>` on the
-parameter:
+Generic helpers that accept scoped access must use a parameter that normalizes
+to `Borrow<T>`:
 
 ```voyd
 fn inspect<T>(value: Borrow<T>) -> i32
@@ -222,8 +385,13 @@ This keeps ordinary generic code free from hidden loan propagation.
 
 ### Keep method calls safe
 
-A borrowed receiver may call a method while the borrow is active. The method
-must not store, capture, or return the borrowed receiver.
+A borrowed receiver may call a concrete method while the borrow is active. This
+is a special receiver rule; it does not convert the receiver to plain `T`. The
+method must not store, capture, or return the borrowed receiver or any
+source-derived alias.
+
+A shared `Borrow<T>` receiver cannot call a `~self` method. An exclusive
+`~Borrow<T>` receiver may call a `~self` method through an exclusive reborrow.
 
 An independent result is allowed:
 
@@ -235,20 +403,38 @@ cell.with((value) =>
 
 If a method result aliases the borrowed receiver, the call is rejected. The
 compiler must not erase that relationship by typing the result as plain `T`.
+The projection and independent-copy rules above apply to every result path.
 
 When the compiler cannot prove that a method is safe for a borrowed receiver,
 it must reject the call. Separate compilation must preserve the small result
-and retention summary needed for this check.
+and retention summary needed for this check. The summary must cover reads,
+writes, retention, returned origins, and suspension. Safety admission must use
+semantic facts, never optional optimizer facts.
 
-### Keep closure and effect boundaries strict
+Dynamic or open-trait dispatch on a borrowed receiver is rejected. A concrete
+implementation may be used only when semantic resolution proves the exact
+target before optimization. A trait method may still accept an explicit
+`Borrow<T>` non-receiver parameter; every implementation is checked against
+that parameter type.
 
-A borrow may be captured only by a closure that is proven to run and finish
-inside the same scope. It may not enter an escaping closure, task, suspended
-continuation, or unknown host call.
+### Reject closure, effect, and host boundaries
 
-Until Voyd has a checked direct-effect category, a scoped borrow may not cross
-an effect operation that could capture or resume the continuation later.
-Direct effects are a separate design decision.
+An active borrow may not be captured by any closure, including a closure that
+appears to run immediately. Nested code must receive the borrow through an
+explicit `Borrow<T>` or `~Borrow<T>` parameter. This keeps closure environments
+free of active loans.
+
+An active borrow may not cross an effect operation, suspension, task boundary,
+or continuation boundary. Under the full-invocation rule, a callable with a
+borrowed parameter cannot perform an effect operation before it returns.
+Checked direct effects are a separate future decision.
+
+`Borrow<T>` is rejected in every host or Wasm import, host or Wasm export, FFI
+signature, and host call. This restriction does not apply to ordinary Voyd
+package imports and exports; public Voyd APIs may use scoped `Borrow<T>` input
+parameters. Compiler-known intrinsics may implement `SharedCell` and internal
+physical borrowing, but they cannot expose a source borrow to a host. Public
+scoped FFI contracts require a separate future decision.
 
 ### Use conservative fallback rules
 
@@ -301,12 +487,16 @@ The following rules are required for safety:
 - plain `T` never hides a source-level borrow;
 - `~T` remains exclusive for its active scope;
 - `Borrow<T>` cannot escape, be stored, or be erased by generics;
+- shared access cannot be upgraded to exclusive access;
+- source-derived projections keep their scoped origin unless an independent
+  copy is proven;
 - borrowed method receivers cannot escape through method results;
-- borrows cannot cross suspending or continuation-capturing operations;
+- active borrows cannot be captured or cross effect, suspension, task, or
+  continuation boundaries;
 - uncertain overlap is guarded or rejected;
 - internal physical borrows materialize before ownership becomes observable;
-- unknown FFI and host boundaries cannot receive a borrow without a checked
-  scoped contract.
+- host and Wasm imports, host and Wasm exports, FFI, and host boundaries cannot
+  receive a source borrow.
 
 The existing out-of-scope areas remain out of scope: raw linear memory, unsafe
 facilities, FFI implementation safety, and future multi-threaded transfer and
@@ -379,6 +569,9 @@ performance.
 - Linear borrowed-result APIs are unavailable.
 - Zero-copy access sometimes requires callback nesting.
 - A borrowed receiver cannot call a method that may return or retain it.
+- Active borrows cannot be captured or used by effectful code.
+- Dynamic trait dispatch on a borrowed receiver is unavailable.
+- Host, Wasm, and FFI boundaries cannot accept source borrows.
 - Some safe programs become invalid until a real use case justifies a new
   design.
 - Compiler performance improvements are expected but must be measured.
@@ -419,18 +612,23 @@ compiler cost directly.
 
 Implementation should proceed in this order:
 
-1. Replace `borrow T` with `Borrow<T>` and remove the parser's contextual prefix
-   operator and custom generic-inner-type handling for `borrow`.
-2. Remove `ViewIterator`, `Array.view_iter()`, and their exports.
-3. Reject `Borrow<T>` in all result positions.
-4. Reject `Borrow<T>` inside containers, aggregates, stored values, and ordinary
-   generic arguments.
-5. Add focused diagnostics for direct, wrapped, generic, method, capture,
-   storage, suspension, and host-boundary escapes.
-6. Preserve scoped parameter and callback behavior used by `SharedCell`.
+1. Add the unshadowable built-in `Borrow<T>` type, replace `borrow T`, and
+   remove the parser's contextual prefix and custom generic-inner-type handling.
+2. Enforce normalized type-position, exact callable, formation, activation,
+   reborrow, and exclusive-access rules.
+3. Migrate all four `SharedCell<T>` methods to `Borrow<T>` and
+   `~Borrow<T>`.
+4. Preserve scoped origins through projections, calls, methods, copied values,
+   destructuring, overloads, and local inference.
+5. Reject borrowed results, active borrows inside stored values and ordinary
+   generic arguments, closure capture, effects, dynamic borrowed-receiver
+   dispatch, every host or Wasm import and export, every FFI signature, and
+   every host call.
+6. Remove `ViewIterator`, `Array.view_iter()`, and their exports.
 7. Remove named-region and `@borrow_contract` syntax and semantics.
 8. Remove borrowed-result propagation from compiler summaries, module
-   interfaces, and dependency caches.
+   interfaces, and dependency caches. Keep only access, retention, returned
+   origin, and suspension facts required by scoped concrete calls.
 9. Make detailed borrow analysis demand-driven.
 10. Update the memory-safety specification, language reference, conformance
     manifest, and test inventory.
@@ -443,21 +641,44 @@ Required cases include:
 
 - shared and exclusive `SharedCell` callbacks;
 - nested shared callbacks and runtime conflict behavior;
+- exact `SharedCell` signatures, exclusive `val` writeback, object-handle
+  rebinding, and guard completion;
 - scoped borrow helper parameters;
 - normal generic-type parsing for `Borrow<T>` and nested inner types;
 - rejection of the removed `borrow T` prefix syntax;
 - absence of parser special cases for `borrow` as a contextual prefix operator;
+- reservation, arity checking, and non-shadowing of the built-in `Borrow` name;
+- legality after type-alias expansion and rejection of nested `Borrow`;
+- acceptance of function types whose input is `Borrow<T>` without treating the
+  function value as an active borrow;
+- plain-place and temporary formation, full-invocation activation, and nested
+  shared reborrowing;
+- shared reborrow from exclusive access, exclusive reborrow restoration, and
+  rejection of shared-to-exclusive upgrades;
 - rejection of direct and nested borrowed result types;
-- rejection of `Borrow<T>` in containers, aggregate fields, stored values, and
-  ordinary generic arguments;
+- rejection of active `Borrow<T>` values in containers, aggregate fields,
+  stored values, and ordinary generic arguments;
 - rejection of removed `region`, region-mapping, `deref(...)`, `disjoint`, and
   `@borrow_contract` syntax;
 - rejection of direct and wrapped borrow escapes;
+- rejection of borrow flow into plain concrete parameters and callable
+  adaptation in either direction;
 - rejection of borrow erasure through ordinary generics;
+- scalar extraction and independent reference-free `val` copies;
+- preservation of origins through direct and nested mutable object fields,
+  array elements, callable fields, destructuring, and `val` values containing
+  mutable or otherwise alias-observing object handles;
+- acceptance of a `StringSlice` produced from a borrowed receiver or projection,
+  used after the callback ends, and still valid after the source cell is rebound;
+  apply the same rule to other results whose ordinary type contract guarantees
+  stable immutable backing retained directly by the result;
 - safe method calls on borrowed receivers;
+- safe `~self` calls from `~Borrow<T>` and rejection from shared `Borrow<T>`;
 - rejection of method results that retain or alias a borrowed receiver;
-- rejection of escaping closures, suspension, and unknown host calls;
-- conservative behavior across modules and dynamic trait dispatch;
+- rejection of every active-borrow closure capture, effect operation,
+  suspension, task, host or Wasm import, host or Wasm export, FFI, and host call;
+- conservative summaries across modules and rejection of dynamic or open-trait
+  dispatch on borrowed receivers;
 - ordinary object alias and `~` behavior;
 - internal wide-value physical borrowing;
 - absence of `ViewIterator`, `Array.view_iter()`, and their public exports;
