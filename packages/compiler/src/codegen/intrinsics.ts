@@ -56,6 +56,7 @@ import { ensureLinearMemoryExport } from "./memory-exports.js";
 import {
   BoundarySchemaError,
   deriveBoundarySchema,
+  withDtoFingerprint,
 } from "./boundary/schema.js";
 import {
   packBoundaryValueAsMsgPack,
@@ -76,6 +77,8 @@ import {
   compileOptionalSomeValue,
 } from "./optionals.js";
 import { DiagnosticError, diagnosticFromCode } from "../diagnostics/index.js";
+import { makeSelectedCallbackCompletion } from "./host-transport/frame-codec.js";
+import type { SelectedHostTransportProvider } from "./host-transport/selected-provider.js";
 import {
   compilePanicTrap,
   ensurePanicTrapGlobals,
@@ -517,11 +520,91 @@ const ensureRetainedCallbackHelper = ({
   ]);
   const closureRef = ctx.mod.local.get(0, base.interfaceType);
   const decodedPayloadValue = (): binaryen.ExpressionRef =>
-    ctx.mod.call(
+    (() => {
+      const decodedFrame = ctx.mod.call(
+        msgpack.decodeValue.wasmName,
+        [
+          ctx.mod.local.get(1, binaryen.i32),
+          ctx.mod.local.get(2, binaryen.i32),
+        ],
+        msgPackType,
+      );
+      const frameArray = ctx.mod.call(
+        msgpack.unpackArray.wasmName,
+        [decodedFrame],
+        msgpack.arrayWithCapacity.resultType,
+      );
+      const frameStorage = ctx.mod.call(
+        msgpack.arrayRawStorage.wasmName,
+        [frameArray],
+        msgpack.arrayRawStorage.resultType,
+      );
+      const argsValue = arrayGet(
+        ctx.mod,
+        frameStorage,
+        ctx.mod.i32.const(4),
+        msgPackType,
+        false,
+      );
+      const argsArray = ctx.mod.call(
+        msgpack.unpackArray.wasmName,
+        [argsValue],
+        msgpack.arrayWithCapacity.resultType,
+      );
+      const argsStorage = ctx.mod.call(
+        msgpack.arrayRawStorage.wasmName,
+        [argsArray],
+        msgpack.arrayRawStorage.resultType,
+      );
+      const typedPayloadValue = arrayGet(
+        ctx.mod,
+        argsStorage,
+        ctx.mod.i32.const(0),
+        msgPackType,
+        false,
+      );
+      const typedPayloadArray = ctx.mod.call(
+        msgpack.unpackArray.wasmName,
+        [typedPayloadValue],
+        msgpack.arrayWithCapacity.resultType,
+      );
+      const typedPayloadStorage = ctx.mod.call(
+        msgpack.arrayRawStorage.wasmName,
+        [typedPayloadArray],
+        msgpack.arrayRawStorage.resultType,
+      );
+      return arrayGet(
+        ctx.mod,
+        typedPayloadStorage,
+        ctx.mod.i32.const(1),
+        msgPackType,
+        false,
+      );
+    })();
+  const callbackInvocationIdValue = (): binaryen.ExpressionRef => {
+    const decodedFrame = ctx.mod.call(
       msgpack.decodeValue.wasmName,
       [ctx.mod.local.get(1, binaryen.i32), ctx.mod.local.get(2, binaryen.i32)],
       msgPackType,
     );
+    const frameArray = ctx.mod.call(
+      msgpack.unpackArray.wasmName,
+      [decodedFrame],
+      msgpack.arrayWithCapacity.resultType,
+    );
+    const frameStorage = ctx.mod.call(
+      msgpack.arrayRawStorage.wasmName,
+      [frameArray],
+      msgpack.arrayRawStorage.resultType,
+    );
+    return arrayGet(
+      ctx.mod,
+      frameStorage,
+      ctx.mod.i32.const(2),
+      msgPackType,
+      false,
+    );
+  };
   const payloadElementValue = (index: number): binaryen.ExpressionRef => {
     if (parameterCodecs.length === 1) {
       return decodedPayloadValue();
@@ -656,6 +739,9 @@ const ensureRetainedCallbackHelper = ({
         ctx,
         fnCtx: helperFnCtx,
       });
+  const returnFingerprint = returnSchema
+    ? withDtoFingerprint(returnSchema).fingerprint
+    : `legacy:${desc.returnType}`;
   const encodedLength = returnsVoid
     ? ctx.mod.block(null, [resultValue, ctx.mod.i32.const(-2)], binaryen.i32)
     : (() => {
@@ -692,10 +778,21 @@ const ensureRetainedCallbackHelper = ({
                   ctx,
                   fnCtx: helperFnCtx,
                 });
+        if (!returnFingerprint) {
+          throw new Error("callback return is missing a DTO fingerprint");
+        }
+        const completionFrame = makeSelectedCallbackCompletion({
+          invocationId: callbackInvocationIdValue(),
+          fingerprint: returnFingerprint,
+          value: encodedResultValue,
+          ctx,
+          fnCtx: helperFnCtx,
+          provider: msgpack as SelectedHostTransportProvider,
+        });
         return ctx.mod.call(
           msgpack.encodeValue.wasmName,
           [
-            encodedResultValue,
+            completionFrame,
             ctx.mod.local.get(3, binaryen.i32),
             ctx.mod.local.get(4, binaryen.i32),
           ],

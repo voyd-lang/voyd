@@ -172,6 +172,51 @@ export const makeSelectedEffectRequest = ({
     provider,
   });
 
+export const makeSelectedCallbackCompletion = ({
+  invocationId,
+  fingerprint,
+  value,
+  ctx,
+  fnCtx,
+  provider,
+}: {
+  invocationId: binaryen.ExpressionRef;
+  fingerprint: string;
+  value: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  provider: SelectedHostTransportProvider;
+}): binaryen.ExpressionRef => {
+  const typedPayload = makeSelectedTypedPayload({
+    fingerprint,
+    value,
+    ctx,
+    fnCtx,
+    provider,
+  });
+  const outcome = makeSelectedArray({
+    elements: [makeSelectedI32(0, ctx, provider), typedPayload],
+    ctx,
+    fnCtx,
+    provider,
+  });
+  return makeSelectedArray({
+    elements: [
+      makeSelectedI32(SELECTED_HOST_FRAME_VERSION, ctx, provider),
+      makeSelectedI32(
+        SELECTED_HOST_FRAME_TAG.callbackCompletion,
+        ctx,
+        provider,
+      ),
+      invocationId,
+      outcome,
+    ],
+    ctx,
+    fnCtx,
+    provider,
+  });
+};
+
 const makeSelectedArray = ({
   elements,
   ctx,

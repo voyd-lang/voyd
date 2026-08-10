@@ -317,6 +317,7 @@ const buildRetainedCallbackImportModules = ({
   decorateResult,
   scopeManager,
   getActiveScopeOwner,
+  nextInvocationId,
 }: {
   importDescriptors: WebAssembly.ModuleImportDescriptor[];
   getInstance: () => WebAssembly.Instance;
@@ -328,6 +329,7 @@ const buildRetainedCallbackImportModules = ({
   decorateResult?: (value: unknown) => unknown;
   scopeManager: RetainedCallbackScopeManager;
   getActiveScopeOwner: () => RetainedCallbackScopeOwner | undefined;
+  nextInvocationId: () => number;
 }): WebAssembly.Imports => {
   const callbackImportsByModule = new Map<
     string,
@@ -390,7 +392,18 @@ const buildRetainedCallbackImportModules = ({
             instance,
             name: LINEAR_MEMORY_EXPORT,
           });
-          const encodedPayload = transport.encode(payload);
+          const invocationId = nextInvocationId();
+          const encodedPayload = transport.encodeFrame({
+            kind: "callback-invocation",
+            invocationId,
+            callbackId: 0,
+            args: [
+              {
+                fingerprint: `callback:${callbackExportName}`,
+                value: payload,
+              },
+            ],
+          });
           if (encodedPayload.length > bufferSize) {
             throw new Error("retained callback payload exceeds buffer size");
           }
@@ -443,7 +456,17 @@ const buildRetainedCallbackImportModules = ({
             throw new Error("retained callback payload exceeds buffer size");
           }
           const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
-          const result = transport.decode(bytes);
+          const completion = transport.decodeFrame(bytes);
+          if (
+            completion.kind !== "callback-completion" ||
+            completion.invocationId !== invocationId
+          ) {
+            throw new Error("retained callback returned an incompatible frame");
+          }
+          if (completion.outcome.kind === "failure") {
+            throw new Error(completion.outcome.failure.message);
+          }
+          const result = completion.outcome.value.value;
           return decorateResult?.(result) ?? result;
         });
       }) as CallableFunction;
@@ -875,6 +898,7 @@ export const createVoydHost = async ({
   };
   const standaloneTaskRuns = new Map<number, StandaloneTaskEntry>();
   let nextStandaloneTaskId = 1_000_000;
+  let nextRetainedCallbackInvocationId = 1;
   const observeStandaloneTask = async (
     taskId: number,
   ): Promise<RunOutcome<unknown>> => {
@@ -917,6 +941,7 @@ export const createVoydHost = async ({
     decorateResult: (value) => attachTaskObserver(value, observeStandaloneTask),
     scopeManager: callbackScopeManager,
     getActiveScopeOwner: () => activeCallbackScopeOwner,
+    nextInvocationId: () => nextRetainedCallbackInvocationId++,
   });
   const retainedCallbackScopeImports = buildRetainedCallbackScopeImportModule({
     importDescriptors: WebAssembly.Module.imports(module),
@@ -2616,7 +2641,18 @@ export const createVoydHost = async ({
       instance,
       name: LINEAR_MEMORY_EXPORT,
     });
-    const encodedPayload = transport.encode(payload);
+    const invocationId = nextRetainedCallbackInvocationId++;
+    const encodedPayload = transport.encodeFrame({
+      kind: "callback-invocation",
+      invocationId,
+      callbackId: 0,
+      args: [
+        {
+          fingerprint: `callback:${callbackExportName}`,
+          value: payload,
+        },
+      ],
+    });
     if (encodedPayload.length > bufferSize) {
       throw new Error("retained callback payload exceeds buffer size");
     }
