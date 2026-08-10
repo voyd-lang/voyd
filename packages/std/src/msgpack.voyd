@@ -8,6 +8,7 @@
 use self::fns::self as msgpack_fns
 use self::fns::{ MsgPack as RawMsgPack }
 use std::array::Array
+use std::bytes::Bytes
 use std::dict::{ Dict, DictKey }
 use std::msgpack::errors::{
   MsgPackError,
@@ -219,6 +220,14 @@ fn msgpack_map_tag_is(map: Dict<String, MsgPack>, expected: String): () -> bool
 @compiler_contract(id: "voyd.std.boundary.msgpack.make-string")
 fn msgpack_make_string(value: String): () -> MsgPack
   msgpack_fns::make_string(value)
+
+@compiler_contract(id: "voyd.std.boundary.msgpack.make-bytes")
+fn msgpack_make_bytes(value: Bytes): () -> MsgPack
+  msgpack_fns::make_binary(Binary { bytes: value.to_array() })
+
+@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-bytes")
+fn msgpack_unpack_bytes(value: MsgPack): () -> Bytes
+  Bytes { storage: msgpack_fns::unpack_binary(value).bytes }
 
 @intrinsic(name: "__boundary_value_to_msgpack")
 fn boundary_value_to_msgpack<T>(value: T): () -> MsgPack

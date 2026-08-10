@@ -57,14 +57,18 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     const module = new WebAssembly.Module(wasmBufferSource(wasm));
     const abi = parseExportAbi(module);
 
-    expect(abi.version).toBe(1);
+    expect(abi.version).toBe(2);
+    expect(abi.host).toEqual({
+      hostAbi: 2,
+      dtoSchemaAbi: 1,
+      transport: { id: "voyd.std.msgpack", version: 1 },
+    });
     expect(abi.exports).toEqual([
       { name: "add", abi: "direct" },
-      { name: "echo", abi: "serialized", formatId: "msgpack" },
+      { name: "echo", abi: "serialized" },
       {
         name: "fetch_items",
         abi: "serialized",
-        formatId: "msgpack",
         params: [],
       },
     ]);
@@ -82,12 +86,10 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
         expect.objectContaining({
           name: "app",
           abi: "serialized",
-          formatId: "msgpack",
         }),
         expect.objectContaining({
           name: "echo_command",
           abi: "serialized",
-          formatId: "msgpack",
         }),
         expect.objectContaining({ name: "add", abi: "direct" }),
       ]),
@@ -168,7 +170,6 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
         expect.objectContaining({
           name: "view",
           abi: "serialized",
-          formatId: "msgpack",
         }),
         expect.objectContaining({ name: "init", abi: "direct" }),
       ]),
@@ -328,7 +329,7 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     const abi = parseExportAbi(module);
 
     expect(abi.exports).toEqual([
-      { name: "fetch", abi: "serialized", formatId: "msgpack" },
+      { name: "fetch", abi: "serialized" },
     ]);
   });
 
@@ -359,6 +360,20 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
         params: [expect.objectContaining({ kind: "bool" })],
         result: expect.objectContaining({ kind: "bool" }),
       },
+      expect.objectContaining({
+        name: "echo_bytes",
+        abi: "serialized",
+        params: [
+          expect.objectContaining({
+            kind: "bytes",
+            fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+          }),
+        ],
+        result: expect.objectContaining({
+          kind: "bytes",
+          fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+        }),
+      }),
       {
         name: "echo_f32",
         abi: "direct",
@@ -410,6 +425,25 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
         result: expect.objectContaining({ kind: "record" }),
       }),
     ]);
+
+    const translate = abi.exports.find((entry) => entry.name === "translate");
+    expect(translate?.params?.[0]?.fingerprint).toBe(
+      translate?.result?.fingerprint,
+    );
+  });
+
+  it("round-trips Bytes as a distinct automatic DTO primitive", async () => {
+    const wasm = await buildModule({
+      entryFile: "boundary-export.voyd",
+      codegenOptions: { boundaryExports: "auto" },
+    });
+    const host = await createVoydHost({ wasm });
+    const source = new Uint8Array([0, 1, 127, 255]);
+
+    const result = await host.runPure<Uint8Array>("echo_bytes", [source]);
+
+    expect(result).toBeInstanceOf(Uint8Array);
+    expect(Array.from(result)).toEqual(Array.from(source));
   });
 
   it("keeps typed boundary export helpers reachable under optimization", async () => {

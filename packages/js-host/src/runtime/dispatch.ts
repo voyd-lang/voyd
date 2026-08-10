@@ -1,4 +1,3 @@
-import { decode, encode } from "@msgpack/msgpack";
 import type {
   EffectHandler,
   EffectResourceCleanup,
@@ -21,8 +20,8 @@ import type {
   VoydRuntimeEffectContext,
   VoydRuntimeTransitionContext,
 } from "./trap-diagnostics.js";
+import type { HostTransportAdapter } from "../protocol/host-transport.js";
 
-const MSGPACK_OPTS = { useBigInt64: true } as const;
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
@@ -30,13 +29,15 @@ const decodePayload = ({
   memory,
   ptr,
   length,
+  transport,
 }: {
   memory: WebAssembly.Memory;
   ptr: number;
   length: number;
+  transport: HostTransportAdapter;
 }): unknown => {
   const bytes = new Uint8Array(memory.buffer, ptr, length);
-  return decode(bytes, MSGPACK_OPTS);
+  return transport.decode(bytes);
 };
 
 const invalidPayloadLengthMessage = ({
@@ -116,6 +117,7 @@ export const continueEffectLoopStep = async <T = unknown>({
   registerResourceCleanup,
   annotateTrap,
   fallbackFunctionName,
+  transport,
 }: {
   result: unknown;
   effectStatus: CallableFunction;
@@ -135,6 +137,7 @@ export const continueEffectLoopStep = async <T = unknown>({
     fallbackFunctionName?: string;
   }) => Error;
   fallbackFunctionName?: string;
+  transport: HostTransportAdapter;
 }): Promise<EffectLoopStepResult<T>> => {
   const withTrapContext = ({
     error,
@@ -180,6 +183,7 @@ export const continueEffectLoopStep = async <T = unknown>({
     memory: msgpackMemory,
     ptr: bufferPtr,
     length: payloadLength,
+    transport,
   });
 
   if (status === EFFECT_RESULT_STATUS.value) {
@@ -228,7 +232,7 @@ export const continueEffectLoopStep = async <T = unknown>({
       throw new Error(nonReturningHandlerMessage(opEntry.label));
     }
 
-    const encoded = encode(handlerResult.value, MSGPACK_OPTS) as Uint8Array;
+    const encoded = transport.encode(handlerResult.value);
     if (encoded.length > bufferSize) {
       throw new Error("resume payload exceeds buffer size");
     }
@@ -274,6 +278,7 @@ export const runEffectLoop = async <T = unknown>({
   msgpackMemory,
   bufferPtr,
   bufferSize,
+  transport,
 }: {
   entry: CallableFunction;
   effectStatus: CallableFunction;
@@ -285,6 +290,7 @@ export const runEffectLoop = async <T = unknown>({
   msgpackMemory: WebAssembly.Memory;
   bufferPtr: number;
   bufferSize: number;
+  transport: HostTransportAdapter;
 }): Promise<T> => {
   let result = entry(bufferPtr, bufferSize);
 
@@ -301,6 +307,7 @@ export const runEffectLoop = async <T = unknown>({
       msgpackMemory,
       bufferPtr,
       bufferSize,
+      transport,
     });
     if (stepResult.kind === "value") {
       return stepResult.value;

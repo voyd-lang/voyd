@@ -15,6 +15,7 @@ export type MsgPackFunctions = {
   makeNull: FunctionMetadata;
   makeBool: FunctionMetadata;
   makeString: FunctionMetadata;
+  makeBytes: FunctionMetadata;
   makeArray: FunctionMetadata;
   makeI32: FunctionMetadata;
   makeI64: FunctionMetadata;
@@ -23,6 +24,7 @@ export type MsgPackFunctions = {
   makeMap: FunctionMetadata;
   unpackBool: FunctionMetadata;
   unpackString: FunctionMetadata;
+  unpackBytes: FunctionMetadata;
   unpackArray: FunctionMetadata;
   unpackI32: FunctionMetadata;
   unpackI64: FunctionMetadata;
@@ -94,6 +96,10 @@ export const ensureMsgPackFunctions = (
         ctx,
         BOUNDARY_MSGPACK_CONTRACT_IDS.makeString,
       ),
+      makeBytes: requireContract(
+        ctx,
+        BOUNDARY_MSGPACK_CONTRACT_IDS.makeBytes,
+      ),
       makeArray: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeArray),
       makeI32: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeI32),
       makeI64: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeI64),
@@ -107,6 +113,10 @@ export const ensureMsgPackFunctions = (
       unpackString: requireContract(
         ctx,
         BOUNDARY_MSGPACK_CONTRACT_IDS.unpackString,
+      ),
+      unpackBytes: requireContract(
+        ctx,
+        BOUNDARY_MSGPACK_CONTRACT_IDS.unpackBytes,
       ),
       unpackArray: requireContract(
         ctx,

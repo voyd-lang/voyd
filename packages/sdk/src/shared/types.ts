@@ -11,6 +11,7 @@ import type {
   EffectHandler,
   ExportAbiEntry,
   HostProtocolTable,
+  HostTransportAdapter,
   SignatureHash,
   VoydRuntimeDiagnostics,
   VoydRuntimeError,
@@ -26,6 +27,7 @@ export type {
   EffectHandler,
   ExportAbiEntry,
   HostProtocolTable,
+  HostTransportAdapter,
   ModuleRoots,
   OptimizationLevel,
   ParsedExternalRequirements,
@@ -158,6 +160,7 @@ export type RunOptions = {
   bufferSize?: number;
   defaultAdapters?: boolean | DefaultAdapterOptions;
   adapters?: readonly VoydPackageAdapter[];
+  transportAdapters?: readonly HostTransportAdapter[];
 };
 
 export type TestCollection = {

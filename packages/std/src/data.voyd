@@ -5,10 +5,12 @@
 //! after this module validates the matching provider-neutral `Shape`.
 
 use std::array::Array
+use std::bytes::Bytes
 use std::dict::{ Dict, DictKey }
 use std::meta::{
   ArrayShape,
   BoolShape,
+  BytesShape,
   F32Shape,
   F64Shape,
   I32Shape,
@@ -25,8 +27,6 @@ use std::meta::{
   UnitShape,
   shape_of
 }
-use std::msgpack::{ MsgPack }
-use std::msgpack::self as msgpack
 use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
@@ -52,6 +52,9 @@ pub obj DataF64 { api value: f64 }
 
 /// Neutral owned string value.
 pub obj DataString { api value: String }
+
+/// Neutral immutable byte sequence.
+pub obj DataBytes { api value: Bytes }
 
 /// Named field in a neutral object or variant payload.
 pub obj DataField {
@@ -79,6 +82,7 @@ pub type DataValue = DataNull
   | DataF32
   | DataF64
   | DataString
+  | DataBytes
   | DataArray
   | DataObject
   | DataVariant
@@ -137,7 +141,11 @@ pub obj DecodeError {
 
 /// Returns decoder options that ignore unknown fields.
 pub fn default_decode_options() -> DecodeOptions
-  DecodeOptions { unknown_fields: IgnoreUnknownFields {} }
+  DecodeOptions { unknown_fields: RejectUnknownFields {} }
+
+/// Encodes a DTO-compatible value into the neutral dynamic tree.
+pub fn encode<T>(value: T): () -> DataValue
+  dto_value_to_data(value)
 
 /// Fallibly decodes a neutral value into a boundary-compatible Voyd type.
 pub fn decode<T>(value: DataValue): () -> Result<T, DecodeError>
@@ -148,7 +156,7 @@ pub fn decode<T>(value: DataValue, { options: DecodeOptions }): () -> Result<T, 
   let shape = shape_of<T>()
   match(validate(value, shape.root, shape, options, "$".to_string()))
     Ok<Unit>:
-      Ok<T> { value: boundary_data_to_value<T>(value) }
+      Ok<T> { value: data_to_dto_value<T>(value) }
     Err<DecodeError> { error }:
       Err<DecodeError> { error }
 
@@ -192,6 +200,10 @@ fn validate(
       value.match(decoded)
         DataString: valid()
         else: mismatch(path, "string", data_kind_name(value))
+    BytesShape:
+      value.match(decoded)
+        DataBytes: valid()
+        else: mismatch(path, "bytes", data_kind_name(value))
     UnitShape:
       value.match(decoded)
         DataNull: valid()
@@ -398,6 +410,7 @@ fn shape_kind_name(shape: ShapeNode) -> String
     F32Shape: "f32".to_string()
     F64Shape: "f64".to_string()
     StringShape: "string".to_string()
+    BytesShape: "bytes".to_string()
     UnitShape: "unit".to_string()
     ArrayShape: "array".to_string()
     RecordShape: active.name
@@ -413,50 +426,188 @@ fn data_kind_name(value: DataValue) -> String
     DataF32: "f32".to_string()
     DataF64: "f64".to_string()
     DataString: "string".to_string()
+    DataBytes: "bytes".to_string()
     DataArray: "array".to_string()
     DataObject: "object".to_string()
     DataVariant: active.name
 
-fn data_value_to_msgpack(value: DataValue): () -> MsgPack
-  value.match(active)
-    DataNull:
-      msgpack::make_null()
-    DataBool:
-      msgpack::make_bool(active.value)
-    DataI32:
-      msgpack::make_i32(active.value)
-    DataI64:
-      msgpack::make_i64(active.value)
-    DataF32:
-      msgpack::make_f32(active.value)
-    DataF64:
-      msgpack::make_f64(active.value)
-    DataString:
-      msgpack::make_string(active.value)
-    DataArray:
-      let ~values = Array<MsgPack>::with_capacity(active.values.len())
-      var index = 0
-      while index < active.values.len():
-        values.push(data_value_to_msgpack(active.values.at(index)))
-        index = index + 1
-      msgpack::make_array(values)
-    DataObject:
-      msgpack::make_map(data_fields_to_msgpack(active.fields))
-    DataVariant:
-      let fields = data_fields_to_msgpack(active.fields).setting(
-        "$variant",
-        msgpack::make_string(active.name)
-      )
-      msgpack::make_map(fields)
+@intrinsic(name: "__dto_value_to_data")
+fn dto_value_to_data<T>(value: T): () -> DataValue
+  __dto_value_to_data(value)
 
-fn data_fields_to_msgpack(fields: Array<DataField>): () -> Dict<String, MsgPack>
-  let ~out = Dict<String, MsgPack>::init()
+@intrinsic(name: "__data_to_dto_value")
+fn data_to_dto_value<T>(value: DataValue): () -> T
+  __data_to_dto_value<T>(value)
+
+@compiler_contract(id: "voyd.std.data.make-null")
+fn data_make_null() -> DataValue
+  DataNull {}
+
+@compiler_contract(id: "voyd.std.data.make-bool")
+fn data_make_bool(value: bool) -> DataValue
+  DataBool { value }
+
+@compiler_contract(id: "voyd.std.data.make-i32")
+fn data_make_i32(value: i32) -> DataValue
+  DataI32 { value }
+
+@compiler_contract(id: "voyd.std.data.make-i64")
+fn data_make_i64(value: i64) -> DataValue
+  DataI64 { value }
+
+@compiler_contract(id: "voyd.std.data.make-f32")
+fn data_make_f32(value: f32) -> DataValue
+  DataF32 { value }
+
+@compiler_contract(id: "voyd.std.data.make-f64")
+fn data_make_f64(value: f64) -> DataValue
+  DataF64 { value }
+
+@compiler_contract(id: "voyd.std.data.make-string")
+fn data_make_string(value: String) -> DataValue
+  DataString { value }
+
+@compiler_contract(id: "voyd.std.data.make-bytes")
+fn data_make_bytes(value: Bytes) -> DataValue
+  DataBytes { value }
+
+@compiler_contract(id: "voyd.std.data.make-array")
+fn data_make_array(values: Array<DataValue>) -> DataValue
+  DataArray { values }
+
+@compiler_contract(id: "voyd.std.data.make-map")
+fn data_make_map(values: Dict<String, DataValue>) -> DataValue
+  match(values.get("$variant"))
+    Some<DataValue> { value }:
+      value.match(tag)
+        DataString:
+          DataVariant { name: tag.value, fields: data_fields(values) }
+        else:
+          DataObject { fields: data_fields(values) }
+    None:
+      DataObject { fields: data_fields(values) }
+
+@compiler_contract(id: "voyd.std.data.unpack-bool")
+fn data_unpack_bool(value: DataValue) -> bool
+  value.match(active)
+    DataBool: active.value
+    else: false
+
+@compiler_contract(id: "voyd.std.data.unpack-i32")
+fn data_unpack_i32(value: DataValue) -> i32
+  value.match(active)
+    DataI32: active.value
+    else: 0
+
+@compiler_contract(id: "voyd.std.data.unpack-i64")
+fn data_unpack_i64(value: DataValue) -> i64
+  value.match(active)
+    DataI64: active.value
+    else: 0i64
+
+@compiler_contract(id: "voyd.std.data.unpack-f32")
+fn data_unpack_f32(value: DataValue) -> f32
+  value.match(active)
+    DataF32: active.value
+    else: 0.0f32
+
+@compiler_contract(id: "voyd.std.data.unpack-f64")
+fn data_unpack_f64(value: DataValue) -> f64
+  value.match(active)
+    DataF64: active.value
+    else: 0.0
+
+@compiler_contract(id: "voyd.std.data.unpack-string")
+fn data_unpack_string(value: DataValue) -> String
+  value.match(active)
+    DataString: active.value
+    else: "".to_string()
+
+@compiler_contract(id: "voyd.std.data.unpack-bytes")
+fn data_unpack_bytes(value: DataValue) -> Bytes
+  value.match(active)
+    DataBytes: active.value
+    else: Bytes { storage: Array<i32>::init() }
+
+@compiler_contract(id: "voyd.std.data.unpack-array")
+fn data_unpack_array(value: DataValue) -> Array<DataValue>
+  value.match(active)
+    DataArray: active.values
+    else: Array<DataValue>::init()
+
+@compiler_contract(id: "voyd.std.data.unpack-map")
+fn data_unpack_map(value: DataValue) -> Dict<String, DataValue>
+  value.match(active)
+    DataObject:
+      data_map(active.fields)
+    DataVariant:
+      data_map(active.fields).setting("$variant", DataString { value: active.name })
+    else:
+      Dict<String, DataValue>::init()
+
+@compiler_contract(id: "voyd.std.data.array-with-capacity")
+fn data_array_with_capacity(size: i32) -> Array<DataValue>
+  Array<DataValue>::with_capacity(size)
+
+@compiler_contract(id: "voyd.std.data.array-push")
+fn data_array_push(values: Array<DataValue>, value: DataValue) -> Array<DataValue>
+  values.pushed(value)
+
+@compiler_contract(id: "voyd.std.data.array-length")
+fn data_array_length(values: Array<DataValue>) -> i32
+  values.len()
+
+@compiler_contract(id: "voyd.std.data.array-raw-storage")
+fn data_array_raw_storage(values: Array<DataValue>) -> FixedArray<DataValue>
+  values.raw_storage()
+
+@compiler_contract(id: "voyd.std.data.map-new")
+fn data_map_new() -> Dict<String, DataValue>
+  Dict<String, DataValue>::init()
+
+@compiler_contract(id: "voyd.std.data.map-set")
+fn data_map_set(
+  values: Dict<String, DataValue>,
+  name: String,
+  value: DataValue
+) -> Dict<String, DataValue>
+  values.setting(name, value)
+
+@compiler_contract(id: "voyd.std.data.map-get")
+fn data_map_get(values: Dict<String, DataValue>, name: String) -> DataValue
+  match(values.get(name))
+    Some<DataValue> { value }: value
+    None: DataNull {}
+
+@compiler_contract(id: "voyd.std.data.map-has")
+fn data_map_has(values: Dict<String, DataValue>, name: String) -> bool
+  values.contains(name)
+
+@compiler_contract(id: "voyd.std.data.map-tag-is")
+fn data_map_tag_is(values: Dict<String, DataValue>, expected: String) -> bool
+  match(values.get("$variant"))
+    Some<DataValue> { value }:
+      value.match(active)
+        DataString: active.value == expected
+        else: false
+    None: false
+
+fn data_fields(values: Dict<String, DataValue>) -> Array<DataField>
+  let entries = values.entries()
+  let ~fields = Array<DataField>::with_capacity(entries.len())
+  var index = 0
+  while index < entries.len():
+    let entry = entries.at(index)
+    if entry.0 != "$variant":
+      fields.push(DataField { name: entry.0, value: entry.1 })
+    index = index + 1
+  fields
+
+fn data_map(fields: Array<DataField>) -> Dict<String, DataValue>
+  let ~values = Dict<String, DataValue>::init()
   var index = 0
   while index < fields.len():
     let field = fields.at(index)
-    out.set(field.name, data_value_to_msgpack(field.value))
+    values.set(field.name, field.value)
     index = index + 1
-  out
-
-fn boundary_data_to_value<T>(value: DataValue): () -> T
-  msgpack::unpack_boundary_value<T>(data_value_to_msgpack(value))
+  values

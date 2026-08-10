@@ -40,7 +40,10 @@ import {
 } from "../types.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import { emitStringLiteral } from "../expressions/primitives.js";
-import { ensureMsgPackFunctions } from "../effects/host-boundary/msgpack.js";
+import {
+  ensureMsgPackFunctions,
+  type MsgPackFunctions,
+} from "../effects/host-boundary/msgpack.js";
 import { RTT_METADATA_SLOTS } from "../rtt/index.js";
 import {
   compileOptionalNoneValue,
@@ -57,6 +60,7 @@ import type {
 import { deriveBoundarySchema } from "./schema.js";
 
 type BoundaryCodecState = {
+  provider: DtoTreeFunctions;
   registry: Map<TypeId, BoundarySchema>;
   packHelpers: Map<TypeId, string>;
   activePackHelpers: Set<TypeId>;
@@ -64,6 +68,11 @@ type BoundaryCodecState = {
   activeUnpackHelpers: Set<TypeId>;
   ancestorStackType?: binaryen.Type;
 };
+
+export type DtoTreeFunctions = Omit<
+  MsgPackFunctions,
+  "encodeValue" | "decodeValue"
+>;
 
 const BOUNDARY_PACK_CYCLE_ERROR =
   "__voyd_boundary_error: cannot encode cyclic object graph or boundary object graph exceeds maximum depth";
@@ -73,13 +82,18 @@ export const packBoundaryValueAsMsgPack = ({
   schema,
   ctx,
   fnCtx,
+  provider,
 }: {
   value: binaryen.ExpressionRef;
   schema: BoundarySchema;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
+  provider?: DtoTreeFunctions;
 }): binaryen.ExpressionRef => {
-  const state = createBoundaryCodecState(schema);
+  const state = createBoundaryCodecState(
+    schema,
+    provider ?? ensureMsgPackFunctions(ctx),
+  );
   const ancestorStack = emptyBoundaryAncestorStack({ ctx, state });
   return packBoundaryValueAsMsgPackInternal({
     value,
@@ -114,10 +128,10 @@ const packBoundaryValueAsMsgPackInternal = ({
     return ctx.mod.call(
       helper,
       [value, packAncestors, packAncestorCount],
-      wasmTypeFor(ensureMsgPackFunctions(ctx).msgPackTypeId, ctx),
+      wasmTypeFor(state.provider.msgPackTypeId, ctx),
     );
   }
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   switch (schema.kind) {
     case "bool":
@@ -150,6 +164,20 @@ const packBoundaryValueAsMsgPackInternal = ({
             value,
             actualType: schema.typeId,
             targetType: msgpack.makeString.paramTypeIds[0],
+            ctx,
+            fnCtx,
+          }),
+        ],
+        msgPackType,
+      );
+    case "bytes":
+      return ctx.mod.call(
+        msgpack.makeBytes.wasmName,
+        [
+          coerceValueToType({
+            value,
+            actualType: schema.typeId,
+            targetType: msgpack.makeBytes.paramTypeIds[0],
             ctx,
             fnCtx,
           }),
@@ -194,13 +222,18 @@ export const unpackBoundaryValueFromMsgPack = ({
   schema,
   ctx,
   fnCtx,
+  provider,
 }: {
   value: binaryen.ExpressionRef;
   schema: BoundarySchema;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
+  provider?: DtoTreeFunctions;
 }): binaryen.ExpressionRef => {
-  const state = createBoundaryCodecState(schema);
+  const state = createBoundaryCodecState(
+    schema,
+    provider ?? ensureMsgPackFunctions(ctx),
+  );
   return unpackBoundaryValueFromMsgPackInternal({
     value,
     schema,
@@ -227,7 +260,7 @@ const unpackBoundaryValueFromMsgPackInternal = ({
     const helper = ensureUnpackHelper({ schema, ctx, state });
     return ctx.mod.call(helper, [value], wasmTypeFor(schema.typeId, ctx));
   }
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   switch (schema.kind) {
     case "bool":
       return ctx.mod.call(msgpack.unpackBool.wasmName, [value], binaryen.i32);
@@ -253,6 +286,18 @@ const unpackBoundaryValueFromMsgPackInternal = ({
         ctx,
         fnCtx,
       });
+    case "bytes":
+      return coerceValueToType({
+        value: ctx.mod.call(
+          msgpack.unpackBytes.wasmName,
+          [value],
+          wasmTypeFor(msgpack.unpackBytes.resultTypeId, ctx),
+        ),
+        actualType: msgpack.unpackBytes.resultTypeId,
+        targetType: schema.typeId,
+        ctx,
+        fnCtx,
+      });
     case "array":
       return unpackArray({ value, schema, ctx, fnCtx, state });
     case "record":
@@ -264,10 +309,12 @@ const unpackBoundaryValueFromMsgPackInternal = ({
 
 const createBoundaryCodecState = (
   schema: BoundarySchema,
+  provider: DtoTreeFunctions,
 ): BoundaryCodecState => {
   const registry = new Map<TypeId, BoundarySchema>();
   registerBoundarySchema({ schema, registry });
   return {
+    provider,
     registry,
     packHelpers: new Map(),
     activePackHelpers: new Set(),
@@ -361,7 +408,7 @@ const ensurePackHelper = ({
   if (state.activePackHelpers.has(schema.typeId)) return name;
 
   state.activePackHelpers.add(schema.typeId);
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   const ancestorStackType = boundaryAncestorStackType({ ctx, state });
   const valueType = wasmTypeFor(schema.typeId, ctx);
   const params = binaryen.createType([
@@ -406,7 +453,7 @@ const ensurePackHelper = ({
         fnCtx,
         state,
       }),
-      boundaryPackCycleErrorMsgPack(ctx),
+      boundaryPackCycleErrorMsgPack(ctx, state),
       ctx.mod.block(
         null,
         [
@@ -450,7 +497,7 @@ const ensureUnpackHelper = ({
   if (state.activeUnpackHelpers.has(schema.typeId)) return name;
 
   state.activeUnpackHelpers.add(schema.typeId);
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   const params = binaryen.createType([wasmTypeFor(msgpack.msgPackTypeId, ctx)]);
   const result = wasmTypeFor(schema.typeId, ctx);
   const locals: binaryen.Type[] = [];
@@ -665,7 +712,7 @@ const packArray = ({
   packAncestors: binaryen.ExpressionRef;
   packAncestorCount: binaryen.ExpressionRef;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const info = requiredStructuralInfo(schema.typeId, ctx);
   const storageField = requiredField(info.fieldMap, "storage", schema.typeId);
@@ -786,7 +833,7 @@ const unpackArray = ({
   fnCtx: FunctionContext;
   state: BoundaryCodecState;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const info = requiredStructuralInfo(schema.typeId, ctx);
   const storageField = requiredField(info.fieldMap, "storage", schema.typeId);
@@ -974,7 +1021,7 @@ const unpackRecord = ({
   fnCtx: FunctionContext;
   state: BoundaryCodecState;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   const map = allocateTempLocal(msgpack.unpackMap.resultType, fnCtx);
   return ctx.mod.block(
     null,
@@ -1015,7 +1062,7 @@ const packUnion = ({
   packAncestors: binaryen.ExpressionRef;
   packAncestorCount: binaryen.ExpressionRef;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const source = allocateTempLocal(
     wasmTypeFor(schema.typeId, ctx),
@@ -1078,7 +1125,7 @@ const unpackUnion = ({
   fnCtx: FunctionContext;
   state: BoundaryCodecState;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   const map = allocateTempLocal(msgpack.unpackMap.resultType, fnCtx);
   const mapRef = () => loadLocalValue(map, ctx);
   const decodeVariant = (
@@ -1152,7 +1199,7 @@ const packRecordMap = ({
   packAncestors: binaryen.ExpressionRef;
   packAncestorCount: binaryen.ExpressionRef;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const info = requiredStructuralInfo(typeId, ctx);
   const source = allocateTempLocal(
@@ -1179,7 +1226,11 @@ const packRecordMap = ({
         binding: map,
         value: ctx.mod.call(
           msgpack.mapSet.wasmName,
-          [mapRef(), stringValue("$variant", ctx), stringMsgPack(tag, ctx)],
+          [
+            mapRef(),
+            stringValue("$variant", ctx),
+            stringMsgPack(tag, ctx, state),
+          ],
           map.type,
         ),
         ctx,
@@ -1252,7 +1303,7 @@ const unpackRecordFromMap = ({
   fnCtx: FunctionContext;
   state: BoundaryCodecState;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   const info = requiredStructuralInfo(typeId, ctx);
   const fieldValues = info.fields.map((field) => {
     const schemaField = fields.find(
@@ -1313,7 +1364,7 @@ const packOptionalRecordField = ({
   packAncestors: binaryen.ExpressionRef;
   packAncestorCount: binaryen.ExpressionRef;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   const optional = allocateTempLocal(
     wasmTypeFor(optionalTypeId, ctx),
     fnCtx,
@@ -1370,7 +1421,7 @@ const unpackOptionalRecordField = ({
   fnCtx: FunctionContext;
   state: BoundaryCodecState;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   return ctx.mod.if(
     ctx.mod.call(
       msgpack.mapHas.wasmName,
@@ -1665,8 +1716,9 @@ const stringValue = (
 const stringMsgPack = (
   value: string,
   ctx: CodegenContext,
+  state: BoundaryCodecState,
 ): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = state.provider;
   return ctx.mod.call(
     msgpack.makeString.wasmName,
     [stringValue(value, ctx)],
@@ -1676,7 +1728,9 @@ const stringMsgPack = (
 
 const boundaryPackCycleErrorMsgPack = (
   ctx: CodegenContext,
-): binaryen.ExpressionRef => stringMsgPack(BOUNDARY_PACK_CYCLE_ERROR, ctx);
+  state: BoundaryCodecState,
+): binaryen.ExpressionRef =>
+  stringMsgPack(BOUNDARY_PACK_CYCLE_ERROR, ctx, state);
 
 let labelCounter = 0;
 

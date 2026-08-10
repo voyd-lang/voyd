@@ -6,7 +6,6 @@ import type {
   SignatureHash,
   VoydRunHandle,
 } from "./protocol/types.js";
-import { decode, encode } from "@msgpack/msgpack";
 import {
   buildEffectOpKey,
   buildParsedEffectOpMap,
@@ -33,6 +32,10 @@ import {
   encodeDirectBoundaryArgs,
 } from "./boundary-values.js";
 import type { ExportAbiEntry } from "./protocol/export-abi.js";
+import {
+  resolveHostTransport,
+  type HostTransportAdapter,
+} from "./protocol/host-transport.js";
 import {
   createRuntimeScheduler,
   type RuntimeSchedulerOptions,
@@ -76,6 +79,7 @@ export type HostInitOptions = {
   defaultAdapters?: boolean | DefaultAdapterOptions;
   retainedCallbacks?: RetainedEventHandlerRegistry;
   adapters?: readonly VoydPackageAdapter[];
+  transportAdapters?: readonly HostTransportAdapter[];
 };
 
 export type VoydHost = {
@@ -112,7 +116,6 @@ export type VoydHost = {
   retainedCallbacks: RetainedEventHandlerRegistry;
 };
 
-const MSGPACK_OPTS = { useBigInt64: true } as const;
 const TASK_RUNTIME_IMPORT_MODULE = "voyd.task";
 const CALLBACK_IMPORT_MODULE = "voyd.callback";
 const BOUNDARY_CALLBACK_IMPORT_MODULE = "voyd.boundary.callback";
@@ -310,6 +313,7 @@ const buildRetainedCallbackImportModules = ({
   bufferSize,
   annotateTrap,
   runEffectfulRetainedCallback,
+  transport,
   decorateResult,
   scopeManager,
   getActiveScopeOwner,
@@ -320,6 +324,7 @@ const buildRetainedCallbackImportModules = ({
   bufferSize: number;
   annotateTrap: (error: unknown, opts?: VoydTrapAnnotation) => Error;
   runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner;
+  transport: HostTransportAdapter;
   decorateResult?: (value: unknown) => unknown;
   scopeManager: RetainedCallbackScopeManager;
   getActiveScopeOwner: () => RetainedCallbackScopeOwner | undefined;
@@ -385,7 +390,7 @@ const buildRetainedCallbackImportModules = ({
             instance,
             name: LINEAR_MEMORY_EXPORT,
           });
-          const encodedPayload = encode(payload, MSGPACK_OPTS) as Uint8Array;
+          const encodedPayload = transport.encode(payload);
           if (encodedPayload.length > bufferSize) {
             throw new Error("retained callback payload exceeds buffer size");
           }
@@ -438,7 +443,7 @@ const buildRetainedCallbackImportModules = ({
             throw new Error("retained callback payload exceeds buffer size");
           }
           const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
-          const result = decode(bytes, MSGPACK_OPTS);
+          const result = transport.decode(bytes);
           return decorateResult?.(result) ?? result;
         });
       }) as CallableFunction;
@@ -819,6 +824,7 @@ export const createVoydHost = async ({
   defaultAdapters = true,
   retainedCallbacks,
   adapters = [],
+  transportAdapters = [],
 }: HostInitOptions): Promise<VoydHost> => {
   const module = toModule(wasm);
   const trapDiagnostics = createVoydTrapDiagnostics({ module });
@@ -841,6 +847,10 @@ export const createVoydHost = async ({
   const parsedTable = parseEffectTable(module, EFFECT_TABLE_EXPORT);
   const table = toHostProtocolTable(parsedTable);
   const exportAbi = parseExportAbi(module);
+  const transport = resolveHostTransport({
+    metadata: exportAbi.host,
+    adapters: transportAdapters,
+  });
   const externalRequirements = parseExternalRequirements(module);
   const exportAbiByName = new Map(
     exportAbi.exports.map((entry) => [entry.name, entry] as const),
@@ -903,6 +913,7 @@ export const createVoydHost = async ({
     annotateTrap,
     runEffectfulRetainedCallback: (params) =>
       runEffectfulRetainedCallback(params),
+    transport,
     decorateResult: (value) => attachTaskObserver(value, observeStandaloneTask),
     scopeManager: callbackScopeManager,
     getActiveScopeOwner: () => activeCallbackScopeOwner,
@@ -924,6 +935,7 @@ export const createVoydHost = async ({
       }
       return instanceRef;
     },
+    transport,
   });
   instanceRef = new WebAssembly.Instance(
     module,
@@ -1044,7 +1056,7 @@ export const createVoydHost = async ({
           args,
         })
       : args;
-    const encodedArgs = encode(boundaryArgs, MSGPACK_OPTS) as Uint8Array;
+    const encodedArgs = transport.encode(boundaryArgs);
     if (encodedArgs.length > bufferSize) {
       throw new Error(
         `serialized export ${entryName} args exceed buffer size (${encodedArgs.length} > ${bufferSize}); increase createVoydHost({ bufferSize }) or pass a smaller payload`,
@@ -1083,7 +1095,7 @@ export const createVoydHost = async ({
       );
     }
     const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
-    const decoded = decode(bytes, MSGPACK_OPTS);
+    const decoded = transport.decode(bytes);
     return (
       abi?.result
         ? decodeBoundaryResult({
@@ -1106,9 +1118,6 @@ export const createVoydHost = async ({
     try {
       const abi = exportAbiByName.get(entryName);
       if (abi?.abi === "serialized") {
-        if (abi.formatId !== "msgpack") {
-          throw new Error(`unsupported serializer format ${abi.formatId}`);
-        }
         return runSerialized<T>(entryName, args, abi);
       }
       const entry = requireExportedFunction({ instance, name: entryName });
@@ -1302,6 +1311,7 @@ export const createVoydHost = async ({
               msgpackMemory,
               bufferPtr,
               bufferSize,
+              transport,
               registerResourceCleanup: registerRunResourceCleanup,
               annotateTrap,
               fallbackFunctionName: startRaw
@@ -1419,7 +1429,7 @@ export const createVoydHost = async ({
     };
 
     const encodeToBuffer = (value: unknown): number => {
-      const encoded = encode(value, MSGPACK_OPTS) as Uint8Array;
+      const encoded = transport.encode(value);
       if (encoded.length > bufferSize) {
         throw new Error("resume payload exceeds buffer size");
       }
@@ -1430,9 +1440,8 @@ export const createVoydHost = async ({
     };
 
     const decodeFromBuffer = (length: number): unknown =>
-      decode(
+      transport.decode(
         new Uint8Array(msgpackMemory.buffer, bufferPtr, length),
-        MSGPACK_OPTS,
       );
 
     let resolvePublicOutcome: ((outcome: RunOutcome<T>) => void) | undefined;
@@ -2530,7 +2539,7 @@ export const createVoydHost = async ({
       instance,
       name: LINEAR_MEMORY_EXPORT,
     });
-    const encodedPayload = encode(payload, MSGPACK_OPTS) as Uint8Array;
+    const encodedPayload = transport.encode(payload);
     if (encodedPayload.length > bufferSize) {
       throw new Error("retained callback payload exceeds buffer size");
     }

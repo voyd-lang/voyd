@@ -3,16 +3,19 @@ import {
   BOUNDARY_MSGPACK_CONTRACT_IDS,
   BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES,
   COMPILER_FUNCTION_CONTRACTS,
+  DTO_DATA_CONTRACT_IDS,
   WEB_RENDER_CONTRACT_IDS,
 } from "../index.js";
 
 describe("compiler function contract catalog", () => {
   it("defines one boundary-msgpack spec for every stable role", () => {
     const ids = Object.values(BOUNDARY_MSGPACK_CONTRACT_IDS);
-    expect(ids).toHaveLength(29);
+    expect(ids).toHaveLength(31);
     expect(new Set(ids).size).toBe(ids.length);
     expect(COMPILER_FUNCTION_CONTRACTS.size).toBe(
-      ids.length + Object.keys(WEB_RENDER_CONTRACT_IDS).length,
+      ids.length +
+        Object.keys(DTO_DATA_CONTRACT_IDS).length +
+        Object.keys(WEB_RENDER_CONTRACT_IDS).length,
     );
 
     ids.forEach((id) => {
@@ -30,6 +33,21 @@ describe("compiler function contract catalog", () => {
       const spec = COMPILER_FUNCTION_CONTRACTS.get(id)!;
       expect(spec.expectedArity).toBe(spec.signature.parameters.length);
       expect(spec.signature.parameters.every((param) => !param.optional)).toBe(true);
+    });
+  });
+
+  it("defines one provider-neutral data spec for every stable role", () => {
+    const ids = Object.values(DTO_DATA_CONTRACT_IDS);
+    expect(ids).toHaveLength(28);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    ids.forEach((id) => {
+      expect(id).toMatch(/^voyd\.std\.data\./);
+      expect(COMPILER_FUNCTION_CONTRACTS.get(id)).toMatchObject({
+        id,
+        feature: "dto-data",
+        expectedArity: expect.any(Number),
+      });
     });
   });
 

@@ -42,6 +42,7 @@ import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
 import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
 import { ensureDispatcher } from "./effects/dispatcher.js";
 import { ensureMsgPackFunctions } from "./effects/host-boundary/msgpack.js";
+import { ensureDataValueFunctions } from "./boundary/data-value.js";
 import {
   getOutcomeValueBoxType,
   unboxOutcomeValue,
@@ -1504,6 +1505,50 @@ export const compileIntrinsicCall = ({
           returnTypeId,
           ctx,
           fnCtx,
+        });
+      } catch (error) {
+        rethrowBoundarySchemaDiagnostic({ error, call });
+      }
+    }
+    case "__dto_value_to_data": {
+      assertArgCount(name, args, 1);
+      const valueTypeId = getRequiredExprType(
+        call.args[0]!.expr,
+        ctx,
+        instanceId,
+      );
+      try {
+        return packBoundaryValueAsMsgPack({
+          value: args[0]!,
+          schema: deriveBoundarySchema({
+            typeId: valueTypeId,
+            ctx,
+            label: "data::encode value",
+            options: { tagStandaloneVariants: true },
+          }),
+          ctx,
+          fnCtx,
+          provider: ensureDataValueFunctions(ctx),
+        });
+      } catch (error) {
+        rethrowBoundarySchemaDiagnostic({ error, call });
+      }
+    }
+    case "__data_to_dto_value": {
+      assertArgCount(name, args, 1);
+      const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      try {
+        return unpackBoundaryValueFromMsgPack({
+          value: args[0]!,
+          schema: deriveBoundarySchema({
+            typeId: returnTypeId,
+            ctx,
+            label: "data::decode target",
+            options: { tagStandaloneVariants: true },
+          }),
+          ctx,
+          fnCtx,
+          provider: ensureDataValueFunctions(ctx),
         });
       } catch (error) {
         rethrowBoundarySchemaDiagnostic({ error, call });

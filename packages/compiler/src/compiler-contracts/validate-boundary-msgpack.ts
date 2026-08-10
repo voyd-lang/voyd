@@ -22,6 +22,7 @@ type ResolvedContract = {
 export type BoundaryMsgpackContractTypes = {
   readonly msgpack: TypeId;
   readonly string: TypeId;
+  readonly bytes: TypeId;
   readonly array: TypeId;
   readonly map: TypeId;
 };
@@ -50,6 +51,7 @@ export const validateBoundaryMsgpackFunctionContracts = (
   const types: BoundaryMsgpackContractTypes = {
     msgpack: parameterType(resolved, BOUNDARY_MSGPACK_CONTRACT_IDS.encodeValue, 0),
     string: parameterType(resolved, BOUNDARY_MSGPACK_CONTRACT_IDS.makeString, 0),
+    bytes: parameterType(resolved, BOUNDARY_MSGPACK_CONTRACT_IDS.makeBytes, 0),
     array: parameterType(resolved, BOUNDARY_MSGPACK_CONTRACT_IDS.makeArray, 0),
     map: parameterType(resolved, BOUNDARY_MSGPACK_CONTRACT_IDS.makeMap, 0),
   };
@@ -83,6 +85,13 @@ const validateSharedDomainTypes = (
     intrinsicType: STD_INTRINSIC_TYPE.string,
   })) {
     throwDomainTypeError(program, "string", "the std String nominal type", types.string);
+  }
+  if (!isStdIntrinsicNominalType({
+    program,
+    typeId: types.bytes,
+    intrinsicType: STD_INTRINSIC_TYPE.bytes,
+  })) {
+    throwDomainTypeError(program, "bytes", "the std Bytes nominal type", types.bytes);
   }
   if (!isStdIntrinsicNominalType({
     program,
@@ -218,12 +227,24 @@ const matchesType = ({
 const sharedTypeId = (
   types: BoundaryMsgpackContractTypes,
   name: CompilerContractSharedType,
-): TypeId => ({
-  msgpack: types.msgpack,
-  string: types.string,
-  "msgpack-array": types.array,
-  "msgpack-map": types.map,
-})[name];
+): TypeId => {
+  switch (name) {
+    case "msgpack":
+      return types.msgpack;
+    case "string":
+      return types.string;
+    case "bytes":
+      return types.bytes;
+    case "msgpack-array":
+      return types.array;
+    case "msgpack-map":
+      return types.map;
+    case "data":
+    case "data-array":
+    case "data-map":
+      throw new Error(`unexpected ${name} in MessagePack contract`);
+  }
+};
 
 const sameContractType = (
   program: ProgramCodegenView,
@@ -247,8 +268,12 @@ const formatExpectedType = (type: CompilerContractTypeSpec): string => {
   return ({
     msgpack: "MsgPack",
     string: "String",
+    bytes: "Bytes",
     "msgpack-array": "Array<MsgPack>",
     "msgpack-map": "Map<String, MsgPack>",
+    data: "DataValue",
+    "data-array": "Array<DataValue>",
+    "data-map": "Map<String, DataValue>",
   })[type.name];
 };
 

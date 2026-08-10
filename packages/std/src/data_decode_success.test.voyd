@@ -1,6 +1,8 @@
 use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
 use std::data::{
   DataArray,
+  DataBytes,
   DataField,
   DataI32,
   DataI64,
@@ -9,7 +11,8 @@ use std::data::{
   DataValue,
   DataVariant,
   DecodeError,
-  decode
+  decode,
+  encode
 }
 use std::optional::all
 use std::result::types::all
@@ -83,5 +86,26 @@ test "decode handles primitive aliases and options":
           assert(decoded, eq: "ready")
         None:
           Test::fail()
+    Err<DecodeError>:
+      Test::fail()
+
+test "encode and decode preserve bytes as a distinct neutral primitive":
+  let ~buffer = ByteBuffer::init()
+  buffer.push(1)
+  buffer.push(127)
+  buffer.push(255)
+  let source = buffer.as_bytes()
+
+  encode(source).match(encoded)
+    DataBytes:
+      assert(encoded.value.len(), eq: 3)
+      assert(encoded.value.at(2), eq: 255)
+    else:
+      Test::fail()
+
+  match(decode<Bytes>(DataBytes { value: source }))
+    Ok<Bytes> { value }:
+      assert(value.len(), eq: 3)
+      assert(value.at(0), eq: 1)
     Err<DecodeError>:
       Test::fail()

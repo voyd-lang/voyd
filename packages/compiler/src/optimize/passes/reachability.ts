@@ -11,6 +11,7 @@ import type {
 import type { CodegenOptions } from "../../codegen/context.js";
 import {
   BOUNDARY_MSGPACK_CONTRACT_IDS,
+  DTO_DATA_CONTRACT_IDS,
   type CompilerFunctionContractId,
 } from "../../compiler-contracts/index.js";
 import { type ProgramOptimizationPass } from "../pass.js";
@@ -37,6 +38,10 @@ export const BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS = new Set([
 ]);
 
 const SHAPE_REIFICATION_INTRINSICS = new Set(["__boundary_shape_of"]);
+const DATA_DTO_INTRINSICS = new Set([
+  "__dto_value_to_data",
+  "__data_to_dto_value",
+]);
 
 export const resolveIntrinsicFunction = ({
   ir,
@@ -518,6 +523,12 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       );
     };
 
+    const enqueueDataDtoFunctions = (): void => {
+      Object.values(DTO_DATA_CONTRACT_IDS).forEach(
+        enqueueCompilerFunctionContract,
+      );
+    };
+
     const enqueueSerializersForTypes = (typeIds: readonly TypeId[]): void => {
       typeIds.forEach((typeId) => {
         const serializer = serializerForType({
@@ -765,6 +776,9 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
                   BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS.has(intrinsicName)
                 ) {
                   enqueueMsgPackFunctions();
+                }
+                if (intrinsicName && DATA_DTO_INTRINSICS.has(intrinsicName)) {
+                  enqueueDataDtoFunctions();
                 }
                 if (
                   intrinsicName &&

@@ -15,12 +15,13 @@ import {
 } from "../index.js";
 
 const ids = { bool: 1, i32: 2, i64: 3, f32: 4, f64: 5 } as const;
-const shared = { msgpack: 10, string: 11, array: 12, map: 13 } as const;
+const shared = { msgpack: 10, string: 11, array: 12, map: 13, bytes: 16 } as const;
 const fixed = { msgpack: 14, i32: 15 } as const;
 const owners = {
   string: 101 as ProgramSymbolId,
   array: 102 as ProgramSymbolId,
   map: 103 as ProgramSymbolId,
+  bytes: 104 as ProgramSymbolId,
 } as const;
 
 const typeIdFor = (spec: CompilerContractTypeSpec): TypeId => {
@@ -29,8 +30,12 @@ const typeIdFor = (spec: CompilerContractTypeSpec): TypeId => {
     return {
       msgpack: shared.msgpack,
       string: shared.string,
+      bytes: shared.bytes,
       "msgpack-array": shared.array,
       "msgpack-map": shared.map,
+      data: shared.msgpack,
+      "data-array": shared.array,
+      "data-map": shared.map,
     }[spec.name] as TypeId;
   }
   return (
@@ -71,6 +76,15 @@ const makeProgram = (
     [ids.f32, { kind: "primitive", name: "f32" }],
     [ids.f64, { kind: "primitive", name: "f64" }],
     [shared.msgpack, { kind: "union", members: [] }],
+    [
+      shared.bytes,
+      {
+        kind: "nominal-object",
+        owner: owners.bytes,
+        name: "Bytes",
+        typeArgs: [],
+      },
+    ],
     [
       shared.string,
       {
@@ -128,12 +142,16 @@ const makeProgram = (
           ? "String"
           : owner === owners.array
             ? "Array"
-            : "Dict",
+            : owner === owners.bytes
+              ? "Bytes"
+              : "Dict",
       getStdIntrinsicTypeContract: (owner: number) =>
         owner === owners.string
           ? { id: STD_INTRINSIC_TYPE.string, providerKind: "nominal-object" }
           : owner === owners.array
             ? { id: STD_INTRINSIC_TYPE.array, providerKind: "nominal-object" }
+            : owner === owners.bytes
+              ? { id: STD_INTRINSIC_TYPE.bytes, providerKind: "nominal-object" }
             : undefined,
     },
     functions: {

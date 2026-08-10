@@ -8,6 +8,7 @@ import {
   isStdIntrinsicNominalType,
   STD_INTRINSIC_TYPE,
 } from "../../compiler-contracts/types.js";
+import { sha256Hex } from "../../utils/sha256.js";
 
 export type BoundaryPrimitiveSchema =
   | { kind: "bool"; typeId: TypeId }
@@ -16,7 +17,8 @@ export type BoundaryPrimitiveSchema =
   | { kind: "f32"; typeId: TypeId }
   | { kind: "f64"; typeId: TypeId }
   | { kind: "void"; typeId: TypeId }
-  | { kind: "string"; typeId: TypeId };
+  | { kind: "string"; typeId: TypeId }
+  | { kind: "bytes"; typeId: TypeId };
 
 export type BoundaryArraySchema = {
   kind: "array";
@@ -66,12 +68,13 @@ export type BoundaryRefSchema = {
   name?: string;
 };
 
-export type BoundarySchema =
+export type BoundarySchema = (
   | BoundaryPrimitiveSchema
   | BoundaryArraySchema
   | BoundaryRecordSchema
   | BoundaryUnionSchema
-  | BoundaryRefSchema;
+  | BoundaryRefSchema
+) & { fingerprint?: string };
 
 export class BoundarySchemaError extends Error {
   constructor(message: string) {
@@ -84,6 +87,63 @@ export type BoundarySchemaOptions = {
   tagStandaloneVariants?: boolean;
   includeDocumentation?: boolean;
   portableNames?: boolean;
+};
+
+export const withDtoFingerprint = (
+  schema: BoundarySchema,
+): BoundarySchema => ({
+  ...schema,
+  fingerprint: dtoSchemaFingerprint(schema),
+});
+
+export const dtoSchemaFingerprint = (schema: BoundarySchema): string =>
+  sha256Hex(canonicalDtoSchemaBytes(schema));
+
+export const canonicalDtoSchemaBytes = (
+  schema: BoundarySchema,
+): Uint8Array =>
+  new TextEncoder().encode(JSON.stringify([1, canonicalDtoNode(schema)]));
+
+const canonicalDtoNode = (schema: BoundarySchema): unknown => {
+  switch (schema.kind) {
+    case "bool":
+    case "i32":
+    case "i64":
+    case "f32":
+    case "f64":
+    case "void":
+    case "string":
+    case "bytes":
+      return [schema.kind];
+    case "array":
+      return ["array", canonicalDtoNode(schema.element)];
+    case "record":
+      return [
+        "record",
+        schema.name,
+        schema.tag ?? null,
+        schema.fields.map((field) => [
+          field.name,
+          field.optional === true,
+          canonicalDtoNode(field.schema),
+        ]),
+      ];
+    case "union":
+      return [
+        "union",
+        schema.name,
+        schema.variants.map((variant) => [
+          variant.name,
+          variant.fields.map((field) => [
+            field.name,
+            field.optional === true,
+            canonicalDtoNode(field.schema),
+          ]),
+        ]),
+      ];
+    case "ref":
+      return ["ref", schema.name ?? `type#${schema.typeId}`];
+  }
 };
 
 export const deriveBoundarySchema = ({
@@ -235,6 +295,9 @@ const deriveBoundarySchemaInternal = ({
   }
   if (isStringType({ typeId, ctx })) {
     return { kind: "string", typeId };
+  }
+  if (isBytesType({ typeId, ctx })) {
+    return { kind: "bytes", typeId };
   }
 
   active.add(typeId);
@@ -689,6 +752,19 @@ const isStringType = ({
     program: ctx.program,
     typeId,
     intrinsicType: STD_INTRINSIC_TYPE.string,
+  });
+
+const isBytesType = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): boolean =>
+  isStdIntrinsicNominalType({
+    program: ctx.program,
+    typeId,
+    intrinsicType: STD_INTRINSIC_TYPE.bytes,
   });
 
 const recordFieldFor = ({

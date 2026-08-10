@@ -45,6 +45,9 @@ pub obj F64Shape {}
 /// String primitive shape.
 pub obj StringShape {}
 
+/// Immutable byte sequence shape.
+pub obj BytesShape {}
+
 /// Void/unit boundary shape.
 pub obj UnitShape {}
 
@@ -109,6 +112,7 @@ pub type ShapeNode = BoolShape
   | F32Shape
   | F64Shape
   | StringShape
+  | BytesShape
   | UnitShape
   | ArrayShape
   | RecordShape

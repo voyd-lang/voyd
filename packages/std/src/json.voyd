@@ -28,6 +28,7 @@ use std::dict::Dict
 use std::meta::{
   ArrayShape,
   BoolShape,
+  BytesShape,
   F32Shape,
   F64Shape,
   I32Shape,
@@ -420,6 +421,8 @@ fn json_value_to_data(
           Ok<DataValue> { value: DataString { value: decoded.value } }
         else:
           schema_mismatch(path, "string")
+    BytesShape:
+      schema_mismatch(path, "bytes require an explicit JSON representation")
     UnitShape:
       value.match(decoded)
         JsonNull:

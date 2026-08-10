@@ -1,4 +1,5 @@
 use std::array::Array
+use std::bytes::Bytes
 use std::enums::{ enum }
 use std::string::type::String
 
@@ -21,6 +22,9 @@ pub fn echo_i64(value: i64) -> i64
   value
 
 pub fn echo_f32(value: f32) -> f32
+  value
+
+pub fn echo_bytes(value: Bytes) -> Bytes
   value
 
 pub fn translate(point: Point, dx: i32, dy: i32) -> Point

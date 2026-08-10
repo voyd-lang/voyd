@@ -53,6 +53,7 @@ import {
 import {
   BoundarySchemaError,
   deriveBoundarySchema,
+  withDtoFingerprint,
   type BoundarySchema,
 } from "./boundary/schema.js";
 import {
@@ -302,19 +303,19 @@ const boundarySchemasForExport = ({
   exportName: string;
 }): { params: BoundarySchema[]; result: BoundarySchema } => ({
   params: meta.paramTypeIds.map((typeId, index) =>
-    deriveBoundarySchema({
+    withDtoFingerprint(deriveBoundarySchema({
       typeId,
       ctx,
       label: `${exportName} arg${index}`,
-      options: { tagStandaloneVariants: true },
-    }),
+      options: { tagStandaloneVariants: true, portableNames: true },
+    })),
   ),
-  result: deriveBoundarySchema({
+  result: withDtoFingerprint(deriveBoundarySchema({
     typeId: meta.resultTypeId,
     ctx,
     label: `${exportName} result`,
-    options: { tagStandaloneVariants: true },
-  }),
+    options: { tagStandaloneVariants: true, portableNames: true },
+  })),
 });
 
 const scalarBoundaryWasmType = (
@@ -1618,7 +1619,6 @@ export const emitModuleExports = (
           exportAbiEntries.push({
             name: exportName,
             abi: "serialized",
-            formatId: "msgpack",
             ...(specialSerializedExport?.params
               ? { params: specialSerializedExport.params }
               : {}),
@@ -1684,7 +1684,6 @@ export const emitModuleExports = (
             name: exportName,
             abi: "serialized",
             wrapperName: wrapper.wrapperName,
-            formatId: wrapper.formatId,
             params: schemas.params,
             result: schemas.result,
           });
@@ -1724,9 +1723,7 @@ export const emitModuleExports = (
     });
   }
 
-  if (exportAbiEntries.length > 0) {
-    emitExportAbiSection({ mod: ctx.mod, entries: exportAbiEntries });
-  }
+  emitExportAbiSection({ mod: ctx.mod, entries: exportAbiEntries });
 
   const retainedCallbackTargets = Array.from(
     ctx.programHelpers

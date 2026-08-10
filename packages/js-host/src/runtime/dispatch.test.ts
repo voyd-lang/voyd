@@ -1,12 +1,11 @@
-import { decode, encode } from "@msgpack/msgpack";
 import { describe, expect, it } from "vitest";
 import type { EffectOpRequest } from "../effect-op.js";
 import type { ParsedEffectOp, ParsedEffectTable } from "../protocol/table.js";
 import type { EffectHandler } from "../protocol/types.js";
 import { continueEffectLoopStep, runEffectLoop } from "./dispatch.js";
 import { EFFECT_RESULT_STATUS, RESUME_KIND } from "./constants.js";
+import { msgPackHostTransport } from "../transports/msgpack.js";
 
-const MSGPACK_OPTS = { useBigInt64: true } as const;
 const BUFFER_PTR = 0;
 const BUFFER_SIZE = 1024;
 
@@ -100,7 +99,7 @@ const createRuntimeDriver = ({
   let resumeCalls = 0;
 
   const writePayload = (payload: unknown): number => {
-    const encoded = encode(payload, MSGPACK_OPTS) as Uint8Array;
+    const encoded = msgPackHostTransport.encode(payload);
     new Uint8Array(memory.buffer, BUFFER_PTR, encoded.length).set(encoded);
     return encoded.length;
   };
@@ -118,7 +117,7 @@ const createRuntimeDriver = ({
     resumeEffectful: (cont: symbol, ptr: number, length: number): FakeResult => {
       resumeCalls += 1;
       const bytes = new Uint8Array(memory.buffer, ptr, length);
-      const decoded = decode(bytes, MSGPACK_OPTS);
+      const decoded = msgPackHostTransport.decode(bytes);
       const resume = continuations.get(cont);
       if (!resume) {
         throw new Error("unknown continuation");
@@ -187,6 +186,7 @@ describe("runEffectLoop", () => {
       msgpackMemory: runtime.msgpackMemory,
       bufferPtr: BUFFER_PTR,
       bufferSize: BUFFER_SIZE,
+      transport: msgPackHostTransport,
     });
 
     expect(output).toBe(40);
@@ -230,6 +230,7 @@ describe("runEffectLoop", () => {
       msgpackMemory: runtime.msgpackMemory,
       bufferPtr: BUFFER_PTR,
       bufferSize: BUFFER_SIZE,
+      transport: msgPackHostTransport,
     });
 
     expect(output).toBe(99);
@@ -259,6 +260,7 @@ describe("runEffectLoop", () => {
         msgpackMemory: runtime.msgpackMemory,
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
+      transport: msgPackHostTransport,
       })
     ).rejects.toThrow(/Unhandled effect/i);
   });
@@ -290,6 +292,7 @@ describe("runEffectLoop", () => {
         msgpackMemory: runtime.msgpackMemory,
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
+      transport: msgPackHostTransport,
       })
     ).rejects.toThrow("boom");
   });
@@ -317,6 +320,7 @@ describe("runEffectLoop", () => {
         msgpackMemory: runtime.msgpackMemory,
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
+      transport: msgPackHostTransport,
       })
     ).rejects.toThrow(/payload encoding failed/i);
   });
@@ -344,6 +348,7 @@ describe("runEffectLoop", () => {
         msgpackMemory: resumeRuntime.msgpackMemory,
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
+      transport: msgPackHostTransport,
       })
     ).rejects.toThrow(/cannot return tail/i);
     expect(resumeRuntime.resumeCalls()).toBe(0);
@@ -370,6 +375,7 @@ describe("runEffectLoop", () => {
         msgpackMemory: tailRuntime.msgpackMemory,
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
+      transport: msgPackHostTransport,
       })
     ).rejects.toThrow(/must return tail/i);
     expect(tailRuntime.resumeCalls()).toBe(0);
@@ -404,6 +410,7 @@ describe("runEffectLoop", () => {
       msgpackMemory: runtime.msgpackMemory,
       bufferPtr: BUFFER_PTR,
       bufferSize: BUFFER_SIZE,
+      transport: msgPackHostTransport,
       shouldContinue: () => false,
     });
 

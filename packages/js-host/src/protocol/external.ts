@@ -1,4 +1,3 @@
-import { decode, encode } from "@msgpack/msgpack";
 import {
   externalFunctionKey,
   isVoydPackageAdapter,
@@ -8,6 +7,7 @@ import {
 } from "@voyd-lang/package-adapter";
 import { decodeBoundaryArgs, encodeBoundaryArgs } from "../boundary-values.js";
 import type { EffectContinuation, EffectHandler, HostProtocolTable } from "./types.js";
+import type { HostTransportAdapter } from "./host-transport.js";
 
 export const EXTERNAL_IMPORT_MODULE = "voyd.external";
 export const EXTERNAL_REQUIREMENTS_SECTION = "voyd.external_requirements";
@@ -16,7 +16,7 @@ export const EXTERNAL_BUFFER_ERROR_IMPORT = "buffer_error";
 
 /** Internal schema emitted by the core-Wasm fallback compiler ABI. */
 export type VoydBoundarySchema =
-  | { kind: "bool" | "i32" | "i64" | "f32" | "f64" | "void" | "string"; typeId?: number }
+  | { kind: "bool" | "i32" | "i64" | "f32" | "f64" | "void" | "string" | "bytes"; typeId?: number }
   | { kind: "array"; typeId?: number; aliases?: readonly number[]; elementTypeId?: number; element: VoydBoundarySchema }
   | { kind: "record"; typeId?: number; aliases?: readonly number[]; name?: string; tag?: string; fields: readonly VoydBoundaryFieldSchema[] }
   | { kind: "union"; typeId?: number; aliases?: readonly number[]; name?: string; variants: readonly VoydBoundaryVariantSchema[] }
@@ -53,7 +53,6 @@ export type ParsedExternalRequirements = {
   functions: readonly ExternalFunctionRequirement[];
 };
 
-const MSGPACK_OPTIONS = { useBigInt64: true } as const;
 const INVOCATION_CONTEXT: VoydPackageAdapterInvocationContext = Object.freeze({});
 
 export const parseExternalRequirements = (
@@ -78,11 +77,13 @@ export const buildExternalImportModule = ({
   adapters,
   bufferSize,
   getInstance,
+  transport,
 }: {
   requirements: ParsedExternalRequirements;
   adapters: readonly VoydPackageAdapter[];
   bufferSize: number;
   getInstance: () => WebAssembly.Instance;
+  transport: HostTransportAdapter;
 }): WebAssembly.Imports => {
   if (requirements.functions.length === 0) return {};
   if (requirements.version !== 1) {
@@ -119,9 +120,8 @@ export const buildExternalImportModule = ({
     assertCompatibleContract({ requirement, provider });
     imports[key] = (inPtr: number, inLen: number, outPtr: number, outCap: number) => {
       const memory = requireMemory(getInstance());
-      const argsValue = decode(
+      const argsValue = transport.decode(
         new Uint8Array(memory.buffer, inPtr, inLen),
-        MSGPACK_OPTIONS,
       );
       if (!Array.isArray(argsValue)) {
         throw externalCallError(key, "arguments payload was not an array");
@@ -148,7 +148,7 @@ export const buildExternalImportModule = ({
         schemas: [requirement.result],
         args: [result],
       })[0];
-      const encoded = encode(boundaryResult, MSGPACK_OPTIONS) as Uint8Array;
+      const encoded = transport.encode(boundaryResult);
       if (encoded.length > outCap) {
         throw externalCallError(
           key,

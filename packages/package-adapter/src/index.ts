@@ -2,7 +2,7 @@ export const VOYD_PACKAGE_ADAPTER_ABI = 1 as const;
 
 /** Stable, transport-neutral schema written to generated adapter contracts. */
 export type VoydDtoSchema =
-  | { kind: "bool" | "i32" | "i64" | "f32" | "f64" | "void" | "string" }
+  | { kind: "bool" | "i32" | "i64" | "f32" | "f64" | "void" | "string" | "bytes" }
   | { kind: "array"; element: VoydDtoSchema }
   | {
       kind: "record";

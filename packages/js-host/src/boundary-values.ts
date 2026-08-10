@@ -183,6 +183,14 @@ const encodeBoundaryValue = ({
         value,
         guard: isString,
       });
+    case "bytes":
+      return expectType({
+        exportName,
+        path,
+        expected: "Uint8Array",
+        value,
+        guard: isBytes,
+      });
     case "array":
       if (!Array.isArray(value)) {
         throw typeError({ exportName, path, expected: "array", value });
@@ -673,3 +681,5 @@ const actualType = (value: unknown): string => {
 
 const isBool = (value: unknown): value is boolean => typeof value === "boolean";
 const isString = (value: unknown): value is string => typeof value === "string";
+const isBytes = (value: unknown): value is Uint8Array =>
+  value instanceof Uint8Array;

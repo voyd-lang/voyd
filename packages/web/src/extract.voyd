@@ -6,8 +6,8 @@ use std::dict::Dict
 use std::http::self as http
 use std::http::{ Header, Headers, HttpError, IncomingRequest, QueryString, Response, Status }
 use std::json::{ JsonArray, JsonBool, JsonNull, JsonNumber, JsonObject, JsonString, JsonValue, parse as parse_json }
-use std::meta::{ ArrayShape, BoolShape, F32Shape, F64Shape, I32Shape, I64Shape, RecordShape, RefShape, Shape, ShapeDefinition, ShapeField, ShapeNode, StringShape, UnionShape, UnitShape, shape_of }
-use std::msgpack::{ Bool, F32, F64, I32, I64, MsgPack, MsgPackError, Null }
+use std::meta::{ ArrayShape, BoolShape, BytesShape, F32Shape, F64Shape, I32Shape, I64Shape, RecordShape, RefShape, Shape, ShapeDefinition, ShapeField, ShapeNode, StringShape, UnionShape, UnitShape, shape_of }
+use std::msgpack::{ Binary, Bool, F32, F64, I32, I64, MsgPack, MsgPackError, Null }
 use std::msgpack::self as msgpack
 use std::number::cast::self as cast
 use std::optional::types::all
@@ -372,6 +372,8 @@ fn shape_compatible(actual: MsgPack, expected: ShapeNode, shape: Shape) -> bool
       is_numeric_msgpack(actual)
     StringShape:
       is_string_msgpack(actual)
+    BytesShape:
+      is_binary_msgpack(actual)
     UnitShape:
       is_optional_absent(actual)
     ArrayShape:
@@ -476,6 +478,8 @@ fn msgpack_shape_compatible(actual: MsgPack, expected: MsgPack): () -> bool
       is_numeric_msgpack(actual)
     String:
       is_string_compatible_msgpack(actual)
+    Binary:
+      is_binary_msgpack(actual)
     Array<MsgPack>:
       is_array_msgpack(actual)
     else:
@@ -521,6 +525,13 @@ fn is_string_compatible_msgpack(value: MsgPack): () -> bool
 fn is_string_msgpack(value: MsgPack): () -> bool
   value.match(decoded)
     String:
+      true
+    else:
+      false
+
+fn is_binary_msgpack(value: MsgPack): () -> bool
+  value.match(decoded)
+    Binary:
       true
     else:
       false

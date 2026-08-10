@@ -39,6 +39,7 @@ export const runWithHandlers = async <T = unknown>({
   bufferSize,
   defaultAdapters,
   adapters,
+  transportAdapters,
   args,
 }: RunOptions): Promise<T> => {
   const host = await createHost({
@@ -47,6 +48,7 @@ export const runWithHandlers = async <T = unknown>({
     bufferSize,
     defaultAdapters,
     adapters,
+    transportAdapters,
   });
   if (handlersByLabelSuffix) {
     registerHandlersByLabelSuffix({ host, handlersByLabelSuffix });

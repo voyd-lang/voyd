@@ -6,6 +6,7 @@ use std::json::{ JsonArray, JsonBool, JsonObject, JsonString, JsonValue }
 use std::meta::{
   ArrayShape,
   BoolShape,
+  BytesShape,
   F32Shape,
   F64Shape,
   I32Shape,
@@ -76,6 +77,8 @@ pub fn schema_node(
       formatted_schema("number", "double")
     StringShape:
       typed_schema("string")
+    BytesShape:
+      formatted_schema("string", "binary")
     UnitShape:
       typed_schema("null")
     RefShape:

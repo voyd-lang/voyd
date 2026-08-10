@@ -74,7 +74,7 @@ export const emitSerializedExportWrapper = ({
   typeAdapter?: SerializedExportTypeAdapter;
   paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
   returnSerializerOverride?: SerializerMetadata;
-}): { wrapperName: string; formatId: "msgpack" } => {
+}): { wrapperName: string } => {
   ensureLinearMemoryExport(ctx);
   validateExportTypes({
     ctx,
@@ -260,7 +260,7 @@ export const emitSerializedExportWrapper = ({
   );
 
   ctx.mod.addFunctionExport(wrapperName, wrapperExportName);
-  return { wrapperName: wrapperExportName, formatId: "msgpack" };
+  return { wrapperName: wrapperExportName };
 };
 
 const buildPayloadEnvelopeParamExpr = ({

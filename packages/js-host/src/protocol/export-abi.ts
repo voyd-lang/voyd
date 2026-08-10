@@ -5,7 +5,8 @@ export type BoundaryPrimitiveSchema =
   | { kind: "f32"; typeId?: number }
   | { kind: "f64"; typeId?: number }
   | { kind: "void"; typeId?: number }
-  | { kind: "string"; typeId?: number };
+  | { kind: "string"; typeId?: number }
+  | { kind: "bytes"; typeId?: number };
 
 export type BoundaryArraySchema = {
   kind: "array";
@@ -50,12 +51,13 @@ export type BoundaryRefSchema = {
   typeId: number;
 };
 
-export type BoundarySchema =
+export type BoundarySchema = (
   | BoundaryPrimitiveSchema
   | BoundaryArraySchema
   | BoundaryRecordSchema
   | BoundaryUnionSchema
-  | BoundaryRefSchema;
+  | BoundaryRefSchema
+) & { fingerprint?: string };
 
 export type ExportAbiEntry =
   | {
@@ -67,7 +69,6 @@ export type ExportAbiEntry =
   | {
       name: string;
       abi: "serialized";
-      formatId?: string;
       wrapperName?: string;
       params?: readonly BoundarySchema[];
       result?: BoundarySchema;
@@ -75,6 +76,7 @@ export type ExportAbiEntry =
 
 export type ParsedExportAbi = {
   version: number;
+  host?: HostTransportMetadata;
   exports: ExportAbiEntry[];
 };
 
@@ -90,9 +92,31 @@ export const parseExportAbi = (
   }
   const payload = new Uint8Array(sections[0]!);
   const json = new TextDecoder().decode(payload);
-  const parsed = JSON.parse(json) as { version?: number; exports?: ExportAbiEntry[] };
+  const parsed = JSON.parse(json) as {
+    version?: number;
+    hostAbi?: number;
+    dtoSchemaAbi?: number;
+    transport?: { id?: string; version?: number };
+    exports?: ExportAbiEntry[];
+  };
+  const host =
+    typeof parsed.hostAbi === "number" &&
+    typeof parsed.dtoSchemaAbi === "number" &&
+    typeof parsed.transport?.id === "string" &&
+    typeof parsed.transport.version === "number"
+      ? {
+          hostAbi: parsed.hostAbi,
+          dtoSchemaAbi: parsed.dtoSchemaAbi,
+          transport: {
+            id: parsed.transport.id,
+            version: parsed.transport.version,
+          },
+        }
+      : undefined;
   return {
     version: typeof parsed.version === "number" ? parsed.version : 0,
+    ...(host ? { host } : {}),
     exports: Array.isArray(parsed.exports) ? parsed.exports : [],
   };
 };
+import type { HostTransportMetadata } from "./host-transport.js";

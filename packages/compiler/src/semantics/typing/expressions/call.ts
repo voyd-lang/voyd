@@ -8475,6 +8475,27 @@ const typeIntrinsicCall = (
         );
       }
       return typeArguments![0]!;
+    case "__dto_value_to_data":
+      assertIntrinsicArgCount({
+        name: "__dto_value_to_data",
+        args,
+        expected: 1,
+        detail: "DTO value",
+      });
+      assertNoIntrinsicTypeArgs("__dto_value_to_data", typeArguments);
+      return expectedReturnType ?? ctx.primitives.unknown;
+    case "__data_to_dto_value":
+      assertIntrinsicArgCount({
+        name: "__data_to_dto_value",
+        args,
+        expected: 1,
+        detail: "DataValue",
+      });
+      return requireSingleTypeArgument({
+        name: "__data_to_dto_value",
+        typeArguments,
+        detail: "target DTO type",
+      });
     case "__boundary_shape_of":
       assertIntrinsicArgCount({
         name: "__boundary_shape_of",

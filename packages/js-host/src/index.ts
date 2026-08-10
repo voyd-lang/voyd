@@ -49,6 +49,11 @@ export {
 } from "./effect-op.js";
 export { EXPORT_ABI_SECTION, parseExportAbi } from "./protocol/export-abi.js";
 export {
+  DTO_SCHEMA_ABI_VERSION,
+  HOST_ABI_VERSION,
+  resolveHostTransport,
+} from "./protocol/host-transport.js";
+export {
   EXTERNAL_IMPORT_MODULE,
   EXTERNAL_REQUIREMENTS_SECTION,
   parseExternalRequirements,
@@ -64,6 +69,11 @@ export type {
   ResumeKindCode,
 } from "./protocol/table.js";
 export type { ExportAbiEntry, ParsedExportAbi } from "./protocol/export-abi.js";
+export type {
+  HostTransportAdapter,
+  HostTransportIdentity,
+  HostTransportMetadata,
+} from "./protocol/host-transport.js";
 export type {
   ExternalFunctionRequirement,
   ParsedExternalRequirements,

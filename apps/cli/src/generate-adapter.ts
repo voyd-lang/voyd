@@ -377,6 +377,7 @@ const typescriptType = (
     case "i64": return "bigint | number";
     case "void": return "void";
     case "string": return "string";
+    case "bytes": return "Uint8Array";
     case "array": return `readonly ${typescriptType(schema.element)}[]`;
     case "record":
       return `{ ${schema.tag ? `tag: ${JSON.stringify(schema.tag)}; ` : ""}${schema.fields.map((field) => `${JSON.stringify(field.name)}${field.optional ? "?" : ""}: ${typescriptType(field.schema)}`).join("; ")} }`;
@@ -479,6 +480,7 @@ const createWitRenderer = (functions: readonly PortableRequirement[]) => {
       case "f32": return "float32";
       case "f64": return "float64";
       case "string": return "string";
+      case "bytes": return "list<u8>";
       case "void": return "tuple<>";
       case "array": return `list<${inlineType(schema.element)}>`;
       case "record": return nameFor(schema);
