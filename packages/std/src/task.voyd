@@ -4,9 +4,6 @@
 //! cooperative and event-loop driven, not thread-parallel.
 
 use std::async::types::{ Cancelled, Completion }
-use std::msgpack::MsgPack
-use std::msgpack::MsgPackError
-use std::msgpack::self as msgpack
 use std::result::types::all
 use std::string::type::String
 
@@ -36,7 +33,7 @@ pub eff TaskRuntime
 
   yield_once(resume) -> void
 
-  failure_message(tail, id: i32) -> MsgPack
+  failure_message(tail, id: i32) -> String
 
 @intrinsic(name: "__task_spawn")
 fn spawn_attached_id<T>(work: fn() : (open) -> T): (open) -> i32 __task_spawn(work)
@@ -63,7 +60,7 @@ pub fn join(task: Task<void>): TaskRuntime -> TaskOutcome<Unit>
 
   if status == 1 then:
     return Err<TaskError> {
-      error: decode_task_failure(TaskRuntime::failure_message(task.id))
+      error: TaskError { message: TaskRuntime::failure_message(task.id) }
     }
 
   Cancelled {}
@@ -78,7 +75,7 @@ fn join_task<T>(task: Task<T>): TaskRuntime -> TaskOutcome<T>
 
   if status == 1 then:
     return Err<TaskError> {
-      error: decode_task_failure(TaskRuntime::failure_message(task.id))
+      error: TaskError { message: TaskRuntime::failure_message(task.id) }
     }
 
   Cancelled {}
@@ -92,10 +89,3 @@ fn cancel_task<T>(task: Task<T>): TaskRuntime -> bool
 pub fn yield_now(): TaskRuntime -> Unit
   TaskRuntime::yield_once()
   Unit {}
-
-fn decode_task_failure(payload: MsgPack): () -> TaskError
-  match(msgpack::unpack_string(payload))
-    Ok<String> { value }:
-      TaskError { message: value }
-    Err<MsgPackError> { error }:
-      TaskError { message: error.message }

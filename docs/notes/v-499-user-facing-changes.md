@@ -20,8 +20,9 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   functions. The representation participates in the canonical DTO plan.
 - The `@boundary` and `@serializer` annotations have been removed.
 - Standard host effects for logging, randomness, environment variables,
-  filesystems, and HTTP now use typed request and result values. Adapter authors
-  receive and return those values instead of MessagePack envelope objects.
+  task failures, filesystems, and HTTP now use typed request and result values.
+  Adapter authors receive and return those values instead of MessagePack
+  envelope objects.
 - HTTP and filesystem byte bodies are `Uint8Array` values in JavaScript host
   adapters.
 
