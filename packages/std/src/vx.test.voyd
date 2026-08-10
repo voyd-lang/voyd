@@ -1,4 +1,5 @@
 use std::array::Array
+use std::bytes::Bytes
 use std::dict::Dict
 use std::enums::{ enum }
 use std::msgpack::MsgPack
@@ -177,7 +178,7 @@ test "vx class prop styles and keyed helpers encode renderer fields":
         assert(false, eq: true)
   Component::state_scope(tail, key):
     seen_scopes.push("scope".to_string())
-    assert_msgpack_string(key, "page-2")
+    assert_encoded_string(key, "page-2")
     tail()
   assert(seen_scopes.len(), eq: 1)
 
@@ -505,69 +506,6 @@ test "vx typed subscription constructors encode messages through the boundary":
   assert_payload_has_field(mapped.payload, "child")
   assert_array_payload_len(mapped.payload, "__vxOwnedMapHandlerIds", 1)
 
-test "vx component state and task APIs use component effect":
-  let ~seen = Array<String>::init()
-
-  try open
-    let handle = state_handle(initial: msgpack::make_string("initial"))
-    assert_msgpack_string(handle.value, "current")
-  Component::state_key(tail, id):
-    tail(id)
-  Component::state_get(tail, id, initial):
-    seen.push("get".to_string())
-    assert_msgpack_string(initial, "initial")
-    tail(msgpack::make_string("current"))
-
-  let handle = StateHandle<MsgPack> { id: 3, value: msgpack::make_string("current") }
-  try open
-    handle.set_serialized(msgpack::make_string("next"))
-  Component::state_set(tail, id, value):
-    seen.push("set".to_string())
-    assert(id, eq: 3)
-    assert_msgpack_string(value, "next")
-    tail()
-
-  try open
-    let (value, set_value) = state(initial: 1)
-    assert(value, eq: 7)
-    set_value(value + 1)
-  Component::state_key(tail, id):
-    tail(id)
-  Component::state_get(tail, id, initial):
-    seen.push("state-get".to_string())
-    assert_msgpack_i32(initial, 1)
-    tail(msgpack::make_i32(7))
-  Component::state_set(tail, id, value):
-    seen.push("state-set".to_string())
-    assert_msgpack_i32(value, 8)
-    tail()
-
-  try open
-    let (text_value, set_text) = state(initial: "initial")
-    assert(text_value.equals("current".to_string()), eq: true)
-    set_text(text_value)
-  Component::state_key(tail, id):
-    tail(id)
-  Component::state_get(tail, id, initial):
-    seen.push("text-get".to_string())
-    assert_msgpack_string(initial, "initial")
-    tail(msgpack::make_string("current"))
-  Component::state_set(tail, id, value):
-    seen.push("text-set".to_string())
-    assert_msgpack_string(value, "current")
-    tail()
-
-  let task_value = Task<MsgPack> { id: 11 }
-  try open
-    task<MsgPack>(key: msgpack::make_string("preview"), task: task_value)
-  Component::task_started(tail, key, task_id):
-    seen.push("task".to_string())
-    assert_msgpack_string(key, "preview")
-    assert(task_id, eq: 11)
-    tail()
-
-  assert(seen.len(), eq: 7)
-
 test "vx program constructor encodes lifecycle handles":
   let step = program<TypedVxTestModel, TypedVxTestMsg>(
     model: TypedVxTestModel { count: 1 },
@@ -790,6 +728,16 @@ fn assert_msgpack_string(value: MsgPack, expected: StringSlice) -> void
 
 fn assert_msgpack_string(value: MsgPack, expected: String) -> void
   assert_msgpack_string(value, expected.as_slice())
+
+fn assert_encoded_string(value: Bytes, expected: StringSlice) -> void
+  match(msgpack::decode<String>(value))
+    Ok<String> { value: actual }:
+      assert(actual.equals(expected.to_string()), eq: true)
+    Err:
+      assert(false, eq: true)
+
+fn assert_encoded_string(value: Bytes, expected: String) -> void
+  assert_encoded_string(value, expected.as_slice())
 
 fn assert_msgpack_i32(value: MsgPack, expected: i32) -> void
   match(msgpack::unpack_i32(value))

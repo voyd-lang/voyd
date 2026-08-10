@@ -25,6 +25,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   MessagePack envelope objects.
 - HTTP and filesystem byte bodies are `Uint8Array` values in JavaScript host
   adapters.
+- VX component state is generic and typed. The serialized `MsgPack` state
+  overloads and `set_serialized`/`update_serialized` methods have been removed.
 
 This record will be extended as the remaining obsolete boundary and VX APIs are
 removed.

@@ -1,4 +1,5 @@
 use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
 use std::error::panic
@@ -133,15 +134,15 @@ pub eff Dom
 
 @effect(id: "voyd.std.vx.component")
 pub eff Component
-  state_scope(tail, key: MsgPack) -> void
+  state_scope(tail, key: Bytes) -> void
 
   state_key(tail, id: i32) -> i32
 
-  state_get(tail, id: i32, initial: MsgPack) -> MsgPack
+  state_get(tail, id: i32, initial: Bytes) -> Bytes
 
-  state_set(tail, id: i32, value: MsgPack) -> void
+  state_set(tail, id: i32, value: Bytes) -> void
 
-  task_started(tail, key: MsgPack, task_id: i32) -> void
+  task_started(tail, key: Bytes, task_id: i32) -> void
 
 @intrinsic(name: "__render_retain_callback", uses_signature: true)
 fn retain_event_handler_id(handler: fn() -> MsgPack): () -> i32
@@ -203,41 +204,30 @@ fn stable_callsite_id(): () -> i32
 fn boundary_value_to_msgpack<Msg>(message: Msg): () -> MsgPack
   __boundary_value_to_msgpack(message)
 
-impl StateHandle<MsgPack>
-  /// Replaces component-local serialized state and schedules the component runtime.
-  api fn set_serialized(self, value: MsgPack): Component -> void
-    Component::state_set(self.id, value)
+fn encode_vx_payload<T>(value: T) -> Bytes
+  match(msgpack::encode(value))
+    Ok<Bytes> { value }:
+      value
+    Err:
+      panic("failed to encode VX payload")
+      ByteBuffer::init().as_bytes()
 
-  /// Replaces component-local serialized state and returns the updated handle.
-  api fn update_serialized(self, value: MsgPack): Component -> StateHandle<MsgPack>
-    Component::state_set(self.id, value)
-    StateHandle<MsgPack> { id: self.id, value: value }
+fn decode_vx_payload<T>(value: Bytes, fallback: T) -> T
+  match(msgpack::decode<T>(value))
+    Ok<T> { value }:
+      value
+    Err:
+      fallback
 
-impl StateHandle<String>
-  /// Replaces component-local text state and schedules the component runtime.
-  api fn set(self, value: String): Component -> void
-    Component::state_set(self.id, msgpack::make_string(value))
+impl<T> StateHandle<T>
+  /// Replaces component-local typed state and schedules the component runtime.
+  api fn set(self, value: T): Component -> void
+    Component::state_set(self.id, encode_vx_payload(value))
 
-  api fn set(self, value: StringSlice): Component -> void
-    self.set(value.to_string())
-
-  /// Replaces component-local text state and returns the updated handle.
-  api fn update(self, value: String): Component -> StateHandle<String>
-    Component::state_set(self.id, msgpack::make_string(value))
-    StateHandle<String> { id: self.id, value: value }
-
-  api fn update(self, value: StringSlice): Component -> StateHandle<String>
-    self.update(value.to_string())
-
-impl StateHandle<i32>
-  /// Replaces component-local integer state and schedules the component runtime.
-  api fn set(self, value: i32): Component -> void
-    Component::state_set(self.id, msgpack::make_i32(value))
-
-  /// Replaces component-local integer state and returns the updated handle.
-  api fn update(self, value: i32): Component -> StateHandle<i32>
-    Component::state_set(self.id, msgpack::make_i32(value))
-    StateHandle<i32> { id: self.id, value: value }
+  /// Replaces component-local typed state and returns the updated handle.
+  api fn update(self, value: T): Component -> StateHandle<T>
+    Component::state_set(self.id, encode_vx_payload(value))
+    StateHandle<T> { id: self.id, value: value }
 
 impl<Msg> Sub<Msg>
   /// Creates an empty subscription set.
@@ -616,34 +606,20 @@ pub fn broadcast_channel<Payload, Msg>({
 }) -> Sub<Msg>
   broadcast_channel<Payload, Msg>(name: name.to_string(), handler: handler)
 
-/// Reads a component-local serialized state handle.
-pub fn state_handle({
-  initial: MsgPack,
+/// Reads a component-local typed state handle.
+pub fn state_handle<T>({
+  initial: T,
   id: i32 = stable_callsite_id()
-}): Component -> StateHandle<MsgPack>
+}): Component -> StateHandle<T>
   state_handle_at(id: id, initial: initial)
 
-fn state_handle_at({ id: i32, initial: MsgPack }): Component -> StateHandle<MsgPack>
+fn state_handle_at<T>({ id: i32, initial: T }): Component -> StateHandle<T>
   let slot = Component::state_key(id)
-  StateHandle<MsgPack> {
+  StateHandle<T> {
     id: slot,
-    value: Component::state_get(slot, initial)
-  }
-
-/// Reads a component-local text state handle.
-pub fn state_handle({
-  initial: String,
-  id: i32 = stable_callsite_id()
-}): Component -> StateHandle<String>
-  state_handle_at(id: id, initial: initial)
-
-fn state_handle_at({ id: i32, initial: String }): Component -> StateHandle<String>
-  let slot = Component::state_key(id)
-  StateHandle<String> {
-    id: slot,
-    value: component_string_state_value(
-      value: Component::state_get(slot, msgpack::make_string(initial)),
-      fallback: initial
+    value: decode_vx_payload<T>(
+      Component::state_get(slot, encode_vx_payload(initial)),
+      initial
     )
   }
 
@@ -651,40 +627,15 @@ pub fn state_handle({
   initial: StringSlice,
   id: i32 = stable_callsite_id()
 }): Component -> StateHandle<String>
-  state_handle_at(id: id, initial: initial.to_string())
+  state_handle_at<String>(id: id, initial: initial.to_string())
 
-/// Reads a component-local integer state handle.
-pub fn state_handle({
-  initial: i32,
+/// Reads component-local typed state as a `(value, setter)` pair.
+pub fn state<T>({
+  initial: T,
   id: i32 = stable_callsite_id()
-}): Component -> StateHandle<i32>
-  state_handle_at(id: id, initial: initial)
-
-fn state_handle_at({ id: i32, initial: i32 }): Component -> StateHandle<i32>
-  let slot = Component::state_key(id)
-  StateHandle<i32> {
-    id: slot,
-    value: component_i32_state_value(
-      value: Component::state_get(slot, msgpack::make_i32(initial)),
-      fallback: initial
-    )
-  }
-
-/// Reads component-local serialized state as a `(value, setter)` pair.
-pub fn state({
-  initial: MsgPack,
-  id: i32 = stable_callsite_id()
-}): Component -> (MsgPack, fn(MsgPack) -> void)
+}): Component -> (T, fn(T) -> void)
   let handle = state_handle_at(id: id, initial: initial)
-  (handle.value, (value: MsgPack) -> void => handle.set_serialized(value))
-
-/// Reads component-local text state as a `(value, setter)` pair.
-pub fn state({
-  initial: String,
-  id: i32 = stable_callsite_id()
-}): Component -> (String, fn(String) -> void)
-  let handle = state_handle_at(id: id, initial: initial)
-  (handle.value, (value: String) -> void => handle.set(value))
+  (handle.value, (value: T) -> void => handle.set(value))
 
 pub fn state({
   initial: StringSlice,
@@ -693,31 +644,9 @@ pub fn state({
   let handle = state_handle_at(id: id, initial: initial.to_string())
   (handle.value, (value: String) -> void => handle.set(value))
 
-/// Reads component-local integer state as a `(value, setter)` pair.
-pub fn state({
-  initial: i32,
-  id: i32 = stable_callsite_id()
-}): Component -> (i32, fn(i32) -> void)
-  let handle = state_handle_at(id: id, initial: initial)
-  (handle.value, (value: i32) -> void => handle.set(value))
-
-fn component_string_state_value({ value: MsgPack, fallback: String }): () -> String
-  match(msgpack::unpack_string(value))
-    Ok<String> { value }:
-      value
-    Err:
-      fallback
-
-fn component_i32_state_value({ value: MsgPack, fallback: i32 }): () -> i32
-  match(msgpack::unpack_i32(value))
-    Ok<i32> { value }:
-      value
-    Err:
-      fallback
-
 /// Registers a task with the current component instance.
-pub fn task<T>({ key: MsgPack, task: Task<T> }): Component -> Unit
-  Component::task_started(key, task.id)
+pub fn task<Key, T>({ key: Key, task: Task<T> }): Component -> Unit
+  Component::task_started(encode_vx_payload(key), task.id)
   Unit {}
 
 /// Retains a pure Voyd event callback in the host and returns its DOM handler id.
@@ -1007,7 +936,7 @@ pub fn keyed({ key: StringSlice, child: MsgPack }): () -> MsgPack
   keyed(key: key.to_string(), child: child)
 
 pub fn keyed({ key: String, body: fn() -> MsgPack }): Component -> MsgPack
-  Component::state_scope(msgpack::make_string(key))
+  Component::state_scope(encode_vx_payload(key))
   keyed(key: key, child: body())
 
 pub fn keyed({ key: StringSlice, body: fn() -> MsgPack }): Component -> MsgPack
