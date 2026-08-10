@@ -4,9 +4,6 @@
 //! payloads. Messages and fields are encoded as MessagePack maps/arrays.
 
 use std::array::Array
-use std::dict::Dict
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::string::{ String, StringSlice }
 use std::string::type::new_string
@@ -50,19 +47,19 @@ pub obj LogField {
 
 pub type LogFields = Array<LogField>
 
+pub obj LogEvent {
+  api level: String,
+  api message: String,
+  api fields: LogFields
+}
+
 /// Host logging effect used by `std::log`.
 ///
-/// `std::log` converts typed log-level and field values into a MessagePack map
-/// consumed by the host log sink.
+/// `std::log` sends a typed event to the host log sink.
 @effect(id: "voyd.std.log")
 pub eff Log
   /// Emits one structured log event.
-  ///
-  /// `payload` is a map with:
-  /// - `level`: one of `trace|debug|info|warn|error`
-  /// - `message`: log message string
-  /// - `fields`: array of `{ key, value }` entries or null
-  emit(tail, payload: MsgPack) -> void
+  emit(tail, event: LogEvent) -> void
 
 /// Emits a trace-level log message.
 pub fn trace(message: StringSlice): Log -> void
@@ -144,55 +141,29 @@ pub fn error(message: StringSlice, fields: LogFields): Log -> void
 pub fn error(message: String, fields: LogFields): Log -> void
   error(message.as_slice(), fields)
 
-fn log_emit_payload(level: LogLevel, message: StringSlice, fields: Option<LogFields>): () -> MsgPack
-  let ~payload = Dict<String, MsgPack>::init()
-  payload.set("level", log_level_to_msgpack(level))
-  payload.set("message", msgpack::make_string(message))
-  payload.set("fields", log_fields_to_msgpack(fields))
-  msgpack::make_map(payload)
+fn log_emit_payload(level: LogLevel, message: StringSlice, fields: Option<LogFields>): () -> LogEvent
+  LogEvent {
+    level: log_level_name(level),
+    message: message.to_string(),
+    fields: log_fields_or_empty(fields)
+  }
 
-fn log_level_to_msgpack(level: LogLevel): () -> MsgPack
+fn log_level_name(level: LogLevel): () -> String
   level.match(active)
     LogTrace:
-      msgpack::make_string("trace")
+      "trace"
     LogDebug:
-      msgpack::make_string("debug")
+      "debug"
     LogInfo:
-      msgpack::make_string("info")
+      "info"
     LogWarn:
-      msgpack::make_string("warn")
+      "warn"
     LogError:
-      msgpack::make_string("error")
+      "error"
 
-fn log_fields_to_msgpack(fields: Option<LogFields>): () -> MsgPack
+fn log_fields_or_empty(fields: Option<LogFields>): () -> LogFields
   match(fields)
     Some<LogFields> { value: field_values }:
-      let ~encoded = Array<MsgPack>::with_capacity(field_values.len())
-      var index = 0
-      while index < field_values.len():
-        match(field_values.get(index))
-          Some<LogField> { value: field }:
-            encoded.push(log_field_to_msgpack(field))
-          None:
-            void
-        index = index + 1
-      msgpack::make_array(encoded)
+      field_values
     None:
-      msgpack::make_null()
-
-fn log_field_to_msgpack(field: LogField): () -> MsgPack
-  let ~entry = Dict<String, MsgPack>::init()
-  entry.set("key", msgpack::make_string(field.key))
-  entry.set("value", log_field_value_to_msgpack(field.value))
-  msgpack::make_map(entry)
-
-fn log_field_value_to_msgpack(value: LogFieldValue): () -> MsgPack
-  value.match(active)
-    LogString:
-      msgpack::make_string(active.value)
-    LogInt:
-      msgpack::make_i64(active.value)
-    LogFloat:
-      msgpack::make_f64(active.value)
-    LogBool:
-      msgpack::make_bool(active.value)
+      Array<LogField>::init()

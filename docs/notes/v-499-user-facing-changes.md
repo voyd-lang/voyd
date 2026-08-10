@@ -51,6 +51,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - Effect requests and outcomes use framed transport with stable effect and
   operation identity, signature hash, resume kind, and typed payload
   fingerprints. This also covers asynchronous external-package calls.
+- Structured logging sends a typed `LogEvent` DTO. Log fields remain typed
+  until the host adapter receives the event.
 - Retained callback invocations and non-effectful callback completions use
   invocation-scoped frames. Effectful callbacks use the same framed effect
   request/outcome loop.

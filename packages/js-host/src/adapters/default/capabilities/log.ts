@@ -32,7 +32,8 @@ export const logCapabilityDefinition: CapabilityDefinition = {
           if (!key) {
             return acc;
           }
-          acc[key] = readField(entry, "value");
+          const fieldValue = readField(entry, "value");
+          acc[key] = readField(fieldValue, "value") ?? fieldValue;
           return acc;
         }, {});
         const method = (
