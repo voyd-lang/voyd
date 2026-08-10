@@ -5,7 +5,7 @@ import { boxOutcomeValue } from "../outcome-values.js";
 import type { CodegenContext, FunctionContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
-import { ensureMsgPackFunctions } from "./msgpack.js";
+import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 import { unpackMsgPackValueForType } from "./msgpack-values.js";
 import { unpackBoundaryValueFromMsgPack } from "../../boundary/msgpack-codec.js";
 import { hostBoundaryPayloadSupportForType } from "./payload-compatibility.js";
@@ -87,7 +87,7 @@ export const createResumeContinuation = ({
   exportName?: string;
 }): string =>
   stateFor(ctx, RESUME_CONTINUATION_KEY, () => {
-    const msgpack = ensureMsgPackFunctions(ctx);
+    const msgpack = ensureSelectedHostTransportProvider(ctx);
     const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
 
     const name = `${ctx.moduleLabel}__resume_continuation`;
@@ -344,7 +344,7 @@ export const createEndRequestRaw = ({
   exportName?: string;
 }): string =>
   stateFor(ctx, END_REQUEST_RAW_KEY, () => {
-    const msgpack = ensureMsgPackFunctions(ctx);
+    const msgpack = ensureSelectedHostTransportProvider(ctx);
     const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
     const specializedSites = [...ctx.effectsState.contSiteByKey.values()];
     const specializedSiteIds = new Set(

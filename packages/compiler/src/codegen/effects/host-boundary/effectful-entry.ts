@@ -6,7 +6,7 @@ import { coerceValueToType } from "../../structural.js";
 import { wasmTypeFor } from "../../types.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
-import { ensureMsgPackFunctions } from "./msgpack.js";
+import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 import { unpackMsgPackValueForType } from "./msgpack-values.js";
 
 export const createEffectfulEntry = ({
@@ -126,7 +126,7 @@ const buildEffectfulEntryBody = ({
     };
   }
 
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = ensureSelectedHostTransportProvider(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const arrayType = msgpack.unpackArray.resultType;
   const storageType = msgpack.arrayRawStorage.resultType;

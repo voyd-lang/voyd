@@ -7,7 +7,7 @@ import type {
 import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
 import { allocateTempLocal } from "../locals.js";
 import { ensureLinearMemoryExport } from "../memory-exports.js";
-import { ensureMsgPackFunctions } from "../effects/host-boundary/msgpack.js";
+import { ensureSelectedHostTransportProvider } from "../host-transport/selected-provider.js";
 import {
   wasmTypeFor,
   getStructuralTypeInfo,
@@ -100,7 +100,7 @@ export const compileExternalCall = ({
   const importName = ensureExternalFunctionImport({ ctx, ...identity });
   const bufferSizeImport = ensureExternalBufferSizeImport(ctx);
   const bufferErrorImport = ensureExternalBufferErrorImport(ctx);
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = ensureSelectedHostTransportProvider(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const arrayType = msgpack.arrayWithCapacity.resultType;
   const arrayLocal = allocateTempLocal(arrayType, fnCtx);
@@ -423,7 +423,7 @@ const packExternalValue = ({
   fnCtx: FunctionContext;
   label: string;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = ensureSelectedHostTransportProvider(ctx);
   const serializer = findSerializerForType(typeId, ctx);
   if (serializer) {
     if (serializer.formatId !== "msgpack") {
@@ -466,7 +466,7 @@ const unpackExternalValue = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = ensureSelectedHostTransportProvider(ctx);
   const serializer = findSerializerForType(typeId, ctx);
   if (serializer) {
     if (serializer.formatId !== "msgpack") {

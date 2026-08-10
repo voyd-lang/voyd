@@ -1,13 +1,10 @@
 import type binaryen from "binaryen";
 import type { BoundarySchema } from "../boundary/schema.js";
+import { SELECTED_HOST_TRANSPORT_IDENTITY } from "../host-transport/selected-provider.js";
 
 export const EXPORT_ABI_SECTION = "voyd.export_abi";
 export const HOST_ABI_VERSION = 1;
 export const DTO_SCHEMA_ABI_VERSION = 1;
-export const DEFAULT_HOST_TRANSPORT = {
-  id: "voyd.std.msgpack",
-  version: 1,
-} as const;
 
 export type ExportAbiEntry =
   | {
@@ -36,7 +33,7 @@ export const emitExportAbiSection = ({
     version: 2,
     hostAbi: HOST_ABI_VERSION,
     dtoSchemaAbi: DTO_SCHEMA_ABI_VERSION,
-    transport: DEFAULT_HOST_TRANSPORT,
+    transport: SELECTED_HOST_TRANSPORT_IDENTITY,
     exports: sorted,
   });
   const bytes = new TextEncoder().encode(payload);

@@ -25,7 +25,7 @@ import {
   wasmTypeFor,
 } from "../types.js";
 import { ensureLinearMemoryExport } from "../memory-exports.js";
-import { ensureMsgPackFunctions } from "../effects/host-boundary/msgpack.js";
+import { ensureSelectedHostTransportProvider } from "../host-transport/selected-provider.js";
 import { deriveBoundarySchema } from "../boundary/schema.js";
 import {
   packBoundaryValueAsMsgPack,
@@ -85,7 +85,7 @@ export const emitSerializedExportWrapper = ({
     returnSerializerOverride,
   });
 
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = ensureSelectedHostTransportProvider(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const arrayType = msgpack.arrayWithCapacity.resultType;
   const storageType = msgpack.arrayRawStorage.resultType;
@@ -278,7 +278,7 @@ const buildPayloadEnvelopeParamExpr = ({
   fnCtx: FunctionContext;
   label: string;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = ensureSelectedHostTransportProvider(ctx);
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo) {
     throw new Error(
@@ -636,7 +636,7 @@ const packSerializedResultValue = ({
   typeAdapter?: SerializedExportTypeAdapter;
   serializerOverride?: SerializerMetadata;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = ensureSelectedHostTransportProvider(ctx);
   const serializer = serializerOverride ?? findSerializerForType(typeId, ctx);
   if (serializer) {
     if (serializer.formatId !== "msgpack") {

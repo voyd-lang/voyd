@@ -19,7 +19,7 @@ import {
 import { packBoundaryValueAsMsgPack } from "../../boundary/msgpack-codec.js";
 import { EFFECT_RESULT_STATUS } from "./constants.js";
 import { buildEffectRequestMsgPack } from "./effect-request-msgpack.js";
-import { ensureMsgPackFunctions } from "./msgpack.js";
+import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
 import { findSerializerFormatForType } from "../../serializer.js";
@@ -38,7 +38,7 @@ export const createHandleOutcomeDynamic = ({
   exportName?: string;
 }): string =>
   stateFor(ctx, HANDLE_OUTCOME_DYNAMIC_KEY, () => {
-    const msgpack = ensureMsgPackFunctions(ctx);
+    const msgpack = ensureSelectedHostTransportProvider(ctx);
     const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
 
     const name = `${ctx.moduleLabel}__handle_outcome_dynamic`;
