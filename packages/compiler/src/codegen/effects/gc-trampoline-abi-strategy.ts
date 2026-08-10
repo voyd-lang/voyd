@@ -1,7 +1,7 @@
 import binaryen from "binaryen";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
-import { MSGPACK_HOST_TRANSPORT_CONTRACT_IDS } from "../../compiler-contracts/index.js";
+import { SELECTED_HOST_TRANSPORT_CONTRACT_IDS } from "../../compiler-contracts/index.js";
 import { isPackageVisible } from "../../semantics/hir/index.js";
 import {
   collectEffectOperationSignatures,
@@ -137,14 +137,12 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
     return;
   }
 
-  const hostBoundary = entryCtx.options.effectsHostBoundary ?? "msgpack";
+  const hostBoundary = entryCtx.options.effectsHostBoundary ?? "selected";
   if (hostBoundary === "off") {
     return;
   }
 
-  const missingContracts = Object.values(
-    MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
-  ).filter(
+  const missingContracts = SELECTED_HOST_TRANSPORT_CONTRACT_IDS.filter(
     (contractId) =>
       entryCtx.program.symbols.resolveCompilerFunctionContract(contractId) ===
       undefined,
@@ -155,7 +153,7 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
         code: "CG0001",
         params: {
           kind: "codegen-error",
-          message: `effectful exports require host-transport-msgpack compiler contracts; missing: ${missingContracts.join(
+          message: `effectful exports require the selected host-transport compiler contracts; missing: ${missingContracts.join(
             ", ",
           )} (provide a compatible std root or disable the host boundary via effectsHostBoundary: "off")`,
         },

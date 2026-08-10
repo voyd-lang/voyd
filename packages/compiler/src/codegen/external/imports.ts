@@ -106,14 +106,14 @@ export const compileExternalCall = ({
   const importName = ensureExternalFunctionImport({ ctx, ...identity });
   const bufferSizeImport = ensureExternalBufferSizeImport(ctx);
   const bufferErrorImport = ensureExternalBufferErrorImport(ctx);
-  const msgpack = ensureSelectedHostTransportProvider(ctx);
-  const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
-  const arrayType = msgpack.arrayWithCapacity.resultType;
-  const storageType = msgpack.arrayRawStorage.resultType;
+  const provider = ensureSelectedHostTransportProvider(ctx);
+  const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
+  const arrayType = provider.arrayWithCapacity.resultType;
+  const storageType = provider.arrayRawStorage.resultType;
   const capacityLocal = allocateTempLocal(binaryen.i32, fnCtx);
   const encodedLengthLocal = allocateTempLocal(binaryen.i32, fnCtx);
   const writtenLocal = allocateTempLocal(binaryen.i32, fnCtx);
-  const decodedLocal = allocateTempLocal(msgPackType, fnCtx);
+  const decodedLocal = allocateTempLocal(providerValueType, fnCtx);
   const frameArrayLocal = allocateTempLocal(arrayType, fnCtx);
   const frameStorageLocal = allocateTempLocal(storageType, fnCtx);
   const outcomeArrayLocal = allocateTempLocal(arrayType, fnCtx);
@@ -130,7 +130,7 @@ export const compileExternalCall = ({
       ctx.mod,
       ctx.mod.local.get(frameStorageLocal.index, storageType),
       ctx.mod.i32.const(index),
-      msgPackType,
+      providerValueType,
       false,
     );
   const outcomeField = (index: number) =>
@@ -138,7 +138,7 @@ export const compileExternalCall = ({
       ctx.mod,
       ctx.mod.local.get(outcomeStorageLocal.index, storageType),
       ctx.mod.i32.const(index),
-      msgPackType,
+      providerValueType,
       false,
     );
   const typedPayloadField = (index: number) =>
@@ -146,7 +146,7 @@ export const compileExternalCall = ({
       ctx.mod,
       ctx.mod.local.get(typedPayloadStorageLocal.index, storageType),
       ctx.mod.i32.const(index),
-      msgPackType,
+      providerValueType,
       false,
     );
   const invocationFrame = makeSelectedExternalInvocation({
@@ -170,7 +170,7 @@ export const compileExternalCall = ({
     }),
     ctx,
     fnCtx,
-    provider: msgpack,
+    provider,
   });
 
   const setup: binaryen.ExpressionRef[] = [
@@ -181,7 +181,7 @@ export const compileExternalCall = ({
     ctx.mod.local.set(
       encodedLengthLocal.index,
       ctx.mod.call(
-        msgpack.encodeValue.wasmName,
+        provider.encodeValue.wasmName,
         [invocationFrame, ctx.mod.i32.const(0), capacityRef()],
         binaryen.i32,
       ),
@@ -217,23 +217,23 @@ export const compileExternalCall = ({
     ctx.mod.local.set(
       decodedLocal.index,
       ctx.mod.call(
-        msgpack.decodeValue.wasmName,
+        provider.decodeValue.wasmName,
         [capacityRef(), writtenRef()],
-        msgPackType,
+        providerValueType,
       ),
     ),
     ctx.mod.local.set(
       frameArrayLocal.index,
       ctx.mod.call(
-        msgpack.unpackArray.wasmName,
-        [ctx.mod.local.get(decodedLocal.index, msgPackType)],
+        provider.unpackArray.wasmName,
+        [ctx.mod.local.get(decodedLocal.index, providerValueType)],
         arrayType,
       ),
     ),
     ctx.mod.local.set(
       frameStorageLocal.index,
       ctx.mod.call(
-        msgpack.arrayRawStorage.wasmName,
+        provider.arrayRawStorage.wasmName,
         [ctx.mod.local.get(frameArrayLocal.index, arrayType)],
         storageType,
       ),
@@ -242,7 +242,7 @@ export const compileExternalCall = ({
       ctx.mod.i32.or(
         ctx.mod.i32.ne(
           ctx.mod.call(
-            msgpack.unpackI32.wasmName,
+            provider.unpackI32.wasmName,
             [frameField(0)],
             binaryen.i32,
           ),
@@ -250,7 +250,7 @@ export const compileExternalCall = ({
         ),
         ctx.mod.i32.ne(
           ctx.mod.call(
-            msgpack.unpackI32.wasmName,
+            provider.unpackI32.wasmName,
             [frameField(1)],
             binaryen.i32,
           ),
@@ -262,12 +262,12 @@ export const compileExternalCall = ({
     ),
     ctx.mod.local.set(
       outcomeArrayLocal.index,
-      ctx.mod.call(msgpack.unpackArray.wasmName, [frameField(4)], arrayType),
+      ctx.mod.call(provider.unpackArray.wasmName, [frameField(4)], arrayType),
     ),
     ctx.mod.local.set(
       outcomeStorageLocal.index,
       ctx.mod.call(
-        msgpack.arrayRawStorage.wasmName,
+        provider.arrayRawStorage.wasmName,
         [ctx.mod.local.get(outcomeArrayLocal.index, arrayType)],
         storageType,
       ),
@@ -275,7 +275,7 @@ export const compileExternalCall = ({
     ctx.mod.if(
       ctx.mod.i32.ne(
         ctx.mod.call(
-          msgpack.unpackI32.wasmName,
+          provider.unpackI32.wasmName,
           [outcomeField(0)],
           binaryen.i32,
         ),
@@ -286,12 +286,12 @@ export const compileExternalCall = ({
     ),
     ctx.mod.local.set(
       typedPayloadArrayLocal.index,
-      ctx.mod.call(msgpack.unpackArray.wasmName, [outcomeField(1)], arrayType),
+      ctx.mod.call(provider.unpackArray.wasmName, [outcomeField(1)], arrayType),
     ),
     ctx.mod.local.set(
       typedPayloadStorageLocal.index,
       ctx.mod.call(
-        msgpack.arrayRawStorage.wasmName,
+        provider.arrayRawStorage.wasmName,
         [ctx.mod.local.get(typedPayloadArrayLocal.index, arrayType)],
         storageType,
       ),
@@ -543,8 +543,8 @@ const packExternalValue = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureSelectedHostTransportProvider(ctx);
-  return writeDtoValueToTree({ value, schema, ctx, fnCtx, provider: msgpack });
+  const provider = ensureSelectedHostTransportProvider(ctx);
+  return writeDtoValueToTree({ value, schema, ctx, fnCtx, provider });
 };
 
 const unpackExternalValue = ({
@@ -558,8 +558,8 @@ const unpackExternalValue = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureSelectedHostTransportProvider(ctx);
-  return readDtoValueFromTree({ value, schema, ctx, fnCtx, provider: msgpack });
+  const provider = ensureSelectedHostTransportProvider(ctx);
+  return readDtoValueFromTree({ value, schema, ctx, fnCtx, provider });
 };
 
 const trapIfNegative = (

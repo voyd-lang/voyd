@@ -1876,7 +1876,10 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
       source: rawHttpServerSource,
       maxChunkBytes: Math.min(
         16_384,
-        maxTransportSafeHttpServerChunkBytes({ effectBufferSize })
+        maxTransportSafeHttpServerChunkBytes({
+          effectBufferSize,
+          encodedPayloadSize: host.encodedPayloadSize,
+        })
       ),
     });
     if (!httpServerSource.isAvailable) {

@@ -10,7 +10,7 @@ import type {
 } from "../../semantics/ids.js";
 import type { CodegenOptions } from "../../codegen/context.js";
 import {
-  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
+  SELECTED_HOST_TRANSPORT_CONTRACT_IDS,
   DTO_DATA_CONTRACT_IDS,
   type CompilerFunctionContractId,
 } from "../../compiler-contracts/index.js";
@@ -29,7 +29,7 @@ import {
   resolveTargetsForCaller,
 } from "./shared.js";
 
-export const MSGPACK_HOST_TRANSPORT_DEPENDENT_INTRINSICS = new Set([
+export const HOST_TRANSPORT_DEPENDENT_INTRINSICS = new Set([
   "__retain_callback",
   "__boundary_retain_callback",
   "__render_retain_callback",
@@ -449,10 +449,8 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       enqueueKnownFunctionInstances(ctx.ir.baseProgram.symbols.refOf(symbolId));
     };
 
-    const enqueueMsgPackProviderFunctions = (): void => {
-      Object.values(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS).forEach(
-        enqueueCompilerFunctionContract,
-      );
+    const enqueueSelectedProviderFunctions = (): void => {
+      SELECTED_HOST_TRANSPORT_CONTRACT_IDS.forEach(enqueueCompilerFunctionContract);
     };
 
     const enqueueDataDtoFunctions = (): void => {
@@ -513,7 +511,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       moduleId: string;
       symbol: SymbolId;
     }): void => {
-      enqueueMsgPackProviderFunctions();
+      enqueueSelectedProviderFunctions();
       exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
         typeIds.forEach((typeId) => {
           try {
@@ -574,21 +572,14 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       moduleId: string;
       symbol: SymbolId;
     }): boolean => {
-      const resolved = resolveImportedSymbol({
-        moduleId,
-        symbol,
-        ir: ctx.ir,
-      });
+      const resolved = resolveImportedSymbol({ moduleId, symbol, ir: ctx.ir });
       const signature = ctx.ir.baseProgram.functions.getSignature(
         resolved.moduleId,
         resolved.symbol,
       );
       return Boolean(
         signature &&
-        !isPureSignature({
-          effectRow: signature.effectRow,
-          ir: ctx.ir,
-        }),
+        !isPureSignature({ effectRow: signature.effectRow, ir: ctx.ir }),
       );
     };
 
@@ -717,9 +708,9 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
                   ctx.ir.baseProgram.symbols.getIntrinsicName(calleeId);
                 if (
                   intrinsicName &&
-                  MSGPACK_HOST_TRANSPORT_DEPENDENT_INTRINSICS.has(intrinsicName)
+                  HOST_TRANSPORT_DEPENDENT_INTRINSICS.has(intrinsicName)
                 ) {
-                  enqueueMsgPackProviderFunctions();
+                  enqueueSelectedProviderFunctions();
                 }
                 if (intrinsicName && DATA_DTO_INTRINSICS.has(intrinsicName)) {
                   enqueueDataDtoFunctions();
@@ -794,7 +785,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
             symbol: entry.symbol,
           })
         ) {
-          enqueueMsgPackProviderFunctions();
+          enqueueSelectedProviderFunctions();
         }
         if (
           !ctx.ir.options.testMode &&

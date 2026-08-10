@@ -46,6 +46,7 @@ type BuildGraphOptions = {
   host: ModuleHost;
   roots: ModuleRoots;
   includeTests?: boolean;
+  includeSelectedHostTransport?: boolean;
 };
 
 type PendingDependency = {
@@ -65,6 +66,20 @@ const IMPLICIT_PRELUDE_USE_DECL = (() => {
   const entry = ast.rest[0];
   if (!isForm(entry)) {
     throw new Error("failed to parse implicit prelude use declaration");
+  }
+  return entry;
+})();
+const IMPLICIT_HOST_TRANSPORT_USE_DECL = (() => {
+  const ast = parseBase(
+    "use std::msgpack::self as __voyd_host_transport_provider",
+    "<implicit-host-transport>",
+  );
+  if (!formCallsInternal(ast, "ast")) {
+    throw new Error("failed to parse implicit host transport import");
+  }
+  const entry = ast.rest[0];
+  if (!isForm(entry)) {
+    throw new Error("failed to parse implicit host transport use declaration");
   }
   return entry;
 })();
@@ -158,6 +173,7 @@ export const buildModuleGraph = async ({
   host,
   roots,
   includeTests,
+  includeSelectedHostTransport = false,
 }: BuildGraphOptions): Promise<ModuleGraph> => {
   const modules = new Map<string, ModuleNode>();
   const modulesByPath = new Map<string, ModuleNode>();
@@ -389,6 +405,7 @@ export const buildModuleGraph = async ({
     roots,
     includeTests: includeTests === true,
     hasStdPreludeModule,
+    includeSelectedHostTransport,
   });
 
   addModuleTree(entryModule, modules, modulesByPath, (module) => {
@@ -1010,6 +1027,7 @@ const loadFileModule = async ({
   roots,
   includeTests,
   hasStdPreludeModule,
+  includeSelectedHostTransport = false,
 }: {
   filePath: string;
   modulePath: ModulePath;
@@ -1017,6 +1035,7 @@ const loadFileModule = async ({
   roots: ModuleRoots;
   includeTests: boolean;
   hasStdPreludeModule: boolean;
+  includeSelectedHostTransport?: boolean;
 }): Promise<LoadedModule> => {
   const moduleStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   incrementCompilerPerfCounter(
@@ -1077,6 +1096,21 @@ const loadFileModule = async ({
     hasStdPreludeModule,
     noPrelude,
   });
+  if (
+    includeSelectedHostTransport &&
+    modulePath.namespace !== "std" &&
+    formCallsInternal(ast, "ast")
+  ) {
+    const astHead = ast.first ?? new InternalIdentifierAtom("ast");
+    ast = new Form({
+      location: ast.location?.clone(),
+      elements: [
+        astHead,
+        IMPLICIT_HOST_TRANSPORT_USE_DECL.clone(),
+        ...ast.rest,
+      ],
+    }).toCall();
+  }
   const packageRootStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   const sourcePackageRoot = await discoverSourcePackageRoot({
     modulePath,

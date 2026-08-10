@@ -392,7 +392,7 @@ const buildRetainedCallbackImportModules = ({
             instance,
             name: callbackExportName,
           });
-          const msgpackMemory = requireExportedMemory({
+          const transportMemory = requireExportedMemory({
             instance,
             name: LINEAR_MEMORY_EXPORT,
           });
@@ -412,14 +412,14 @@ const buildRetainedCallbackImportModules = ({
             throw new Error("retained callback payload exceeds buffer size");
           }
           ensureMemoryCapacity({
-            memory: msgpackMemory,
+            memory: transportMemory,
             requiredBytes: bufferSize * 2,
             label: LINEAR_MEMORY_EXPORT,
           });
           const inPtr = 0;
           const outPtr = bufferSize;
           new Uint8Array(
-            msgpackMemory.buffer,
+            transportMemory.buffer,
             inPtr,
             encodedPayload.length,
           ).set(encodedPayload);
@@ -459,7 +459,7 @@ const buildRetainedCallbackImportModules = ({
           if (written > bufferSize) {
             throw new Error("retained callback payload exceeds buffer size");
           }
-          const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
+          const bytes = new Uint8Array(transportMemory.buffer, outPtr, written);
           const completion = transport.decodeFrame(bytes);
           if (
             completion.kind !== "callback-completion" ||
@@ -1068,12 +1068,12 @@ export const createVoydHost = async ({
   ): T => {
     const wrapperName = abi?.wrapperName ?? entryName;
     const entry = requireExportedFunction({ instance, name: wrapperName });
-    const msgpackMemory = requireExportedMemory({
+    const transportMemory = requireExportedMemory({
       instance,
       name: LINEAR_MEMORY_EXPORT,
     });
     ensureMemoryCapacity({
-      memory: msgpackMemory,
+      memory: transportMemory,
       requiredBytes: bufferSize * 2,
       label: LINEAR_MEMORY_EXPORT,
     });
@@ -1101,7 +1101,7 @@ export const createVoydHost = async ({
     }
     const inPtr = 0;
     const outPtr = bufferSize;
-    new Uint8Array(msgpackMemory.buffer, inPtr, encodedArgs.length).set(
+    new Uint8Array(transportMemory.buffer, inPtr, encodedArgs.length).set(
       encodedArgs,
     );
     let written: number;
@@ -1131,7 +1131,7 @@ export const createVoydHost = async ({
         `serialized export ${entryName} result exceeds buffer size (${written} > ${bufferSize}); increase createVoydHost({ bufferSize }) or return a smaller payload`,
       );
     }
-    const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
+    const bytes = new Uint8Array(transportMemory.buffer, outPtr, written);
     const completion = transport.decodeFrame(bytes);
     if (
       completion.kind !== "export-completion" ||
@@ -1259,13 +1259,13 @@ export const createVoydHost = async ({
         return { kind: "export", id: abi.id } as const;
       })();
 
-    const msgpackMemory = requireExportedMemory({
+    const transportMemory = requireExportedMemory({
       instance,
       name: LINEAR_MEMORY_EXPORT,
     });
     const bufferPtr = acquireEffectRunBufferPtr();
     ensureMemoryCapacity({
-      memory: msgpackMemory,
+      memory: transportMemory,
       requiredBytes: bufferPtr + bufferSize,
       label: LINEAR_MEMORY_EXPORT,
     });
@@ -1385,7 +1385,7 @@ export const createVoydHost = async ({
               resumeEffectful,
               table: parsedTable,
               handlersByOpIndex,
-              msgpackMemory,
+              transportMemory,
               bufferPtr,
               bufferSize,
               transport,
@@ -1527,7 +1527,7 @@ export const createVoydHost = async ({
       if (encoded.length > bufferSize) {
         throw new Error("resume payload exceeds buffer size");
       }
-      new Uint8Array(msgpackMemory.buffer, bufferPtr, encoded.length).set(
+      new Uint8Array(transportMemory.buffer, bufferPtr, encoded.length).set(
         encoded,
       );
       return encoded.length;
@@ -1574,7 +1574,7 @@ export const createVoydHost = async ({
       }
       try {
         return decodeHostCompletion({
-          memory: msgpackMemory,
+          memory: transportMemory,
           ptr: bufferPtr,
           length: payloadLength,
           transport,
@@ -2375,7 +2375,7 @@ export const createVoydHost = async ({
             const payloadLength = effectLen(effectResult) as number;
             const request = effectCont(effectResult);
             const frame = transport.decodeFrame(
-              new Uint8Array(msgpackMemory.buffer, bufferPtr, payloadLength),
+              new Uint8Array(transportMemory.buffer, bufferPtr, payloadLength),
             );
             if (frame.kind !== "effect-request") {
               throw new Error(
@@ -2682,7 +2682,7 @@ export const createVoydHost = async ({
       instance,
       name: rawCallbackExportName,
     });
-    const msgpackMemory = requireExportedMemory({
+    const transportMemory = requireExportedMemory({
       instance,
       name: LINEAR_MEMORY_EXPORT,
     });
@@ -2706,12 +2706,12 @@ export const createVoydHost = async ({
       [],
       ({ bufferPtr, bufferSize }) => {
         ensureMemoryCapacity({
-          memory: msgpackMemory,
+          memory: transportMemory,
           requiredBytes: bufferPtr + bufferSize,
           label: LINEAR_MEMORY_EXPORT,
         });
         new Uint8Array(
-          msgpackMemory.buffer,
+          transportMemory.buffer,
           bufferPtr,
           encodedPayload.length,
         ).set(encodedPayload);
@@ -2798,7 +2798,11 @@ export const createVoydHost = async ({
       }),
     registerDefaultAdapters: (options = {}) =>
       registerDefaultHostAdapters({
-        host: { table, registerHandler },
+        host: {
+          table,
+          registerHandler,
+          encodedPayloadSize: transport.encodedPayloadSize,
+        },
         options: {
           ...options,
           effectBufferSize: options.effectBufferSize ?? bufferSize,

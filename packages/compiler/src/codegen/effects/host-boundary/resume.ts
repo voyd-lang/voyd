@@ -14,7 +14,7 @@ import type { CodegenContext, FunctionContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
 import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
-import { unpackMsgPackValueForType } from "./msgpack-values.js";
+import { readProviderValueForType } from "./provider-values.js";
 import { readDtoValueFromTree } from "../../boundary/dto-tree-codec.js";
 import { hostBoundaryPayloadSupportForType } from "./payload-compatibility.js";
 import { stateFor } from "./state.js";
@@ -103,10 +103,10 @@ export const createResumeContinuation = ({
   exportName?: string;
 }): string =>
   stateFor(ctx, RESUME_CONTINUATION_KEY, () => {
-    const msgpack = ensureSelectedHostTransportProvider(ctx);
-    const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
-    const arrayType = msgpack.unpackArray.resultType;
-    const storageType = msgpack.arrayRawStorage.resultType;
+    const provider = ensureSelectedHostTransportProvider(ctx);
+    const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
+    const arrayType = provider.unpackArray.resultType;
+    const storageType = provider.arrayRawStorage.resultType;
 
     const name = `${ctx.moduleLabel}__resume_continuation`;
     const params = binaryen.createType([
@@ -117,7 +117,7 @@ export const createResumeContinuation = ({
     const locals: binaryen.Type[] = [
       runtime.tailGuardType,
       runtime.continuationType,
-      msgPackType,
+      providerValueType,
       arrayType,
       storageType,
       arrayType,
@@ -157,7 +157,7 @@ export const createResumeContinuation = ({
         ctx.mod,
         ctx.mod.local.get(frameStorageLocal, storageType),
         ctx.mod.i32.const(index),
-        msgPackType,
+        providerValueType,
         false,
       );
     const outcomeField = (index: number): binaryen.ExpressionRef =>
@@ -165,7 +165,7 @@ export const createResumeContinuation = ({
         ctx.mod,
         ctx.mod.local.get(outcomeStorageLocal, storageType),
         ctx.mod.i32.const(index),
-        msgPackType,
+        providerValueType,
         false,
       );
     const typedPayloadField = (index: number): binaryen.ExpressionRef =>
@@ -173,7 +173,7 @@ export const createResumeContinuation = ({
         ctx.mod,
         ctx.mod.local.get(typedPayloadStorageLocal, storageType),
         ctx.mod.i32.const(index),
-        msgPackType,
+        providerValueType,
         false,
       );
     const guardInit = ctx.mod.if(
@@ -216,16 +216,16 @@ export const createResumeContinuation = ({
           ? ctx.mod.nop()
           : sig.externalBoundary
             ? readDtoValueFromTree({
-                value: ctx.mod.local.get(decodedLocal, msgPackType),
+                value: ctx.mod.local.get(decodedLocal, providerValueType),
                 schema: sig.externalBoundary.result,
                 ctx,
                 fnCtx: scratch,
-                provider: msgpack,
+                provider: provider,
               })
-            : unpackMsgPackValueForType({
-                value: ctx.mod.local.get(decodedLocal, msgPackType),
+            : readProviderValueForType({
+                value: ctx.mod.local.get(decodedLocal, providerValueType),
                 typeId: sig.returnTypeId,
-                msgpack,
+                provider: provider,
                 ctx,
                 fnCtx: scratch,
                 label: sig.label,
@@ -273,26 +273,26 @@ export const createResumeContinuation = ({
         ctx.mod.local.set(
           decodedLocal,
           ctx.mod.call(
-            msgpack.decodeValue.wasmName,
+            provider.decodeValue.wasmName,
             [
               ctx.mod.local.get(bufPtrLocal, binaryen.i32),
               ctx.mod.local.get(resumeLenLocal, binaryen.i32),
             ],
-            msgPackType,
+            providerValueType,
           ),
         ),
         ctx.mod.local.set(
           frameArrayLocal,
           ctx.mod.call(
-            msgpack.unpackArray.wasmName,
-            [ctx.mod.local.get(decodedLocal, msgPackType)],
+            provider.unpackArray.wasmName,
+            [ctx.mod.local.get(decodedLocal, providerValueType)],
             arrayType,
           ),
         ),
         ctx.mod.local.set(
           frameStorageLocal,
           ctx.mod.call(
-            msgpack.arrayRawStorage.wasmName,
+            provider.arrayRawStorage.wasmName,
             [ctx.mod.local.get(frameArrayLocal, arrayType)],
             storageType,
           ),
@@ -302,7 +302,7 @@ export const createResumeContinuation = ({
             ctx.mod.i32.or(
               ctx.mod.i32.ne(
                 ctx.mod.call(
-                  msgpack.unpackI32.wasmName,
+                  provider.unpackI32.wasmName,
                   [frameField(0)],
                   binaryen.i32,
                 ),
@@ -310,7 +310,7 @@ export const createResumeContinuation = ({
               ),
               ctx.mod.i32.ne(
                 ctx.mod.call(
-                  msgpack.unpackI32.wasmName,
+                  provider.unpackI32.wasmName,
                   [frameField(1)],
                   binaryen.i32,
                 ),
@@ -319,7 +319,7 @@ export const createResumeContinuation = ({
             ),
             ctx.mod.i32.ne(
               ctx.mod.call(
-                msgpack.unpackI32.wasmName,
+                provider.unpackI32.wasmName,
                 [frameField(2)],
                 binaryen.i32,
               ),
@@ -332,7 +332,7 @@ export const createResumeContinuation = ({
         ctx.mod.local.set(
           outcomeArrayLocal,
           ctx.mod.call(
-            msgpack.unpackArray.wasmName,
+            provider.unpackArray.wasmName,
             [frameField(3)],
             arrayType,
           ),
@@ -340,7 +340,7 @@ export const createResumeContinuation = ({
         ctx.mod.local.set(
           outcomeStorageLocal,
           ctx.mod.call(
-            msgpack.arrayRawStorage.wasmName,
+            provider.arrayRawStorage.wasmName,
             [ctx.mod.local.get(outcomeArrayLocal, arrayType)],
             storageType,
           ),
@@ -348,7 +348,7 @@ export const createResumeContinuation = ({
         ctx.mod.if(
           ctx.mod.i32.ne(
             ctx.mod.call(
-              msgpack.unpackI32.wasmName,
+              provider.unpackI32.wasmName,
               [outcomeField(0)],
               binaryen.i32,
             ),
@@ -360,7 +360,7 @@ export const createResumeContinuation = ({
         ctx.mod.local.set(
           typedPayloadArrayLocal,
           ctx.mod.call(
-            msgpack.unpackArray.wasmName,
+            provider.unpackArray.wasmName,
             [outcomeField(1)],
             arrayType,
           ),
@@ -368,7 +368,7 @@ export const createResumeContinuation = ({
         ctx.mod.local.set(
           typedPayloadStorageLocal,
           ctx.mod.call(
-            msgpack.arrayRawStorage.wasmName,
+            provider.arrayRawStorage.wasmName,
             [ctx.mod.local.get(typedPayloadArrayLocal, arrayType)],
             storageType,
           ),
@@ -506,10 +506,10 @@ export const createEndRequestRaw = ({
   exportName?: string;
 }): string =>
   stateFor(ctx, END_REQUEST_RAW_KEY, () => {
-    const msgpack = ensureSelectedHostTransportProvider(ctx);
-    const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
-    const arrayType = msgpack.unpackArray.resultType;
-    const storageType = msgpack.arrayRawStorage.resultType;
+    const provider = ensureSelectedHostTransportProvider(ctx);
+    const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
+    const arrayType = provider.unpackArray.resultType;
+    const storageType = provider.arrayRawStorage.resultType;
     const specializedSites = [...ctx.effectsState.contSiteByKey.values()];
     const specializedSiteIds = new Set(
       specializedSites.map((site) => site.siteId),
@@ -554,7 +554,7 @@ export const createEndRequestRaw = ({
       binaryen.i32,
     ]);
     const locals: binaryen.Type[] = [
-      msgPackType,
+      providerValueType,
       arrayType,
       storageType,
       arrayType,
@@ -592,13 +592,13 @@ export const createEndRequestRaw = ({
       );
 
     const decodedValue = (): binaryen.ExpressionRef =>
-      ctx.mod.local.get(decodedLocal, msgPackType);
+      ctx.mod.local.get(decodedLocal, providerValueType);
     const frameField = (index: number): binaryen.ExpressionRef =>
       arrayGet(
         ctx.mod,
         ctx.mod.local.get(frameStorageLocal, storageType),
         ctx.mod.i32.const(index),
-        msgPackType,
+        providerValueType,
         false,
       );
     const outcomeField = (index: number): binaryen.ExpressionRef =>
@@ -606,7 +606,7 @@ export const createEndRequestRaw = ({
         ctx.mod,
         ctx.mod.local.get(outcomeStorageLocal, storageType),
         ctx.mod.i32.const(index),
-        msgPackType,
+        providerValueType,
         false,
       );
     const typedPayloadField = (index: number): binaryen.ExpressionRef =>
@@ -614,7 +614,7 @@ export const createEndRequestRaw = ({
         ctx.mod,
         ctx.mod.local.get(typedPayloadStorageLocal, storageType),
         ctx.mod.i32.const(index),
-        msgPackType,
+        providerValueType,
         false,
       );
 
@@ -632,10 +632,10 @@ export const createEndRequestRaw = ({
         returnType === binaryen.none
           ? ctx.mod.ref.null(binaryen.eqref)
           : boxOutcomeValue({
-              value: unpackMsgPackValueForType({
+              value: readProviderValueForType({
                 value: decodedValue(),
                 typeId: siteInfo.typeId,
-                msgpack,
+                provider: provider,
                 ctx,
                 fnCtx: scratch,
                 label: `end_request_raw(site ${siteInfo.siteOrder})`,
@@ -666,12 +666,12 @@ export const createEndRequestRaw = ({
                     schema: sig.externalBoundary.result,
                     ctx,
                     fnCtx: scratch,
-                    provider: msgpack,
+                    provider: provider,
                   })
-                : unpackMsgPackValueForType({
+                : readProviderValueForType({
                     value: decodedValue(),
                     typeId: sig.returnTypeId,
-                    msgpack,
+                    provider: provider,
                     ctx,
                     fnCtx: scratch,
                     label: sig.label,
@@ -696,26 +696,26 @@ export const createEndRequestRaw = ({
         ctx.mod.local.set(
           decodedLocal,
           ctx.mod.call(
-            msgpack.decodeValue.wasmName,
+            provider.decodeValue.wasmName,
             [
               ctx.mod.local.get(bufPtrLocal, binaryen.i32),
               ctx.mod.local.get(resumeLenLocal, binaryen.i32),
             ],
-            msgPackType,
+            providerValueType,
           ),
         ),
         ctx.mod.local.set(
           frameArrayLocal,
           ctx.mod.call(
-            msgpack.unpackArray.wasmName,
-            [ctx.mod.local.get(decodedLocal, msgPackType)],
+            provider.unpackArray.wasmName,
+            [ctx.mod.local.get(decodedLocal, providerValueType)],
             arrayType,
           ),
         ),
         ctx.mod.local.set(
           frameStorageLocal,
           ctx.mod.call(
-            msgpack.arrayRawStorage.wasmName,
+            provider.arrayRawStorage.wasmName,
             [ctx.mod.local.get(frameArrayLocal, arrayType)],
             storageType,
           ),
@@ -725,7 +725,7 @@ export const createEndRequestRaw = ({
             ctx.mod.i32.or(
               ctx.mod.i32.ne(
                 ctx.mod.call(
-                  msgpack.unpackI32.wasmName,
+                  provider.unpackI32.wasmName,
                   [frameField(0)],
                   binaryen.i32,
                 ),
@@ -733,7 +733,7 @@ export const createEndRequestRaw = ({
               ),
               ctx.mod.i32.ne(
                 ctx.mod.call(
-                  msgpack.unpackI32.wasmName,
+                  provider.unpackI32.wasmName,
                   [frameField(1)],
                   binaryen.i32,
                 ),
@@ -742,7 +742,7 @@ export const createEndRequestRaw = ({
             ),
             ctx.mod.i32.ne(
               ctx.mod.call(
-                msgpack.unpackI32.wasmName,
+                provider.unpackI32.wasmName,
                 [frameField(2)],
                 binaryen.i32,
               ),
@@ -755,7 +755,7 @@ export const createEndRequestRaw = ({
         ctx.mod.local.set(
           outcomeArrayLocal,
           ctx.mod.call(
-            msgpack.unpackArray.wasmName,
+            provider.unpackArray.wasmName,
             [frameField(3)],
             arrayType,
           ),
@@ -763,7 +763,7 @@ export const createEndRequestRaw = ({
         ctx.mod.local.set(
           outcomeStorageLocal,
           ctx.mod.call(
-            msgpack.arrayRawStorage.wasmName,
+            provider.arrayRawStorage.wasmName,
             [ctx.mod.local.get(outcomeArrayLocal, arrayType)],
             storageType,
           ),
@@ -771,7 +771,7 @@ export const createEndRequestRaw = ({
         ctx.mod.if(
           ctx.mod.i32.ne(
             ctx.mod.call(
-              msgpack.unpackI32.wasmName,
+              provider.unpackI32.wasmName,
               [outcomeField(0)],
               binaryen.i32,
             ),
@@ -783,7 +783,7 @@ export const createEndRequestRaw = ({
         ctx.mod.local.set(
           typedPayloadArrayLocal,
           ctx.mod.call(
-            msgpack.unpackArray.wasmName,
+            provider.unpackArray.wasmName,
             [outcomeField(1)],
             arrayType,
           ),
@@ -791,7 +791,7 @@ export const createEndRequestRaw = ({
         ctx.mod.local.set(
           typedPayloadStorageLocal,
           ctx.mod.call(
-            msgpack.arrayRawStorage.wasmName,
+            provider.arrayRawStorage.wasmName,
             [ctx.mod.local.get(typedPayloadArrayLocal, arrayType)],
             storageType,
           ),

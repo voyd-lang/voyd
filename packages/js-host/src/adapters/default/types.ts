@@ -19,6 +19,7 @@ export type EffectOp = HostProtocolTable["ops"][number];
 
 export type DefaultAdapterHost = {
   table: HostProtocolTable;
+  encodedPayloadSize: (value: unknown) => number;
   registerHandler: (
     effectId: string,
     opId: number,

@@ -135,7 +135,7 @@ export const continueEffectLoopStep = async <T = unknown>({
   resumeEffectful,
   table,
   handlersByOpIndex,
-  msgpackMemory,
+  transportMemory,
   bufferPtr,
   bufferSize,
   shouldContinue = () => true,
@@ -152,7 +152,7 @@ export const continueEffectLoopStep = async <T = unknown>({
   resumeEffectful: CallableFunction;
   table: ParsedEffectTable;
   handlersByOpIndex: Array<EffectHandler | undefined>;
-  msgpackMemory: WebAssembly.Memory;
+  transportMemory: WebAssembly.Memory;
   bufferPtr: number;
   bufferSize: number;
   shouldContinue?: () => boolean;
@@ -213,7 +213,7 @@ export const continueEffectLoopStep = async <T = unknown>({
     return {
       kind: "value",
       value: decodeHostCompletion({
-        memory: msgpackMemory,
+        memory: transportMemory,
         ptr: bufferPtr,
         length: payloadLength,
         transport,
@@ -224,7 +224,7 @@ export const continueEffectLoopStep = async <T = unknown>({
 
   if (status === EFFECT_RESULT_STATUS.effect) {
     const frame = transport.decodeFrame(
-      new Uint8Array(msgpackMemory.buffer, bufferPtr, payloadLength),
+      new Uint8Array(transportMemory.buffer, bufferPtr, payloadLength),
     );
     if (frame.kind !== "effect-request") {
       throw new Error("effect boundary returned an incompatible host frame");
@@ -301,7 +301,7 @@ export const continueEffectLoopStep = async <T = unknown>({
     if (encoded.length > bufferSize) {
       throw new Error("resume payload exceeds buffer size");
     }
-    new Uint8Array(msgpackMemory.buffer, bufferPtr, encoded.length).set(
+    new Uint8Array(transportMemory.buffer, bufferPtr, encoded.length).set(
       encoded,
     );
     let resumed: unknown;
@@ -344,7 +344,7 @@ export const runEffectLoop = async <T = unknown>({
   resumeEffectful,
   table,
   handlersByOpIndex,
-  msgpackMemory,
+  transportMemory,
   bufferPtr,
   bufferSize,
   transport,
@@ -357,7 +357,7 @@ export const runEffectLoop = async <T = unknown>({
   resumeEffectful: CallableFunction;
   table: ParsedEffectTable;
   handlersByOpIndex: Array<EffectHandler | undefined>;
-  msgpackMemory: WebAssembly.Memory;
+  transportMemory: WebAssembly.Memory;
   bufferPtr: number;
   bufferSize: number;
   transport: HostTransportAdapter;
@@ -375,7 +375,7 @@ export const runEffectLoop = async <T = unknown>({
       resumeEffectful,
       table,
       handlersByOpIndex,
-      msgpackMemory,
+      transportMemory,
       bufferPtr,
       bufferSize,
       transport,

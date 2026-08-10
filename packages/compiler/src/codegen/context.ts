@@ -64,7 +64,7 @@ export interface CodegenOptions {
   validate?: boolean;
   runtimeDiagnostics?: boolean;
   emitEffectHelpers?: boolean;
-  effectsHostBoundary?: "msgpack" | "off";
+  effectsHostBoundary?: "selected" | "off";
   linearMemoryExport?: "always" | "auto" | "off";
   effectsMemoryExport?: "auto" | "always" | "off";
   boundaryExports?: BoundaryExportsOption;

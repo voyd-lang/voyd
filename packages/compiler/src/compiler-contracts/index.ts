@@ -14,6 +14,7 @@ export {
   type CompilerFunctionContractSignatureSpec,
   type CompilerFunctionContractSpec,
 } from "./function-contracts.js";
+export { SELECTED_HOST_TRANSPORT_CONTRACT_IDS } from "./selected-host-transport.js";
 export {
   validateMsgpackHostTransportFunctionContracts,
   validateDtoDataFunctionContracts,

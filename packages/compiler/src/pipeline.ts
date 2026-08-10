@@ -25,4 +25,13 @@ export const loadModuleGraph = async (
 export const compileProgram = (
   options: CompileProgramOptions,
 ): Promise<CompileProgramResult> =>
-  compileProgramWithLoader(options, loadModuleGraph);
+  compileProgramWithLoader(options, (loadOptions) =>
+    buildModuleGraph({
+      entryPath: loadOptions.entryPath,
+      host: loadOptions.host ?? createFsModuleHost(),
+      roots: loadOptions.roots,
+      includeTests: loadOptions.includeTests,
+      includeSelectedHostTransport:
+        options.codegenOptions?.effectsHostBoundary !== "off",
+    }),
+  );

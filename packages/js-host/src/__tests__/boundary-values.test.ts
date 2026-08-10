@@ -1,9 +1,33 @@
 import { describe, expect, it } from "vitest";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { decodeBoundaryArgs } from "../boundary-values.js";
 import { resolveHostTransport } from "../protocol/host-transport.js";
 import type { HostFrame } from "../protocol/host-frame.js";
 import { msgPackHostTransport } from "../transports/msgpack.js";
 import { encode } from "@msgpack/msgpack";
+
+const SOURCE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+const genericRuntimeFiles = (root: string): string[] =>
+  readdirSync(root).flatMap((entry) => {
+    if (root === SOURCE_ROOT && ["transports", "__tests__"].includes(entry)) {
+      return [];
+    }
+    const path = join(root, entry);
+    if (statSync(path).isDirectory()) {
+      return genericRuntimeFiles(path);
+    }
+    if (
+      !path.endsWith(".ts") ||
+      path.endsWith(".test.ts") ||
+      path === resolve(SOURCE_ROOT, "index.ts")
+    ) {
+      return [];
+    }
+    return [path];
+  });
 
 describe("boundary DTO decoding", () => {
   it("restores adapter-facing tags for unions and standalone variants", () => {
@@ -39,6 +63,7 @@ describe("host transport negotiation", () => {
     const adapter = {
       id: "example.transport",
       version: 3,
+      encodedPayloadSize: () => 1,
       encodeFrame: () => new Uint8Array([2]),
       decodeFrame: () => ({
         kind: "cancellation-acknowledgement" as const,
@@ -81,6 +106,14 @@ describe("host transport negotiation", () => {
         },
       }),
     ).toThrow("Missing Voyd host transport adapter voyd.std.msgpack@2");
+  });
+});
+
+describe("generic host runtime architecture", () => {
+  it("keeps transport format dependencies at composition edges", () => {
+    genericRuntimeFiles(SOURCE_ROOT).forEach((path) => {
+      expect(readFileSync(path, "utf8"), path).not.toMatch(/msgpack/iu);
+    });
   });
 });
 

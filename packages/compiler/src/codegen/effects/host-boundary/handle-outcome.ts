@@ -19,7 +19,7 @@ import {
 } from "../../boundary/schema.js";
 import { writeDtoValueToTree } from "../../boundary/dto-tree-codec.js";
 import { EFFECT_RESULT_STATUS } from "./constants.js";
-import { buildEffectRequestMsgPack } from "./effect-request-msgpack.js";
+import { buildEffectRequestFrame } from "./effect-request.js";
 import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
@@ -49,8 +49,8 @@ export const createHandleOutcomeDynamic = ({
   exportName?: string;
 }): string =>
   stateFor(ctx, HANDLE_OUTCOME_DYNAMIC_KEY, () => {
-    const msgpack = ensureSelectedHostTransportProvider(ctx);
-    const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
+    const provider = ensureSelectedHostTransportProvider(ctx);
+    const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
 
     const name = `${ctx.moduleLabel}__handle_outcome_dynamic`;
     const params = binaryen.createType([
@@ -65,7 +65,7 @@ export const createHandleOutcomeDynamic = ({
       binaryen.i32, // opIndexLocal
       binaryen.i32, // payloadLenLocal
       binaryen.eqref, // payloadLocal
-      msgpack.arrayWithCapacity.resultType, // arrayLocal
+      provider.arrayWithCapacity.resultType, // arrayLocal
     ];
     const outcomeLocal = 0;
     const bufPtrLocal = 1;
@@ -107,7 +107,7 @@ export const createHandleOutcomeDynamic = ({
           valueType === binaryen.i64 ||
           valueType === binaryen.f32 ||
           valueType === binaryen.f64 ||
-          valueType === msgPackType)) ||
+          valueType === providerValueType)) ||
       (typeId === ctx.program.primitives.bool && valueType === binaryen.i32);
 
     const matchesMarkedBox = ({
@@ -148,7 +148,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.local.set(
           payloadLenLocal,
           ctx.mod.call(
-            msgpack.encodeValue.wasmName,
+            provider.encodeValue.wasmName,
             [
               value,
               ctx.mod.local.get(bufPtrLocal, binaryen.i32),
@@ -169,7 +169,7 @@ export const createHandleOutcomeDynamic = ({
       encodeTransportValueToBuffer(
         makeSelectedCompletion({
           frameTag: ctx.mod.call(
-            msgpack.makeI32.wasmName,
+            provider.makeI32.wasmName,
             [
               ctx.mod.if(
                 ctx.mod.i32.eq(
@@ -180,18 +180,18 @@ export const createHandleOutcomeDynamic = ({
                 ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.callbackCompletion),
               ),
             ],
-            msgPackType,
+            providerValueType,
           ),
           identity: ctx.mod.call(
-            msgpack.makeI32.wasmName,
+            provider.makeI32.wasmName,
             [ctx.mod.local.get(completionIdLocal, binaryen.i32)],
-            msgPackType,
+            providerValueType,
           ),
           fingerprint,
           value,
           ctx,
           fnCtx,
-          provider: msgpack,
+          provider: provider,
         }),
       );
 
@@ -219,7 +219,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.ref.is_null(ctx.mod.local.get(payloadLocal, binaryen.eqref)),
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
-            value: ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType),
+            value: ctx.mod.call(provider.makeNull.wasmName, [], providerValueType),
             fingerprint: fingerprintFor(
               ctx.program.primitives.void,
               "void completion",
@@ -237,7 +237,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
             value: ctx.mod.call(
-              msgpack.makeBool.wasmName,
+              provider.makeBool.wasmName,
               [
                 unboxOutcomeValue({
                   payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
@@ -246,7 +246,7 @@ export const createHandleOutcomeDynamic = ({
                   ctx,
                 }),
               ],
-              msgPackType,
+              providerValueType,
             ),
             fingerprint: fingerprintFor(
               ctx.program.primitives.bool,
@@ -265,7 +265,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
             value: ctx.mod.call(
-              msgpack.makeI32.wasmName,
+              provider.makeI32.wasmName,
               [
                 unboxOutcomeValue({
                   payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
@@ -273,7 +273,7 @@ export const createHandleOutcomeDynamic = ({
                   ctx,
                 }),
               ],
-              msgPackType,
+              providerValueType,
             ),
             fingerprint: fingerprintFor(
               ctx.program.primitives.i32,
@@ -292,7 +292,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
             value: ctx.mod.call(
-              msgpack.makeI64.wasmName,
+              provider.makeI64.wasmName,
               [
                 unboxOutcomeValue({
                   payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
@@ -300,7 +300,7 @@ export const createHandleOutcomeDynamic = ({
                   ctx,
                 }),
               ],
-              msgPackType,
+              providerValueType,
             ),
             fingerprint: fingerprintFor(
               ctx.program.primitives.i64,
@@ -319,7 +319,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
             value: ctx.mod.call(
-              msgpack.makeF32.wasmName,
+              provider.makeF32.wasmName,
               [
                 unboxOutcomeValue({
                   payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
@@ -327,7 +327,7 @@ export const createHandleOutcomeDynamic = ({
                   ctx,
                 }),
               ],
-              msgPackType,
+              providerValueType,
             ),
             fingerprint: fingerprintFor(
               ctx.program.primitives.f32,
@@ -346,7 +346,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
             value: ctx.mod.call(
-              msgpack.makeF64.wasmName,
+              provider.makeF64.wasmName,
               [
                 unboxOutcomeValue({
                   payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
@@ -354,7 +354,7 @@ export const createHandleOutcomeDynamic = ({
                   ctx,
                 }),
               ],
-              msgPackType,
+              providerValueType,
             ),
             fingerprint: fingerprintFor(
               ctx.program.primitives.f64,
@@ -405,7 +405,7 @@ export const createHandleOutcomeDynamic = ({
                       schema,
                       ctx,
                       fnCtx,
-                      provider: msgpack,
+                      provider: provider,
                     }),
                     fingerprint: withDtoFingerprint(schema).fingerprint!,
                   }),
@@ -428,12 +428,11 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.local.get(opIndexLocal, binaryen.i32),
         ctx.mod.i32.const(sig.opIndex),
       );
-      const msgpackMap = buildEffectRequestMsgPack({
+      const requestFrame = buildEffectRequestFrame({
         sig,
         request: () =>
           ctx.mod.local.get(requestLocal, runtime.effectRequestType),
-        msgPackType,
-        msgpack,
+        provider: provider,
         arrayLocal,
         ctx,
         runtime,
@@ -441,7 +440,7 @@ export const createHandleOutcomeDynamic = ({
       });
 
       const effectOps = ctx.mod.block(null, [
-        encodeTransportValueToBuffer(msgpackMap),
+        encodeTransportValueToBuffer(requestFrame),
         ctx.mod.return(
           runtime.makeEffectResult({
             status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.effect),

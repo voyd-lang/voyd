@@ -1,17 +1,17 @@
 import type binaryen from "binaryen";
 import type { CodegenContext, FunctionContext } from "../../context.js";
-import { ensureMsgPackProviderFunctions } from "../../host-transport/providers/msgpack.js";
 import type { BoundarySchema } from "../../boundary/schema.js";
 import { deriveBoundarySchema } from "../../boundary/schema.js";
 import {
   readDtoValueFromTree,
   writeDtoValueToTree,
 } from "../../boundary/dto-tree-codec.js";
+import type { SelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 
-export const packMsgPackValueForType = ({
+export const writeProviderValueForType = ({
   value,
   typeId,
-  msgpack,
+  provider,
   ctx,
   fnCtx,
   label,
@@ -19,7 +19,7 @@ export const packMsgPackValueForType = ({
 }: {
   value: binaryen.ExpressionRef;
   typeId: number;
-  msgpack: ReturnType<typeof ensureMsgPackProviderFunctions>;
+  provider: SelectedHostTransportProvider;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   label: string;
@@ -27,22 +27,16 @@ export const packMsgPackValueForType = ({
 }): binaryen.ExpressionRef =>
   writeDtoValueToTree({
     value,
-    schema:
-      schema ??
-      deriveBoundarySchema({
-        typeId,
-        ctx,
-        label,
-      }),
+    schema: schema ?? deriveBoundarySchema({ typeId, ctx, label }),
     ctx,
     fnCtx,
-    provider: msgpack,
+    provider,
   });
 
-export const unpackMsgPackValueForType = ({
+export const readProviderValueForType = ({
   value,
   typeId,
-  msgpack,
+  provider,
   ctx,
   fnCtx,
   label,
@@ -50,7 +44,7 @@ export const unpackMsgPackValueForType = ({
 }: {
   value: binaryen.ExpressionRef;
   typeId: number;
-  msgpack: ReturnType<typeof ensureMsgPackProviderFunctions>;
+  provider: SelectedHostTransportProvider;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   label: string;
@@ -58,14 +52,8 @@ export const unpackMsgPackValueForType = ({
 }): binaryen.ExpressionRef =>
   readDtoValueFromTree({
     value,
-    schema:
-      schema ??
-      deriveBoundarySchema({
-        typeId,
-        ctx,
-        label,
-      }),
+    schema: schema ?? deriveBoundarySchema({ typeId, ctx, label }),
     ctx,
     fnCtx,
-    provider: msgpack,
+    provider,
   });

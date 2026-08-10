@@ -59,10 +59,10 @@ export const emitSerializedExportWrapper = ({
     exportName,
   });
 
-  const msgpack = ensureSelectedHostTransportProvider(ctx);
-  const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
-  const arrayType = msgpack.arrayWithCapacity.resultType;
-  const storageType = msgpack.arrayRawStorage.resultType;
+  const provider = ensureSelectedHostTransportProvider(ctx);
+  const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
+  const arrayType = provider.arrayWithCapacity.resultType;
+  const storageType = provider.arrayRawStorage.resultType;
 
   const wrapperName = `${meta.wasmName}__serialized_export_${sanitizeIdentifier(exportName)}`;
   const paramCount = 4;
@@ -73,7 +73,7 @@ export const emitSerializedExportWrapper = ({
     binaryen.i32,
   ]);
   const locals: binaryen.Type[] = [
-    msgPackType, // decodedLocal
+    providerValueType, // decodedLocal
     arrayType, // frameArrayLocal
     storageType, // frameStorageLocal
     arrayType, // argsArrayLocal
@@ -101,21 +101,21 @@ export const emitSerializedExportWrapper = ({
   };
 
   const decoded = ctx.mod.call(
-    msgpack.decodeValue.wasmName,
+    provider.decodeValue.wasmName,
     [
       ctx.mod.local.get(argsPtrLocal, binaryen.i32),
       ctx.mod.local.get(argsLenLocal, binaryen.i32),
     ],
-    msgPackType,
+    providerValueType,
   );
 
   const frameArray = ctx.mod.call(
-    msgpack.unpackArray.wasmName,
-    [ctx.mod.local.get(decodedLocal, msgPackType)],
+    provider.unpackArray.wasmName,
+    [ctx.mod.local.get(decodedLocal, providerValueType)],
     arrayType,
   );
   const frameStorage = ctx.mod.call(
-    msgpack.arrayRawStorage.wasmName,
+    provider.arrayRawStorage.wasmName,
     [ctx.mod.local.get(frameArrayLocal, arrayType)],
     storageType,
   );
@@ -124,21 +124,21 @@ export const emitSerializedExportWrapper = ({
       ctx.mod,
       ctx.mod.local.get(frameStorageLocal, storageType),
       ctx.mod.i32.const(index),
-      msgPackType,
+      providerValueType,
       false,
     );
   const argsArray = ctx.mod.call(
-    msgpack.unpackArray.wasmName,
+    provider.unpackArray.wasmName,
     [frameField(3)],
     arrayType,
   );
   const argsCount = ctx.mod.call(
-    msgpack.arrayLength.wasmName,
+    provider.arrayLength.wasmName,
     [ctx.mod.local.get(argsArrayLocal, arrayType)],
     binaryen.i32,
   );
   const argsStorage = ctx.mod.call(
-    msgpack.arrayRawStorage.wasmName,
+    provider.arrayRawStorage.wasmName,
     [ctx.mod.local.get(argsArrayLocal, arrayType)],
     storageType,
   );
@@ -148,7 +148,7 @@ export const emitSerializedExportWrapper = ({
       ctx.mod.i32.or(
         ctx.mod.i32.ne(
           ctx.mod.call(
-            msgpack.unpackI32.wasmName,
+            provider.unpackI32.wasmName,
             [frameField(0)],
             binaryen.i32,
           ),
@@ -156,7 +156,7 @@ export const emitSerializedExportWrapper = ({
         ),
         ctx.mod.i32.ne(
           ctx.mod.call(
-            msgpack.unpackI32.wasmName,
+            provider.unpackI32.wasmName,
             [frameField(1)],
             binaryen.i32,
           ),
@@ -164,7 +164,7 @@ export const emitSerializedExportWrapper = ({
         ),
       ),
       ctx.mod.i32.ne(
-        ctx.mod.call(msgpack.unpackI32.wasmName, [frameField(2)], binaryen.i32),
+        ctx.mod.call(provider.unpackI32.wasmName, [frameField(2)], binaryen.i32),
         ctx.mod.i32.const(hostExportId(exportName)),
       ),
     ),
@@ -188,16 +188,16 @@ export const emitSerializedExportWrapper = ({
       ctx.mod,
       ctx.mod.local.get(argsStorageLocal, storageType),
       ctx.mod.i32.const(index),
-      msgPackType,
+      providerValueType,
       false,
     );
     const typedPayload = ctx.mod.call(
-      msgpack.unpackArray.wasmName,
+      provider.unpackArray.wasmName,
       [element],
       arrayType,
     );
     const typedPayloadStorage = ctx.mod.call(
-      msgpack.arrayRawStorage.wasmName,
+      provider.arrayRawStorage.wasmName,
       [typedPayload],
       storageType,
     );
@@ -205,7 +205,7 @@ export const emitSerializedExportWrapper = ({
       ctx.mod,
       typedPayloadStorage,
       ctx.mod.i32.const(1),
-      msgPackType,
+      providerValueType,
       false,
     );
     return readDtoValueFromTree({
@@ -217,7 +217,7 @@ export const emitSerializedExportWrapper = ({
         label: `${exportName} arg${index}`,
       }),
       fnCtx,
-      provider: msgpack,
+      provider,
     });
   };
 
@@ -253,10 +253,10 @@ export const emitSerializedExportWrapper = ({
     value: encodeValue,
     ctx,
     fnCtx,
-    provider: msgpack,
+    provider,
   });
   const encodedLength = ctx.mod.call(
-    msgpack.encodeValue.wasmName,
+    provider.encodeValue.wasmName,
     [
       completionFrame,
       ctx.mod.local.get(outPtrLocal, binaryen.i32),
@@ -568,7 +568,7 @@ const packSerializedResultValue = ({
   fnCtx: FunctionContext;
   exportName: string;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureSelectedHostTransportProvider(ctx);
+  const provider = ensureSelectedHostTransportProvider(ctx);
   return writeDtoValueToTree({
     value,
     schema: deriveBoundarySchema({
@@ -578,7 +578,7 @@ const packSerializedResultValue = ({
     }),
     ctx,
     fnCtx,
-    provider: msgpack,
+    provider,
   });
 };
 

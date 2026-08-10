@@ -7,6 +7,8 @@ const OPTIONS = { useBigInt64: true } as const;
 export const msgPackHostTransport: HostTransportAdapter = Object.freeze({
   id: "voyd.std.msgpack",
   version: 1,
+  encodedPayloadSize: (value) =>
+    (encode(value, OPTIONS) as Uint8Array).byteLength,
   encodeFrame: (frame) =>
     encode(toMsgPackHostFrame(frame), OPTIONS) as Uint8Array,
   decodeFrame: (bytes) => fromMsgPackHostFrame(decode(bytes, OPTIONS)),

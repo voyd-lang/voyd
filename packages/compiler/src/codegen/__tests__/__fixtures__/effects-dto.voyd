@@ -1,0 +1,18 @@
+use std::array::Array
+use std::string::type::String
+
+obj ExchangePayload {
+  api code: i32,
+  api label: String,
+  api nested: Array<i32>
+}
+
+eff Exchange
+  roundtrip(resume, value: ExchangePayload) -> ExchangePayload
+
+pub fn main(): Exchange -> ExchangePayload
+  Exchange::roundtrip(ExchangePayload {
+    code: 1,
+    label: "hi",
+    nested: [2, 3]
+  })

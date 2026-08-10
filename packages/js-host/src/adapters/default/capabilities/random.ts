@@ -152,7 +152,10 @@ export const randomCapabilityDefinition: CapabilityDefinition = {
         }
         const maximum = Math.min(
           RANDOM_FILL_MAX_REQUEST_BYTES,
-          maxTransportSafeRandomFillBytes({ effectBufferSize })
+          maxTransportSafeRandomFillBytes({
+            effectBufferSize,
+            encodedPayloadSize: host.encodedPayloadSize,
+          })
         );
         if (requested > maximum) {
           throw new Error(

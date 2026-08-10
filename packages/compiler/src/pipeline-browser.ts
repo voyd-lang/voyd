@@ -26,4 +26,16 @@ export const loadModuleGraph = async (
 export const compileProgram = (
   options: CompileProgramOptions
 ): Promise<CompileProgramResult> =>
-  compileProgramWithLoader(options, loadModuleGraph);
+  compileProgramWithLoader(options, (loadOptions) => {
+    if (!loadOptions.host) {
+      throw new Error("ModuleHost is required in browser builds");
+    }
+    return buildModuleGraph({
+      entryPath: loadOptions.entryPath,
+      host: loadOptions.host,
+      roots: loadOptions.roots,
+      includeTests: loadOptions.includeTests,
+      includeSelectedHostTransport:
+        options.codegenOptions?.effectsHostBoundary !== "off",
+    });
+  });

@@ -1,11 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
-import { MSGPACK_HOST_TRANSPORT_CONTRACT_IDS } from "../../compiler-contracts/index.js";
+import {
+  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
+  SELECTED_HOST_TRANSPORT_CONTRACT_IDS,
+} from "../../compiler-contracts/index.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { gcTrampolineAbiStrategy } from "../effects/gc-trampoline-abi-strategy.js";
 import { requireFunctionMetaByCompilerContract } from "../function-lookup.js";
 
 const CONTRACT_ID = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.encodeValue;
+const CODEGEN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+const sourceFilesUnder = (root: string): string[] =>
+  readdirSync(root).flatMap((entry) => {
+    const path = join(root, entry);
+    return statSync(path).isDirectory()
+      ? sourceFilesUnder(path)
+      : path.endsWith(".ts") && !path.endsWith(".test.ts")
+        ? [path]
+        : [];
+  });
 
 describe("compiler function contract lookup", () => {
   it("resolves codegen metadata without depending on module or function names", () => {
@@ -50,7 +67,7 @@ describe("effect host-boundary compiler contracts", () => {
     const diagnostics = new DiagnosticEmitter();
     const resolveCompilerFunctionContract = vi.fn(() => undefined);
     const entryCtx = {
-      options: { effectsHostBoundary: "msgpack" },
+      options: { effectsHostBoundary: "selected" },
       program: { symbols: { resolveCompilerFunctionContract } },
       diagnostics,
       module: {
@@ -65,12 +82,27 @@ describe("effect host-boundary compiler contracts", () => {
     });
 
     expect(resolveCompilerFunctionContract).toHaveBeenCalledTimes(
-      Object.keys(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS).length,
+      SELECTED_HOST_TRANSPORT_CONTRACT_IDS.length,
     );
     expect(diagnostics.diagnostics).toHaveLength(1);
     expect(diagnostics.diagnostics[0]?.message).toContain(
-      "effectful exports require host-transport-msgpack compiler contracts",
+      "effectful exports require the selected host-transport compiler contracts",
     );
     expect(diagnostics.diagnostics[0]?.message).toContain(CONTRACT_ID);
+  });
+});
+
+describe("generic host transport architecture", () => {
+  it("keeps provider format names out of generic boundary code", () => {
+    const genericRoots = [
+      resolve(CODEGEN_ROOT, "boundary"),
+      resolve(CODEGEN_ROOT, "effects/host-boundary"),
+      resolve(CODEGEN_ROOT, "exports"),
+      resolve(CODEGEN_ROOT, "external"),
+    ];
+
+    genericRoots.flatMap(sourceFilesUnder).forEach((path) => {
+      expect(readFileSync(path, "utf8"), path).not.toMatch(/msgpack/iu);
+    });
   });
 });

@@ -32,6 +32,12 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - `std::json::encode_value<T>` produces an explicit `JsonValue` tree from the
   shared DTO plan. Web responses and OpenAPI helpers no longer route typed JSON
   through MessagePack.
+- `effectsHostBoundary` now accepts `"selected"` or `"off"`; the compiler
+  loads and retains the build-selected transport provider only for host-facing
+  code that needs it.
+- Custom JavaScript host transport adapters must provide `encodedPayloadSize`
+  together with frame encoding and decoding. Default adapters use this hook to
+  enforce transport buffer limits without depending on a concrete wire format.
 
 This record will be extended as the remaining obsolete boundary and VX APIs are
 removed.

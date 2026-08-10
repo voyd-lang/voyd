@@ -1,4 +1,3 @@
-import { encode } from "@msgpack/msgpack";
 import { MIN_EFFECT_BUFFER_SIZE } from "../../runtime/constants.js";
 import type { NodeReadableWithRead } from "./types.js";
 
@@ -6,13 +5,6 @@ export const WEB_CRYPTO_MAX_BYTES_PER_CALL = 65_536;
 export const MAX_TIMER_DELAY_MILLIS = 2_147_483_647;
 const MAX_TIMER_DELAY_MILLIS_BIGINT = 2_147_483_647n;
 export const RANDOM_FILL_MAX_REQUEST_BYTES = 1_000_000;
-
-const MSGPACK_BIN8_HEADER_BYTES = 2;
-const MSGPACK_BIN16_HEADER_BYTES = 3;
-const MSGPACK_BIN32_HEADER_BYTES = 5;
-const MSGPACK_BIN8_MAX_LENGTH = 255;
-const MSGPACK_BIN16_MAX_LENGTH = 65_535;
-const MSGPACK_OPTS = { useBigInt64: true } as const;
 
 export const globalRecord = globalThis as Record<string, unknown>;
 
@@ -128,13 +120,14 @@ export const sleepInChunks = async ({
 const payloadFitsEffectTransport = ({
   payload,
   effectBufferSize,
+  encodedPayloadSize,
 }: {
   payload: Record<string, unknown>;
   effectBufferSize: number;
+  encodedPayloadSize: (value: unknown) => number;
 }): boolean => {
   try {
-    const encoded = encode(payload, MSGPACK_OPTS) as Uint8Array;
-    return encoded.byteLength <= effectBufferSize;
+    return encodedPayloadSize(payload) <= effectBufferSize;
   } catch {
     return false;
   }
@@ -142,8 +135,10 @@ const payloadFitsEffectTransport = ({
 
 export const maxTransportSafeHttpServerChunkBytes = ({
   effectBufferSize,
+  encodedPayloadSize,
 }: {
   effectBufferSize: number;
+  encodedPayloadSize: (value: unknown) => number;
 }): number => {
   let low = 0;
   let high = effectBufferSize;
@@ -158,7 +153,13 @@ export const maxTransportSafeHttpServerChunkBytes = ({
       error_code: 0,
       error_message: "",
     };
-    if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
+    if (
+      payloadFitsEffectTransport({
+        payload,
+        effectBufferSize,
+        encodedPayloadSize,
+      })
+    ) {
       low = mid;
       continue;
     }
@@ -188,11 +189,13 @@ export const inputSuccessPayload = ({
   value,
   fallback,
   effectBufferSize,
+  encodedPayloadSize,
 }: {
   opName: string;
   value: string | Uint8Array | null;
   fallback: string | Uint8Array;
   effectBufferSize: number;
+  encodedPayloadSize: (value: unknown) => number;
 }): Record<string, unknown> => {
   const payload = {
     ok: true,
@@ -201,7 +204,13 @@ export const inputSuccessPayload = ({
     code: 0,
     message: "",
   };
-  if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
+  if (
+    payloadFitsEffectTransport({
+      payload,
+      effectBufferSize,
+      encodedPayloadSize,
+    })
+  ) {
     return payload;
   }
   return inputTransportOverflowError({ opName, effectBufferSize, fallback });
@@ -226,29 +235,16 @@ export const joinListDirChildPath = ({
 
 export const maxTransportSafeRandomFillBytes = ({
   effectBufferSize,
+  encodedPayloadSize,
 }: {
   effectBufferSize: number;
+  encodedPayloadSize: (value: unknown) => number;
 }): number => {
-  if (effectBufferSize <= MSGPACK_BIN8_HEADER_BYTES) {
-    return 0;
-  }
-
-  const binaryHeaderSize = (length: number): number => {
-    if (length <= MSGPACK_BIN8_MAX_LENGTH) {
-      return MSGPACK_BIN8_HEADER_BYTES;
-    }
-    if (length <= MSGPACK_BIN16_MAX_LENGTH) {
-      return MSGPACK_BIN16_HEADER_BYTES;
-    }
-    return MSGPACK_BIN32_HEADER_BYTES;
-  };
-
   let low = 0;
   let high = effectBufferSize;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    const encodedWorstCaseBytes = binaryHeaderSize(mid) + mid;
-    if (encodedWorstCaseBytes <= effectBufferSize) {
+    if (encodedPayloadSize(new Uint8Array(mid)) <= effectBufferSize) {
       low = mid;
       continue;
     }

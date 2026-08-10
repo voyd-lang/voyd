@@ -1,4 +1,21 @@
-export { createVoydHost } from "./host.js";
+import {
+  createVoydHost as createVoydHostCore,
+  type HostInitOptions,
+  type VoydHost,
+} from "./host.js";
+import { msgPackHostTransport } from "./transports/msgpack.js";
+
+export const createVoydHost = (
+  options: HostInitOptions,
+): Promise<VoydHost> =>
+  createVoydHostCore({
+    ...options,
+    transportAdapters: [
+      msgPackHostTransport,
+      ...(options.transportAdapters ?? []),
+    ],
+  });
+
 export { CancelledRunError } from "./host.js";
 export type { HostInitOptions, VoydHost } from "./host.js";
 export { registerDefaultHostAdapters } from "./adapters/default.js";

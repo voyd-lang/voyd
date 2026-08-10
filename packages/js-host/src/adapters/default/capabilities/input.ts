@@ -172,6 +172,7 @@ export const inputCapabilityDefinition: CapabilityDefinition = {
                 value: line,
                 fallback: "",
                 effectBufferSize,
+                encodedPayloadSize: host.encodedPayloadSize,
               })
             );
           } catch (error) {
@@ -198,6 +199,7 @@ export const inputCapabilityDefinition: CapabilityDefinition = {
                 value: boundedBytes,
                 fallback: new Uint8Array(),
                 effectBufferSize,
+                encodedPayloadSize: host.encodedPayloadSize,
               })
             );
           } catch (error) {

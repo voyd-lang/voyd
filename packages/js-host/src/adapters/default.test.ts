@@ -11,6 +11,7 @@ import type {
   HostProtocolTable,
   SignatureHash,
 } from "../protocol/types.js";
+import { msgPackHostTransport } from "../transports/msgpack.js";
 import {
   registerDefaultHostAdapters,
   type DefaultAdapterHost,
@@ -43,6 +44,7 @@ const createFakeHost = (
   const handlers: HandlerRegistry = new Map();
   const host: DefaultAdapterHost = {
     table,
+    encodedPayloadSize: msgPackHostTransport.encodedPayloadSize,
     registerHandler: (
       effectId: string,
       opId: number,

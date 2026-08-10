@@ -3,12 +3,11 @@ import {
   refCast,
   structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
-import type { CodegenContext } from "../../context.js";
-import type { FunctionContext } from "../../context.js";
+import type { CodegenContext, FunctionContext } from "../../context.js";
+import { wasmTypeFor } from "../../types.js";
 import { writeDtoValueToTree } from "../../boundary/dto-tree-codec.js";
 import type { EffectRuntime } from "../runtime-abi.js";
-import { ensureMsgPackProviderFunctions } from "../../host-transport/providers/msgpack.js";
-import { packMsgPackValueForType } from "./msgpack-values.js";
+import { writeProviderValueForType } from "./provider-values.js";
 import type { EffectOpSignature } from "./types.js";
 import {
   makeSelectedEffectRequest,
@@ -19,7 +18,7 @@ import type { SelectedHostTransportProvider } from "../../host-transport/selecte
 const buildArgsArray = ({
   sig,
   request,
-  msgpack,
+  provider,
   arrayLocal,
   ctx,
   runtime,
@@ -27,16 +26,16 @@ const buildArgsArray = ({
 }: {
   sig: EffectOpSignature;
   request: () => binaryen.ExpressionRef;
-  msgpack: ReturnType<typeof ensureMsgPackProviderFunctions>;
+  provider: SelectedHostTransportProvider;
   arrayLocal: number;
   ctx: CodegenContext;
   runtime: EffectRuntime;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const arrayType = msgpack.arrayWithCapacity.resultType;
+  const arrayType = provider.arrayWithCapacity.resultType;
   const argsCount = sig.paramTypeIds.length;
   const initArray = ctx.mod.call(
-    msgpack.arrayWithCapacity.wasmName,
+    provider.arrayWithCapacity.wasmName,
     [ctx.mod.i32.const(argsCount)],
     arrayType,
   );
@@ -56,18 +55,18 @@ const buildArgsArray = ({
       exprRef: typedArgs,
     });
     const boundarySchema = sig.externalBoundary?.params[index];
-    const msgpackValue = boundarySchema
+    const providerValue = boundarySchema
       ? writeDtoValueToTree({
           value: argValue,
           schema: boundarySchema,
           ctx,
           fnCtx,
-          provider: msgpack,
+          provider,
         })
-      : packMsgPackValueForType({
+      : writeProviderValueForType({
           value: argValue,
           typeId: paramTypeId,
-          msgpack,
+          provider,
           ctx,
           fnCtx,
           label: `${sig.label} arg${index}`,
@@ -76,15 +75,15 @@ const buildArgsArray = ({
       ctx.mod.local.set(
         arrayLocal,
         ctx.mod.call(
-          msgpack.arrayPush.wasmName,
+          provider.arrayPush.wasmName,
           [
             ctx.mod.local.get(arrayLocal, arrayType),
             makeSelectedTypedPayload({
               fingerprint: sig.paramFingerprints[index]!,
-              value: msgpackValue,
+              value: providerValue,
               ctx,
               fnCtx,
-              provider: msgpack as SelectedHostTransportProvider,
+              provider,
             }),
           ],
           arrayType,
@@ -100,11 +99,10 @@ const buildArgsArray = ({
   );
 };
 
-export const buildEffectRequestMsgPack = ({
+export const buildEffectRequestFrame = ({
   sig,
   request,
-  msgPackType,
-  msgpack,
+  provider,
   arrayLocal,
   ctx,
   runtime,
@@ -112,8 +110,7 @@ export const buildEffectRequestMsgPack = ({
 }: {
   sig: EffectOpSignature;
   request: () => binaryen.ExpressionRef;
-  msgPackType: binaryen.Type;
-  msgpack: ReturnType<typeof ensureMsgPackProviderFunctions>;
+  provider: SelectedHostTransportProvider;
   arrayLocal: number;
   ctx: CodegenContext;
   runtime: EffectRuntime;
@@ -122,7 +119,7 @@ export const buildEffectRequestMsgPack = ({
   const argsArray = buildArgsArray({
     sig,
     request,
-    msgpack,
+    provider,
     arrayLocal,
     ctx,
     runtime,
@@ -135,13 +132,13 @@ export const buildEffectRequestMsgPack = ({
     signatureHash: sig.signatureHash,
     resumeKind: sig.resumeKind,
     typedArgs: ctx.mod.call(
-      msgpack.makeArray.wasmName,
+      provider.makeArray.wasmName,
       [argsArray],
-      msgPackType,
+      wasmTypeFor(provider.valueTypeId, ctx),
     ),
     resultFingerprint: sig.resultFingerprint,
     ctx,
     fnCtx,
-    provider: msgpack as SelectedHostTransportProvider,
+    provider,
   });
 };

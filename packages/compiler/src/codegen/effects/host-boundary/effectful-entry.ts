@@ -10,7 +10,7 @@ import { wasmTypeFor } from "../../types.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
 import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
-import { unpackMsgPackValueForType } from "./msgpack-values.js";
+import { readProviderValueForType } from "./provider-values.js";
 import { HOST_COMPLETION_KIND } from "./handle-outcome.js";
 import { hostExportId } from "../../exports/export-abi.js";
 
@@ -139,10 +139,10 @@ const buildEffectfulEntryBody = ({
     };
   }
 
-  const msgpack = ensureSelectedHostTransportProvider(ctx);
-  const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
-  const arrayType = msgpack.unpackArray.resultType;
-  const storageType = msgpack.arrayRawStorage.resultType;
+  const provider = ensureSelectedHostTransportProvider(ctx);
+  const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
+  const arrayType = provider.unpackArray.resultType;
+  const storageType = provider.arrayRawStorage.resultType;
 
   const argsArrayLocal = paramCount;
   const storageLocal = paramCount + 1;
@@ -158,7 +158,7 @@ const buildEffectfulEntryBody = ({
     effectful: true,
   };
 
-  const decode = msgpack.decodeValue;
+  const decode = provider.decodeValue;
   const decoded = ctx.mod.call(
     decode.wasmName,
     [
@@ -170,22 +170,22 @@ const buildEffectfulEntryBody = ({
   const decodedValue = coerceValueToType({
     value: decoded,
     actualType: decode.resultTypeId,
-    targetType: msgpack.valueTypeId,
+    targetType: provider.valueTypeId,
     ctx,
     fnCtx,
   });
   const argsArray = ctx.mod.call(
-    msgpack.unpackArray.wasmName,
+    provider.unpackArray.wasmName,
     [decodedValue],
     arrayType,
   );
   const argsCount = ctx.mod.call(
-    msgpack.arrayLength.wasmName,
+    provider.arrayLength.wasmName,
     [ctx.mod.local.get(argsArrayLocal, arrayType)],
     binaryen.i32,
   );
   const storage = ctx.mod.call(
-    msgpack.arrayRawStorage.wasmName,
+    provider.arrayRawStorage.wasmName,
     [ctx.mod.local.get(argsArrayLocal, arrayType)],
     storageType,
   );
@@ -202,12 +202,12 @@ const buildEffectfulEntryBody = ({
       ctx.mod,
       ctx.mod.local.get(storageLocal, storageType),
       ctx.mod.i32.const(index),
-      msgPackType,
+      providerValueType,
       false,
     );
-    return unpackMsgPackValueForType({
+    return readProviderValueForType({
       ctx,
-      msgpack,
+      provider: provider,
       value: element,
       typeId,
       fnCtx,
