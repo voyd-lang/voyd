@@ -360,6 +360,9 @@ export const buildModuleGraph = async ({
     roots,
     host,
   });
+  const hasSelectedHostTransportModule =
+    includeSelectedHostTransport &&
+    (await supportsSelectedHostTransportImport({ roots, host }));
   recordCompilerPerfDuration({
     name: "graph.supports_std_prelude.ms",
     startedAt: preludeStartedAt,
@@ -405,7 +408,7 @@ export const buildModuleGraph = async ({
     roots,
     includeTests: includeTests === true,
     hasStdPreludeModule,
-    includeSelectedHostTransport,
+    includeSelectedHostTransport: hasSelectedHostTransportModule,
   });
 
   addModuleTree(entryModule, modules, modulesByPath, (module) => {
@@ -1638,6 +1641,22 @@ const supportsStdPreludeAutoImport = async ({
 
   const resolved = await resolveModuleFile(
     { namespace: "std", segments: ["prelude"] },
+    roots,
+    host,
+  );
+  return Boolean(resolved);
+};
+
+const supportsSelectedHostTransportImport = async ({
+  roots,
+  host,
+}: {
+  roots: ModuleRoots;
+  host: ModuleHost;
+}): Promise<boolean> => {
+  if (!roots.std) return false;
+  const resolved = await resolveModuleFile(
+    { namespace: "std", segments: ["msgpack"] },
     roots,
     host,
   );

@@ -829,6 +829,23 @@ mod pkg
     expect(moduleIds).not.toContain("std::msgpack");
   });
 
+  it("skips the selected host transport import when the std provider is unavailable", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "pub fn main() -> i32\n  1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot },
+      includeSelectedHostTransport: true,
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(["src::main"]);
+  });
+
   it("auto-imports std::prelude::all for src modules when std::prelude exists", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");

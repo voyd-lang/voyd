@@ -170,6 +170,7 @@ const makeProgramFor = (
       resolveCompilerFunctionContract: (id: CompilerFunctionContractId) =>
         symbolByContract.get(id),
       refOf: (symbol: number) => ({ moduleId: "std::contracts", symbol }),
+      canonicalIdOf: (_moduleId: string, symbol: number) => symbol,
       getPackageId: () => "std",
       getName: (owner: number) =>
         owner === owners.string

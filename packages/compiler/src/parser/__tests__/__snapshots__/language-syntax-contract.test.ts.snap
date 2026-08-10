@@ -1431,82 +1431,94 @@ exports[`Voyd syntax shape contract > preserves 'string interpolation and HTML r
               [
                 "fixed_array_literal",
                 [
-                  "html_element",
+                  "html_child",
                   [
-                    ":",
-                    "tag",
+                    "html_element",
                     [
-                      "new_string",
+                      ":",
+                      "tag",
                       [
-                        "fixed_array_literal",
-                        "104",
-                        "49",
-                      ],
-                    ],
-                  ],
-                  [
-                    ":",
-                    "children",
-                    [
-                      "new_array_unchecked",
-                      [
-                        ":",
-                        "from",
+                        "new_string",
                         [
                           "fixed_array_literal",
-                          "greeting",
+                          "104",
+                          "49",
+                        ],
+                      ],
+                    ],
+                    [
+                      ":",
+                      "children",
+                      [
+                        "new_array_unchecked",
+                        [
+                          ":",
+                          "from",
+                          [
+                            "fixed_array_literal",
+                            [
+                              "html_child",
+                              "greeting",
+                            ],
+                          ],
                         ],
                       ],
                     ],
                   ],
                 ],
                 [
-                  "keyed",
+                  "html_child",
                   [
-                    ":",
-                    "key",
-                    "name",
-                  ],
-                  [
-                    ":",
-                    "child",
+                    "keyed",
                     [
-                      "Button",
+                      ":",
+                      "key",
+                      "name",
+                    ],
+                    [
+                      ":",
+                      "child",
                       [
-                        "object_literal",
+                        "Button",
                         [
-                          ":",
-                          "onClick",
+                          "object_literal",
                           [
-                            "=>",
-                            [],
+                            ":",
+                            "onClick",
                             [
-                              "select",
-                              "name",
+                              "=>",
+                              [],
+                              [
+                                "select",
+                                "name",
+                              ],
                             ],
                           ],
-                        ],
-                        [
-                          ":",
-                          "children",
                           [
-                            "new_array_unchecked",
+                            ":",
+                            "children",
                             [
-                              ":",
-                              "from",
+                              "new_array_unchecked",
                               [
-                                "fixed_array_literal",
+                                ":",
+                                "from",
                                 [
-                                  "new_string",
+                                  "fixed_array_literal",
                                   [
-                                    "fixed_array_literal",
-                                    "67",
-                                    "104",
-                                    "111",
-                                    "111",
-                                    "115",
-                                    "101",
-                                    "32",
+                                    "html_child",
+                                    [
+                                      "new_string",
+                                      [
+                                        "fixed_array_literal",
+                                        "67",
+                                        "104",
+                                        "111",
+                                        "111",
+                                        "115",
+                                        "101",
+                                        "32",
+                                      ],
+                                    ],
                                   ],
                                 ],
                               ],
