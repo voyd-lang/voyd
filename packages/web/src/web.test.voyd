@@ -44,8 +44,6 @@ use std::bytes::{ ByteBuffer, Bytes }
 use std::fs::{ Fs, FsResult }
 use std::http::{ Body, Headers, IncomingRequest, Method, QueryString, Response, Status }
 use std::json::{ JsonBool, JsonValue }
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::path::Path
 use std::result::types::all
@@ -1130,18 +1128,18 @@ test "static files middleware keeps absolute-looking paths under root":
   assert(read_paths.with((paths) => optional_string_or(paths.get(0), "missing".as_slice()).equals("/site/public/absolute-looking/path.txt")), eq: true)
 
 test "html rendering turns vx nodes into a text html response":
-  let page: MsgPack =
+  let page: HtmlNode =
     <main class="home">
       <h1>Hello &amp; welcome</h1>
       <p data-count="1">Voyd</p>
     </main>
 
-  let rendered = render<MsgPack>(page)
+  let rendered = render(page)
   assert(rendered.contains("<main".as_slice()), eq: true)
   assert(rendered.contains("class=\"home\"".as_slice()), eq: true)
   assert(rendered.contains("Hello &amp;amp; welcome".as_slice()), eq: true)
 
-  let response = Response::ok().html<MsgPack>(page)
+  let response = Response::ok().html(page)
   assert(response.status.code(), eq: 200)
   match(response.header("content-type".as_slice()))
     Some<String> { value }:
@@ -1151,7 +1149,7 @@ test "html rendering turns vx nodes into a text html response":
 
   let replaced = Response::ok()
     .with(header: "content-type".as_slice(), value: "text/plain".as_slice())
-    .html<MsgPack>(page)
+    .html(page)
   match(replaced.header("content-type".as_slice()))
     Some<String> { value }:
       assert(value.equals("text/html; charset=utf-8"), eq: true)
@@ -1166,7 +1164,7 @@ test "html rendering includes props and styles and respects void elements":
       disabled(true),
       style(name: "display", value: "grid")
     ],
-    children: Array<MsgPack>::init()
+    children: Array<HtmlNode>::init()
   )
 
   let rendered = render(input)
@@ -1184,7 +1182,7 @@ test "VX renderer accepts a basic SVG tree":
       vx::html_element(
         tag: "path",
         attrs: [vx::attr(name: "d", value: "M1 1h2")],
-        children: Array<MsgPack>::init()
+        children: Array<HtmlNode>::init()
       )
     ]
   )
@@ -1202,11 +1200,11 @@ test "VX renderer preserves canonical parser-adjusted SVG names":
       vx::html_element(
         tag: "linearGradient",
         attrs: [vx::attr(name: "gradientUnits", value: "userSpaceOnUse")],
-        children: Array<MsgPack>::init()
+        children: Array<HtmlNode>::init()
       ),
       vx::html_element(
         tag: "feDropShadow",
-        children: Array<MsgPack>::init()
+        children: Array<HtmlNode>::init()
       )
     ]
   )
@@ -1236,7 +1234,7 @@ test "VX renderer uses HTML for children of SVG integration points":
   assert(rendered.contains("<desc><span>Description</span></desc>".as_slice()), eq: true)
 
 test "html rendering unwraps mapped child views":
-  let child: MsgPack = <p class="child">Mapped child</p>
+  let child: HtmlNode = <p class="child">Mapped child</p>
   let mapped = map_html<MappedHtmlTestMsg, MappedHtmlTestMsg>(
     html: child,
     handler: (message: MappedHtmlTestMsg) -> MappedHtmlTestMsg => message
@@ -1246,7 +1244,7 @@ test "html rendering unwraps mapped child views":
   assert(rendered.contains("<p class=\"child\">Mapped child</p>".as_slice()), eq: true)
 
 test "html rendering preserves carriage returns through parsing":
-  let paragraph: MsgPack = <p title={"A\r\nB"}>{"A\r\nB"}</p>
+  let paragraph: HtmlNode = <p title={"A\r\nB"}>{"A\r\nB"}</p>
   let rendered = render(paragraph)
 
   assert(rendered.contains("title=\"A&#13;\nB\"".as_slice()), eq: true)
