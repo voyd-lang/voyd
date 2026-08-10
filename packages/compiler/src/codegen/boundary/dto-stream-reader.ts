@@ -1,4 +1,6 @@
 import binaryen from "binaryen";
+import { arrayNew } from "@voyd-lang/lib/binaryen-gc/index.js";
+import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
 import type {
   CodegenContext,
   FunctionContext,
@@ -14,9 +16,12 @@ import {
 } from "../locals.js";
 import {
   coerceValueToType,
+  defaultFixedArrayElementValue,
+  fixedArrayStorageElementType,
   initStructuralValue,
   loadStructuralField,
 } from "../structural.js";
+import { ensureFixedArrayWasmTypesByElement } from "../fixed-array-types.js";
 import { lowerValueToMutableRefStorage, wasmTypeFor } from "../types.js";
 import { emitStringLiteral } from "../expressions/primitives.js";
 import { pickTraitImplMethodMeta } from "../function-lookup.js";
@@ -34,6 +39,7 @@ import type {
 import { deriveBoundarySchema } from "./schema.js";
 import {
   customDtoMethod,
+  fixedArrayGet,
   fixedArrayNew,
   fixedArraySet,
   lowerFieldValueForInit,
@@ -51,7 +57,14 @@ type StreamReaderState = {
   errorLabel: string;
   rejectUnknownFields: binaryen.ExpressionRef;
   registry: Map<TypeId, BoundarySchema>;
-  helpers: Map<TypeId, string>;
+  helpers: Map<TypeId, RecursiveReadHelper>;
+};
+
+type RecursiveReadHelper = {
+  name: string;
+  resultTypeId: TypeId;
+  holderType: binaryen.Type;
+  holderHeapType: HeapTypeRef;
 };
 
 type ReaderCall = {
@@ -128,27 +141,51 @@ const readValue = ({
 }): binaryen.ExpressionRef => {
   if (schema.kind === "ref") {
     const resolved = resolveSchemaRef({ schema, state, ctx });
-    if (
-      resolved.typeId !== state.rootTypeId &&
-      !("aliases" in resolved && resolved.aliases?.includes(state.rootTypeId))
-    ) {
-      throw new Error(
-        "direct DTO readers require a recursive reference to target the decoded root type",
-      );
-    }
     const helper = ensureRecursiveReadHelper({ schema, state, ctx });
-    return unwrapResultExpression({
+    const holder = allocateTempLocal(helper.holderType, fnCtx);
+    const holderRef = () => loadLocalValue(holder, ctx);
+    const read = unwrapResultExpression({
       expr: ctx.mod.call(
-        helper,
-        [reader(), state.rejectUnknownFields],
-        wasmTypeFor(state.resultTypeId, ctx),
+        helper.name,
+        [reader(), state.rejectUnknownFields, holderRef()],
+        wasmTypeFor(helper.resultTypeId, ctx),
       ),
-      resultTypeId: state.resultTypeId,
-      resultWasmType: wasmTypeFor(state.resultTypeId, ctx),
+      resultTypeId: helper.resultTypeId,
+      resultWasmType: wasmTypeFor(helper.resultTypeId, ctx),
       state,
       ctx,
       fnCtx,
     }).value;
+    return ctx.mod.block(
+      null,
+      [
+        storeLocalValue({
+          binding: holder,
+          value: arrayNew(
+            ctx.mod,
+            helper.holderHeapType,
+            ctx.mod.i32.const(1),
+            defaultFixedArrayElementValue({
+              typeId: resolved.typeId,
+              ctx,
+            }),
+          ),
+          ctx,
+          fnCtx,
+        }),
+        binaryen.getExpressionType(read) === binaryen.none
+          ? read
+          : ctx.mod.drop(read),
+        fixedArrayGet({
+          array: holderRef(),
+          elementTypeId: resolved.typeId,
+          index: ctx.mod.i32.const(0),
+          ctx,
+          fnCtx,
+        }),
+      ],
+      wasmTypeFor(resolved.typeId, ctx),
+    );
   }
   switch (schema.kind) {
     case "custom":
@@ -1063,29 +1100,51 @@ const ensureRecursiveReadHelper = ({
   schema: Extract<BoundarySchema, { kind: "ref" }>;
   state: StreamReaderState;
   ctx: CodegenContext;
-}): string => {
+}): RecursiveReadHelper => {
   const existing = state.helpers.get(schema.typeId);
   if (existing) return existing;
   const name = freshLabel(`__voyd_dto_stream_read_${schema.typeId}`);
-  state.helpers.set(schema.typeId, name);
+  const resolved = resolveSchemaRef({ schema, state, ctx });
+  const holder = ensureFixedArrayWasmTypesByElement({
+    elementType: fixedArrayStorageElementType({
+      typeId: resolved.typeId,
+      ctx,
+    }),
+    ctx,
+  });
+  const unitResultTypeId = requiredReaderMethod({
+    name: "end_record",
+    state,
+  }).resultTypeId;
+  const helper: RecursiveReadHelper = {
+    name,
+    resultTypeId: unitResultTypeId,
+    holderType: holder.type,
+    holderHeapType: holder.heapType,
+  };
+  state.helpers.set(schema.typeId, helper);
   const readerType = wasmTypeFor(state.readerTypeId, ctx);
-  const params = binaryen.createType([readerType, binaryen.i32]);
+  const params = binaryen.createType([
+    readerType,
+    binaryen.i32,
+    holder.type,
+  ]);
   const locals: binaryen.Type[] = [];
   const fnCtx: FunctionContext = {
     bindings: new Map(),
     tempLocals: new Map(),
     locals,
     nextLocalIndex: binaryen.expandType(params).length,
-    returnTypeId: state.resultTypeId,
+    returnTypeId: unitResultTypeId,
     effectful: false,
   };
   const errorLabel = freshLabel("dto_stream_recursive_read_error");
   const helperState: StreamReaderState = {
     ...state,
+    resultTypeId: unitResultTypeId,
     errorLabel,
     rejectUnknownFields: ctx.mod.local.get(1, binaryen.i32),
   };
-  const resolved = resolveSchemaRef({ schema, state, ctx });
   const value = readValue({
     reader: () => ctx.mod.local.get(0, readerType),
     schema: resolved,
@@ -1096,24 +1155,36 @@ const ensureRecursiveReadHelper = ({
   ctx.mod.addFunction(
     name,
     params,
-    wasmTypeFor(state.resultTypeId, ctx),
+    wasmTypeFor(unitResultTypeId, ctx),
     locals,
     ctx.mod.block(
       errorLabel,
       [
+        fixedArraySet({
+          array: ctx.mod.local.get(2, holder.type),
+          elementTypeId: resolved.typeId,
+          index: ctx.mod.i32.const(0),
+          value,
+          ctx,
+          fnCtx,
+        }),
         makeRootResult({
           member: "Ok",
-          payload: value,
-          payloadTypeId: resolved.typeId,
+          payload: ctx.mod.nop(),
+          payloadTypeId: resultValueTypeId({
+            resultTypeId: unitResultTypeId,
+            member: "Ok",
+            ctx,
+          }),
           state: helperState,
           ctx,
           fnCtx,
         }),
       ],
-      wasmTypeFor(state.resultTypeId, ctx),
+      wasmTypeFor(unitResultTypeId, ctx),
     ),
   );
-  return name;
+  return helper;
 };
 
 const registerSchema = ({
@@ -1199,11 +1270,13 @@ const makeRootResult = ({
   const info = requiredStructuralInfo(memberTypeId, ctx);
   const fieldName = member === "Ok" ? "value" : "error";
   const field = requiredField(info.fieldMap, fieldName, memberTypeId);
-  return coerceValueToType({
-    value: initStructuralValue({
-      structInfo: info,
-      fieldValues: [
-        lowerFieldValueForInit({
+  const fieldValue =
+    binaryen.getExpressionType(payload) === binaryen.none
+      ? defaultWasmValue(
+          info.layoutKind === "value-object" ? field.wasmType : field.heapWasmType,
+          ctx,
+        )
+      : lowerFieldValueForInit({
           structInfo: info,
           field,
           value: coerceValueToType({
@@ -1215,8 +1288,11 @@ const makeRootResult = ({
           }),
           ctx,
           fnCtx,
-        }),
-      ],
+        });
+  return coerceValueToType({
+    value: initStructuralValue({
+      structInfo: info,
+      fieldValues: [fieldValue],
       ctx,
       fnCtx,
     }),
@@ -1225,6 +1301,17 @@ const makeRootResult = ({
     ctx,
     fnCtx,
   });
+};
+
+const defaultWasmValue = (
+  type: binaryen.Type,
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
+  if (type === binaryen.i32) return ctx.mod.i32.const(0);
+  if (type === binaryen.i64) return ctx.mod.i64.const(0, 0);
+  if (type === binaryen.f32) return ctx.mod.f32.const(0);
+  if (type === binaryen.f64) return ctx.mod.f64.const(0);
+  return ctx.mod.ref.null(type);
 };
 
 const resultPayload = ({
@@ -1285,6 +1372,36 @@ const resultMember = ({
   return member;
 };
 
+const resultValueTypeId = ({
+  resultTypeId,
+  member,
+  ctx,
+}: {
+  resultTypeId: TypeId;
+  member: "Ok" | "Err";
+  ctx: CodegenContext;
+}): TypeId => {
+  const memberTypeId = resultMember({ resultTypeId, name: member, ctx });
+  const fieldName = member === "Ok" ? "value" : "error";
+  return requiredField(
+    requiredStructuralInfo(memberTypeId, ctx).fieldMap,
+    fieldName,
+    memberTypeId,
+  ).typeId;
+};
+
+const requiredReaderMethod = ({
+  name,
+  state,
+}: {
+  name: string;
+  state: StreamReaderState;
+}): FunctionMetadata => {
+  const method = state.methods.get(name);
+  if (!method) throw new Error(`DataReader implementation is missing ${name}`);
+  return method;
+};
+
 const callReader = ({
   name,
   reader,
@@ -1300,8 +1417,7 @@ const callReader = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): ReaderCall => {
-  const method = state.methods.get(name);
-  if (!method) throw new Error(`DataReader implementation is missing ${name}`);
+  const method = requiredReaderMethod({ name, state });
   const receiver =
     method.paramAbiKinds[0] === "mutable_ref"
       ? lowerValueToMutableRefStorage({
