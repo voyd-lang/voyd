@@ -3,7 +3,7 @@ import { refCast } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { wasmTypeFor } from "../../types.js";
 import type { CodegenContext } from "../../context.js";
 import type { SerializerMetadata } from "../../../semantics/symbol-index.js";
-import { ensureMsgPackFunctions } from "./msgpack.js";
+import { ensureMsgPackProviderFunctions } from "../../host-transport/providers/msgpack.js";
 import { hostBoundaryPayloadSupportForType } from "./payload-compatibility.js";
 
 export const packMsgPackValueForType = ({
@@ -19,7 +19,7 @@ export const packMsgPackValueForType = ({
   value: binaryen.ExpressionRef;
   typeId: number;
   msgPackType: binaryen.Type;
-  msgpack: ReturnType<typeof ensureMsgPackFunctions>;
+  msgpack: ReturnType<typeof ensureMsgPackProviderFunctions>;
   ctx: CodegenContext;
   label: string;
   serializerOverride?: SerializerMetadata;
@@ -72,7 +72,7 @@ export const unpackMsgPackValueForType = ({
 }: {
   value: binaryen.ExpressionRef;
   typeId: number;
-  msgpack: ReturnType<typeof ensureMsgPackFunctions>;
+  msgpack: ReturnType<typeof ensureMsgPackProviderFunctions>;
   ctx: CodegenContext;
   label: string;
   serializerOverride?: SerializerMetadata;

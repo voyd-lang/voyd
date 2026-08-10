@@ -6,10 +6,10 @@ import {
   type CompilerFunctionContractId,
 } from "../../../compiler-contracts/index.js";
 import { requireFunctionMetaByCompilerContract } from "../../function-lookup.js";
-import { stateFor } from "./state.js";
+import { stateFor } from "../../effects/host-boundary/state.js";
 
-export type MsgPackFunctions = {
-  msgPackTypeId: TypeId;
+export type MsgPackProviderFunctions = {
+  valueTypeId: TypeId;
   encodeValue: FunctionMetadata;
   decodeValue: FunctionMetadata;
   makeNull: FunctionMetadata;
@@ -42,7 +42,7 @@ export type MsgPackFunctions = {
   mapTagIs: FunctionMetadata;
 };
 
-const MSGPACK_FUNCS_KEY = Symbol("voyd.effects.hostBoundary.msgpackFunctions");
+const MSGPACK_PROVIDER_FUNCS_KEY = Symbol("voyd.hostTransport.msgpackProviderFunctions");
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 
 type ReachabilityState = {
@@ -75,11 +75,11 @@ const requireContract = (
 ): FunctionMetadata =>
   requireFunctionMetaByCompilerContract({ ctx, contractId });
 
-export const ensureMsgPackFunctions = (
+export const ensureMsgPackProviderFunctions = (
   ctx: CodegenContext
-): MsgPackFunctions =>
-  stateFor(ctx, MSGPACK_FUNCS_KEY, () => {
-    const { msgpack: msgPackTypeId } =
+): MsgPackProviderFunctions =>
+  stateFor(ctx, MSGPACK_PROVIDER_FUNCS_KEY, () => {
+    const { msgpack: valueTypeId } =
       validateBoundaryMsgpackFunctionContracts(ctx.program);
     const functions = {
       encodeValue: requireContract(
@@ -146,8 +146,8 @@ export const ensureMsgPackFunctions = (
       mapHas: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapHas),
       mapTagIs: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapTagIs),
     };
-    const msgpack: MsgPackFunctions = {
-      msgPackTypeId,
+    const msgpack: MsgPackProviderFunctions = {
+      valueTypeId,
       ...functions,
     };
 

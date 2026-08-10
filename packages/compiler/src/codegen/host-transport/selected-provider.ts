@@ -1,15 +1,15 @@
 import type { CodegenContext } from "../context.js";
 import {
-  ensureMsgPackFunctions,
-  type MsgPackFunctions,
-} from "../effects/host-boundary/msgpack.js";
+  ensureMsgPackProviderFunctions,
+  type MsgPackProviderFunctions,
+} from "../host-transport/providers/msgpack.js";
 
 export const SELECTED_HOST_TRANSPORT_IDENTITY = {
   id: "voyd.std.msgpack",
   version: 1,
 } as const;
 
-export type SelectedHostTransportProvider = MsgPackFunctions & {
+export type SelectedHostTransportProvider = MsgPackProviderFunctions & {
   identity: typeof SELECTED_HOST_TRANSPORT_IDENTITY;
 };
 
@@ -22,5 +22,5 @@ export const ensureSelectedHostTransportProvider = (
   ctx: CodegenContext,
 ): SelectedHostTransportProvider => ({
   identity: SELECTED_HOST_TRANSPORT_IDENTITY,
-  ...ensureMsgPackFunctions(ctx),
+  ...ensureMsgPackProviderFunctions(ctx),
 });

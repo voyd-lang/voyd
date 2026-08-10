@@ -517,7 +517,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       enqueueKnownFunctionInstances(ctx.ir.baseProgram.symbols.refOf(symbolId));
     };
 
-    const enqueueMsgPackFunctions = (): void => {
+    const enqueueMsgPackProviderFunctions = (): void => {
       Object.values(BOUNDARY_MSGPACK_CONTRACT_IDS).forEach(
         enqueueCompilerFunctionContract,
       );
@@ -605,7 +605,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
         }
         enqueueSerializersForTypes(typeIds);
         if (serializer.formatId === "msgpack") {
-          enqueueMsgPackFunctions();
+          enqueueMsgPackProviderFunctions();
         }
       });
     };
@@ -617,7 +617,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       moduleId: string;
       symbol: SymbolId;
     }): void => {
-      enqueueMsgPackFunctions();
+      enqueueMsgPackProviderFunctions();
       exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
         enqueueSerializersForTypes(typeIds);
       });
@@ -775,7 +775,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
                   intrinsicName &&
                   BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS.has(intrinsicName)
                 ) {
-                  enqueueMsgPackFunctions();
+                  enqueueMsgPackProviderFunctions();
                 }
                 if (intrinsicName && DATA_DTO_INTRINSICS.has(intrinsicName)) {
                   enqueueDataDtoFunctions();
@@ -854,7 +854,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
             symbol: entry.symbol,
           })
         ) {
-          enqueueMsgPackFunctions();
+          enqueueMsgPackProviderFunctions();
         }
         if (
           !ctx.ir.options.testMode &&

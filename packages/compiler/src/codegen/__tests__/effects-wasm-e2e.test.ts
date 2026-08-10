@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { decode, encode } from "@msgpack/msgpack";
 import { describe, expect, it } from "vitest";
 import { createVoydHost } from "@voyd-lang/js-host";
 import { createEffectsImports } from "./support/wasm-imports.js";
@@ -195,6 +196,7 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
     const mainEffectful = instance.exports.main_effectful as CallableFunction;
     const effectStatus = instance.exports.effect_status as CallableFunction;
     const effectCont = instance.exports.effect_cont as CallableFunction;
+    const effectLen = instance.exports.effect_len as CallableFunction;
     const resumeEffectful = instance.exports.resume_effectful as CallableFunction;
 
     const bufferPtr = 64;
@@ -202,12 +204,26 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
     const first = mainEffectful(bufferPtr, bufferCap);
     expect(effectStatus(first)).toBe(1);
     const continuation = effectCont(first);
-    new Uint8Array(memory.buffer, bufferPtr, 1)[0] = 2;
-    const resumed = resumeEffectful(continuation, bufferPtr, 1, bufferCap);
+    const requestLength = effectLen(first) as number;
+    const requestFrame = decode(
+      new Uint8Array(memory.buffer, bufferPtr, requestLength),
+      { useBigInt64: true },
+    ) as unknown[];
+    const response = encode(
+      [2, 3, requestFrame[2], [0, [requestFrame[8], 2]]],
+      { useBigInt64: true },
+    ) as Uint8Array;
+    new Uint8Array(memory.buffer, bufferPtr, response.length).set(response);
+    const resumed = resumeEffectful(
+      continuation,
+      bufferPtr,
+      response.length,
+      bufferCap,
+    );
     expect(effectStatus(resumed)).toBe(1);
 
     expect(() =>
-      resumeEffectful(continuation, bufferPtr, 1, bufferCap)
+      resumeEffectful(continuation, bufferPtr, response.length, bufferCap)
     ).toThrow(/unreachable|runtime/i);
   });
 });

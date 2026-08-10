@@ -127,7 +127,7 @@ const buildEffectfulEntryBody = ({
   }
 
   const msgpack = ensureSelectedHostTransportProvider(ctx);
-  const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+  const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
   const arrayType = msgpack.unpackArray.resultType;
   const storageType = msgpack.arrayRawStorage.resultType;
 
@@ -161,7 +161,7 @@ const buildEffectfulEntryBody = ({
   const decodedValue = coerceValueToType({
     value: decoded,
     actualType: decode.resultTypeId,
-    targetType: msgpack.msgPackTypeId,
+    targetType: msgpack.valueTypeId,
     ctx,
     fnCtx,
   });
@@ -202,7 +202,7 @@ const buildEffectfulEntryBody = ({
     if (serializerFormat === "msgpack") {
       return coerceValueToType({
         value: element,
-        actualType: msgpack.msgPackTypeId,
+        actualType: msgpack.valueTypeId,
         targetType: typeId,
         ctx,
         fnCtx,

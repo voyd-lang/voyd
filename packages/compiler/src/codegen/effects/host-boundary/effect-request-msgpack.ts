@@ -5,9 +5,9 @@ import {
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { CodegenContext } from "../../context.js";
 import type { FunctionContext } from "../../context.js";
-import { packBoundaryValueAsMsgPack } from "../../boundary/msgpack-codec.js";
+import { writeDtoValueToTree } from "../../boundary/dto-tree-codec.js";
 import type { EffectRuntime } from "../runtime-abi.js";
-import { ensureMsgPackFunctions } from "./msgpack.js";
+import { ensureMsgPackProviderFunctions } from "../../host-transport/providers/msgpack.js";
 import { packMsgPackValueForType } from "./msgpack-values.js";
 import type { EffectOpSignature } from "./types.js";
 import {
@@ -29,7 +29,7 @@ const buildArgsArray = ({
   sig: EffectOpSignature;
   request: () => binaryen.ExpressionRef;
   msgPackType: binaryen.Type;
-  msgpack: ReturnType<typeof ensureMsgPackFunctions>;
+  msgpack: ReturnType<typeof ensureMsgPackProviderFunctions>;
   arrayLocal: number;
   ctx: CodegenContext;
   runtime: EffectRuntime;
@@ -59,11 +59,12 @@ const buildArgsArray = ({
     });
     const boundarySchema = sig.externalBoundary?.params[index];
     const msgpackValue = boundarySchema
-      ? packBoundaryValueAsMsgPack({
+      ? writeDtoValueToTree({
           value: argValue,
           schema: boundarySchema,
           ctx,
           fnCtx,
+          provider: msgpack,
         })
       : packMsgPackValueForType({
           value: argValue,
@@ -116,7 +117,7 @@ export const buildEffectRequestMsgPack = ({
   sig: EffectOpSignature;
   request: () => binaryen.ExpressionRef;
   msgPackType: binaryen.Type;
-  msgpack: ReturnType<typeof ensureMsgPackFunctions>;
+  msgpack: ReturnType<typeof ensureMsgPackProviderFunctions>;
   arrayLocal: number;
   ctx: CodegenContext;
   runtime: EffectRuntime;

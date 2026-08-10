@@ -15,7 +15,7 @@ import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
 import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 import { unpackMsgPackValueForType } from "./msgpack-values.js";
-import { unpackBoundaryValueFromMsgPack } from "../../boundary/msgpack-codec.js";
+import { readDtoValueFromTree } from "../../boundary/dto-tree-codec.js";
 import { hostBoundaryPayloadSupportForType } from "./payload-compatibility.js";
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
@@ -104,7 +104,7 @@ export const createResumeContinuation = ({
 }): string =>
   stateFor(ctx, RESUME_CONTINUATION_KEY, () => {
     const msgpack = ensureSelectedHostTransportProvider(ctx);
-    const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+    const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
     const arrayType = msgpack.unpackArray.resultType;
     const storageType = msgpack.arrayRawStorage.resultType;
 
@@ -215,11 +215,12 @@ export const createResumeContinuation = ({
         sig.returnType === binaryen.none
           ? ctx.mod.nop()
           : sig.externalBoundary
-            ? unpackBoundaryValueFromMsgPack({
+            ? readDtoValueFromTree({
                 value: ctx.mod.local.get(decodedLocal, msgPackType),
                 schema: sig.externalBoundary.result,
                 ctx,
                 fnCtx: scratch,
+                provider: msgpack,
               })
             : unpackMsgPackValueForType({
                 value: ctx.mod.local.get(decodedLocal, msgPackType),
@@ -501,7 +502,7 @@ export const createEndRequestRaw = ({
 }): string =>
   stateFor(ctx, END_REQUEST_RAW_KEY, () => {
     const msgpack = ensureSelectedHostTransportProvider(ctx);
-    const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+    const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
     const arrayType = msgpack.unpackArray.resultType;
     const storageType = msgpack.arrayRawStorage.resultType;
     const specializedSites = [...ctx.effectsState.contSiteByKey.values()];
@@ -654,11 +655,12 @@ export const createEndRequestRaw = ({
           ? ctx.mod.ref.null(binaryen.eqref)
           : boxOutcomeValue({
               value: sig.externalBoundary
-                ? unpackBoundaryValueFromMsgPack({
+                ? readDtoValueFromTree({
                     value: decodedValue(),
                     schema: sig.externalBoundary.result,
                     ctx,
                     fnCtx: scratch,
+                    provider: msgpack,
                   })
                 : unpackMsgPackValueForType({
                     value: decodedValue(),

@@ -19,9 +19,9 @@ import {
   type BoundarySchema,
 } from "../boundary/schema.js";
 import {
-  packBoundaryValueAsMsgPack,
-  unpackBoundaryValueFromMsgPack,
-} from "../boundary/msgpack-codec.js";
+  writeDtoValueToTree,
+  readDtoValueFromTree,
+} from "../boundary/dto-tree-codec.js";
 import { findSerializerForType } from "../serializer.js";
 import {
   boundaryMsgPackPayloadField,
@@ -117,7 +117,7 @@ export const compileExternalCall = ({
   const bufferSizeImport = ensureExternalBufferSizeImport(ctx);
   const bufferErrorImport = ensureExternalBufferErrorImport(ctx);
   const msgpack = ensureSelectedHostTransportProvider(ctx);
-  const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+  const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
   const arrayType = msgpack.arrayWithCapacity.resultType;
   const storageType = msgpack.arrayRawStorage.resultType;
   const capacityLocal = allocateTempLocal(binaryen.i32, fnCtx);
@@ -569,7 +569,7 @@ const packExternalValue = ({
     return coerceValueToType({
       value,
       actualType: typeId,
-      targetType: msgpack.msgPackTypeId,
+      targetType: msgpack.valueTypeId,
       ctx,
       fnCtx,
     });
@@ -588,7 +588,7 @@ const packExternalValue = ({
       fnCtx,
     });
   }
-  return packBoundaryValueAsMsgPack({ value, schema, ctx, fnCtx });
+  return writeDtoValueToTree({ value, schema, ctx, fnCtx, provider: msgpack });
 };
 
 const unpackExternalValue = ({
@@ -612,14 +612,14 @@ const unpackExternalValue = ({
     }
     return coerceValueToType({
       value,
-      actualType: msgpack.msgPackTypeId,
+      actualType: msgpack.valueTypeId,
       targetType: typeId,
       ctx,
       fnCtx,
     });
   }
   if (isBoundaryMsgPackValue(typeId, ctx)) return value;
-  return unpackBoundaryValueFromMsgPack({ value, schema, ctx, fnCtx });
+  return readDtoValueFromTree({ value, schema, ctx, fnCtx, provider: msgpack });
 };
 
 const trapIfNegative = (

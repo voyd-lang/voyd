@@ -6,7 +6,7 @@ import type { ProgramSymbolId } from "../../semantics/ids.js";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
 import { requireFunctionMetaByCompilerContract } from "../function-lookup.js";
 import { stateFor } from "../effects/host-boundary/state.js";
-import type { DtoTreeFunctions } from "./msgpack-codec.js";
+import type { DtoTreeProvider } from "./dto-tree-codec.js";
 
 const FUNCTIONS_KEY = Symbol("voyd.dto.dataValueFunctions");
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
@@ -15,7 +15,7 @@ type ReachabilityState = { symbols?: Set<ProgramSymbolId> };
 
 export const ensureDataValueFunctions = (
   ctx: CodegenContext,
-): DtoTreeFunctions =>
+): DtoTreeProvider =>
   stateFor(ctx, FUNCTIONS_KEY, () => {
     const { data: dataTypeId } = validateDtoDataFunctionContracts(ctx.program);
     const requireContract = (
@@ -69,7 +69,7 @@ export const ensureDataValueFunctions = (
       ),
     );
     return {
-      msgPackTypeId: dataTypeId,
+      valueTypeId: dataTypeId,
       ...functions,
     };
   });

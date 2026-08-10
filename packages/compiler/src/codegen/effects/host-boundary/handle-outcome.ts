@@ -16,7 +16,7 @@ import {
   BoundarySchemaError,
   deriveBoundarySchema,
 } from "../../boundary/schema.js";
-import { packBoundaryValueAsMsgPack } from "../../boundary/msgpack-codec.js";
+import { writeDtoValueToTree } from "../../boundary/dto-tree-codec.js";
 import { EFFECT_RESULT_STATUS } from "./constants.js";
 import { buildEffectRequestMsgPack } from "./effect-request-msgpack.js";
 import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
@@ -41,7 +41,7 @@ export const createHandleOutcomeDynamic = ({
 }): string =>
   stateFor(ctx, HANDLE_OUTCOME_DYNAMIC_KEY, () => {
     const msgpack = ensureSelectedHostTransportProvider(ctx);
-    const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+    const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
 
     const name = `${ctx.moduleLabel}__handle_outcome_dynamic`;
     const params = binaryen.createType([
@@ -371,7 +371,7 @@ export const createHandleOutcomeDynamic = ({
                 matchesBox,
                 ctx.mod.block(null, [
                   encodeToBuffer(
-                    packBoundaryValueAsMsgPack({
+                    writeDtoValueToTree({
                       value: unboxOutcomeValue({
                         payload: ctx.mod.local.get(
                           payloadLocal,
@@ -384,6 +384,7 @@ export const createHandleOutcomeDynamic = ({
                       schema,
                       ctx,
                       fnCtx,
+                      provider: msgpack,
                     }),
                   ),
                   finishValue(),

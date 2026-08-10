@@ -229,7 +229,7 @@ const makeSelectedArray = ({
   provider: SelectedHostTransportProvider;
 }): binaryen.ExpressionRef => {
   const arrayType = provider.arrayWithCapacity.resultType;
-  const msgPackType = wasmTypeFor(provider.msgPackTypeId, ctx);
+  const msgPackType = wasmTypeFor(provider.valueTypeId, ctx);
   const local = allocateTempLocal(arrayType, fnCtx);
   const ref = () => ctx.mod.local.get(local.index, arrayType);
   return ctx.mod.block(
@@ -267,7 +267,7 @@ const makeSelectedI32 = (
   ctx.mod.call(
     provider.makeI32.wasmName,
     [ctx.mod.i32.const(value)],
-    wasmTypeFor(provider.msgPackTypeId, ctx),
+    wasmTypeFor(provider.valueTypeId, ctx),
   );
 
 const makeSelectedString = (
@@ -278,5 +278,5 @@ const makeSelectedString = (
   ctx.mod.call(
     provider.makeString.wasmName,
     [emitStringLiteral(value, ctx)],
-    wasmTypeFor(provider.msgPackTypeId, ctx),
+    wasmTypeFor(provider.valueTypeId, ctx),
   );

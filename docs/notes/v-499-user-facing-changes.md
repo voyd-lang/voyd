@@ -22,6 +22,9 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - Every closed eligible type now has one cached `AutoDtoPlan` in
   `ProgramCodegenView`. Shape reification, schema metadata, fingerprints, and
   generated traversal consume that canonical plan.
+- Compiler DTO tree traversal is provider-neutral and requires an explicit
+  concrete tree provider. The default MessagePack roles are isolated behind
+  the selected host-transport provider instead of being a traversal fallback.
 - Wasm modules declare their host ABI, DTO schema ABI, and selected transport.
   Host ABI v2 will replace the current unframed ABI when complete frame support
   is enabled.

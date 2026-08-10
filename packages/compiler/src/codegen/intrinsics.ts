@@ -41,7 +41,7 @@ import {
 import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
 import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
 import { ensureDispatcher } from "./effects/dispatcher.js";
-import { ensureMsgPackFunctions } from "./effects/host-boundary/msgpack.js";
+import { ensureMsgPackProviderFunctions } from "./host-transport/providers/msgpack.js";
 import { ensureDataValueFunctions } from "./boundary/data-value.js";
 import {
   getOutcomeValueBoxType,
@@ -59,9 +59,9 @@ import {
   withDtoFingerprint,
 } from "./boundary/schema.js";
 import {
-  packBoundaryValueAsMsgPack,
-  unpackBoundaryValueFromMsgPack,
-} from "./boundary/msgpack-codec.js";
+  writeDtoValueToTree,
+  readDtoValueFromTree,
+} from "./boundary/dto-tree-codec.js";
 import { findSerializerForType } from "./serializer.js";
 import { stableCallsiteIdFor } from "../stable-callsite-id.js";
 import {
@@ -454,7 +454,7 @@ const ensureRetainedCallbackHelper = ({
     throw new Error("callback retention requires a function value");
   }
   ensureLinearMemoryExport(ctx);
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const msgpack = ensureMsgPackProviderFunctions(ctx);
   const parameterCodecs = desc.parameters.map((parameter, index) => {
     const serializer = findSerializerForType(parameter.type, ctx);
     if (serializer && serializer.formatId !== "msgpack") {
@@ -499,7 +499,7 @@ const ensureRetainedCallbackHelper = ({
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
 
-  const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+  const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
   const base = getClosureTypeInfo(closureTypeId, ctx);
   const exportName = `__voyd_callback_${sanitizeTaskKey(base.key)}`;
   const locals: binaryen.Type[] = [];
@@ -632,16 +632,17 @@ const ensureRetainedCallbackHelper = ({
     return codec.serializer
       ? coerceValueToType({
           value,
-          actualType: msgpack.msgPackTypeId,
+          actualType: msgpack.valueTypeId,
           targetType: codec.typeId,
           ctx,
           fnCtx: helperFnCtx,
         })
-      : unpackBoundaryValueFromMsgPack({
+      : readDtoValueFromTree({
           value,
           schema: codec.schema!,
           ctx,
           fnCtx: helperFnCtx,
+          provider: msgpack,
         });
   });
   const fnField = structGetFieldValue({
@@ -750,7 +751,7 @@ const ensureRetainedCallbackHelper = ({
           ? coerceValueToType({
               value: resultValue,
               actualType: desc.returnType,
-              targetType: msgpack.msgPackTypeId,
+              targetType: msgpack.valueTypeId,
               ctx,
               fnCtx: helperFnCtx,
             })
@@ -772,11 +773,12 @@ const ensureRetainedCallbackHelper = ({
                     fnCtx: helperFnCtx,
                   });
                 })()
-              : packBoundaryValueAsMsgPack({
+              : writeDtoValueToTree({
                   value: resultValue,
                   schema: returnSchema!,
                   ctx,
                   fnCtx: helperFnCtx,
+                  provider: msgpack,
                 });
         if (!returnFingerprint) {
           throw new Error("callback return is missing a DTO fingerprint");
@@ -1528,6 +1530,7 @@ export const compileIntrinsicCall = ({
     }
     case "__boundary_value_to_msgpack": {
       assertArgCount(name, args, 1);
+      const msgpack = ensureMsgPackProviderFunctions(ctx);
       const valueTypeId = getRequiredExprType(
         call.args[0]!.expr,
         ctx,
@@ -1540,17 +1543,16 @@ export const compileIntrinsicCall = ({
             `boundary value serializer format ${serializer.formatId} is not supported`,
           );
         }
-        const msgpack = ensureMsgPackFunctions(ctx);
         return coerceValueToType({
           value: args[0]!,
           actualType: valueTypeId,
-          targetType: msgpack.msgPackTypeId,
+          targetType: msgpack.valueTypeId,
           ctx,
           fnCtx,
         });
       }
       try {
-        return packBoundaryValueAsMsgPack({
+        return writeDtoValueToTree({
           value: args[0]!,
           schema: deriveBoundarySchema({
             typeId: valueTypeId,
@@ -1560,6 +1562,7 @@ export const compileIntrinsicCall = ({
           }),
           ctx,
           fnCtx,
+          provider: msgpack,
         });
       } catch (error) {
         rethrowBoundarySchemaDiagnostic({ error, call });
@@ -1569,7 +1572,7 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 1);
       const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
       try {
-        return emitBoundaryMsgPackToValue({
+        return emitDtoTreeToValue({
           value: args[0]!,
           returnTypeId,
           ctx,
@@ -1597,7 +1600,7 @@ export const compileIntrinsicCall = ({
         });
       }
       try {
-        return emitBoundaryMsgPackToValue({
+        return emitDtoTreeToValue({
           value: args[1]!,
           returnTypeId,
           ctx,
@@ -1615,7 +1618,7 @@ export const compileIntrinsicCall = ({
         instanceId,
       );
       try {
-        return packBoundaryValueAsMsgPack({
+        return writeDtoValueToTree({
           value: args[0]!,
           schema: deriveBoundarySchema({
             typeId: valueTypeId,
@@ -1635,7 +1638,7 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 1);
       const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
       try {
-        return unpackBoundaryValueFromMsgPack({
+        return readDtoValueFromTree({
           value: args[0]!,
           schema: deriveBoundarySchema({
             typeId: returnTypeId,
@@ -1998,7 +2001,7 @@ const rethrowBoundarySchemaDiagnostic = ({
   throw error;
 };
 
-const emitBoundaryMsgPackToValue = ({
+const emitDtoTreeToValue = ({
   value,
   returnTypeId,
   ctx,
@@ -2009,6 +2012,7 @@ const emitBoundaryMsgPackToValue = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
+  const msgpack = ensureMsgPackProviderFunctions(ctx);
   const serializer = findSerializerForType(returnTypeId, ctx);
   if (serializer) {
     if (serializer.formatId !== "msgpack") {
@@ -2016,16 +2020,15 @@ const emitBoundaryMsgPackToValue = ({
         `boundary value deserializer format ${serializer.formatId} is not supported`,
       );
     }
-    const msgpack = ensureMsgPackFunctions(ctx);
     return coerceValueToType({
       value,
-      actualType: msgpack.msgPackTypeId,
+      actualType: msgpack.valueTypeId,
       targetType: returnTypeId,
       ctx,
       fnCtx,
     });
   }
-  return unpackBoundaryValueFromMsgPack({
+  return readDtoValueFromTree({
     value,
     schema: deriveBoundarySchema({
       typeId: returnTypeId,
@@ -2035,6 +2038,7 @@ const emitBoundaryMsgPackToValue = ({
     }),
     ctx,
     fnCtx,
+    provider: msgpack,
   });
 };
 

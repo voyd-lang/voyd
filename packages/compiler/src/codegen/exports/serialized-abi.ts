@@ -31,9 +31,9 @@ import {
   withDtoFingerprint,
 } from "../boundary/schema.js";
 import {
-  packBoundaryValueAsMsgPack,
-  unpackBoundaryValueFromMsgPack,
-} from "../boundary/msgpack-codec.js";
+  writeDtoValueToTree,
+  readDtoValueFromTree,
+} from "../boundary/dto-tree-codec.js";
 import {
   allocateTempLocal,
   loadLocalValue,
@@ -94,7 +94,7 @@ export const emitSerializedExportWrapper = ({
   });
 
   const msgpack = ensureSelectedHostTransportProvider(ctx);
-  const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+  const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
   const arrayType = msgpack.arrayWithCapacity.resultType;
   const storageType = msgpack.arrayRawStorage.resultType;
 
@@ -238,7 +238,7 @@ export const emitSerializedExportWrapper = ({
       }
       return coerceValueToType({
         value: payload,
-        actualType: msgpack.msgPackTypeId,
+        actualType: msgpack.valueTypeId,
         targetType: typeId,
         ctx,
         fnCtx,
@@ -247,7 +247,7 @@ export const emitSerializedExportWrapper = ({
     if (isBoundaryMsgPackValue(typeId, ctx)) {
       return coerceValueToType({
         value: payload,
-        actualType: msgpack.msgPackTypeId,
+        actualType: msgpack.valueTypeId,
         targetType: typeId,
         ctx,
         fnCtx,
@@ -264,7 +264,7 @@ export const emitSerializedExportWrapper = ({
         label: `${exportName} arg${index}`,
       });
     }
-    return unpackBoundaryValueFromMsgPack({
+    return readDtoValueFromTree({
       ctx,
       value: payload,
       schema: deriveBoundarySchema({
@@ -273,6 +273,7 @@ export const emitSerializedExportWrapper = ({
         label: `${exportName} arg${index}`,
       }),
       fnCtx,
+      provider: msgpack,
     });
   };
 
@@ -377,7 +378,7 @@ const buildPayloadEnvelopeParamExpr = ({
     if (field.name === payloadField.name) {
       const payload = coerceValueToType({
         value,
-        actualType: msgpack.msgPackTypeId,
+        actualType: msgpack.valueTypeId,
         targetType: field.typeId,
         ctx,
         fnCtx,
@@ -734,7 +735,7 @@ const packSerializedResultValue = ({
     return coerceValueToType({
       value,
       actualType: typeId,
-      targetType: msgpack.msgPackTypeId,
+      targetType: msgpack.valueTypeId,
       ctx,
       fnCtx,
     });
@@ -749,7 +750,7 @@ const packSerializedResultValue = ({
   if (adapted) {
     return adapted;
   }
-  return packBoundaryValueAsMsgPack({
+  return writeDtoValueToTree({
     value,
     schema: deriveBoundarySchema({
       typeId,
@@ -758,6 +759,7 @@ const packSerializedResultValue = ({
     }),
     ctx,
     fnCtx,
+    provider: msgpack,
   });
 };
 

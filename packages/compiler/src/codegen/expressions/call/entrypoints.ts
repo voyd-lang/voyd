@@ -571,8 +571,14 @@ export const compileMethodCallExpr = (
     typeInstanceId,
   });
   if (!meta) {
+    const targetLocation = ctx.program.modules
+      .get(targetRef.moduleId)
+      ?.functionLocations.get(targetRef.symbol);
+    const location = targetLocation
+      ? ` at ${targetLocation.filePath}:${targetLocation.startLine}:${targetLocation.startColumn}`
+      : "";
     throw new Error(
-      `codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}`,
+      `codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}${location} from ${ctx.moduleId}`,
     );
   }
   const resolvedMeta = receiverSpecializedMetaForCall({
