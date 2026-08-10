@@ -14,6 +14,9 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - DTO decoding rejects unknown fields by default. Callers must explicitly use
   `IgnoreUnknownFields` for forward-compatible input.
 - Exported DTO schemas carry stable SHA-256 fingerprints.
+- Every closed eligible type now has one cached `AutoDtoPlan` in
+  `ProgramCodegenView`. Shape reification, schema metadata, fingerprints, and
+  generated traversal consume that canonical plan.
 - Wasm modules declare their host ABI, DTO schema ABI, and selected transport.
   The JavaScript host rejects missing or incompatible transport metadata before
   running user code.

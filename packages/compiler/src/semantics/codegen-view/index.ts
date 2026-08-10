@@ -43,6 +43,17 @@ import type {
   SymbolRefKey,
   TraitImplInstance,
 } from "../typing/types.js";
+import {
+  createAutoDtoPlanIndex,
+  type AutoDtoPlanIndex,
+} from "./auto-dto-plan.js";
+
+export type {
+  AutoDtoFieldPlan,
+  AutoDtoPlan,
+  AutoDtoPlanIndex,
+  AutoDtoPrimitivePlan,
+} from "./auto-dto-plan.js";
 import { cloneNestedMap } from "../typing/call-resolution.js";
 import {
   getOptionalInfo,
@@ -506,6 +517,7 @@ export type ProgramCodegenView = {
   callableAccesses: CallableAccessIndex;
   instances: MonomorphizedInstanceIndex;
   imports: ImportWiringIndex;
+  dtoPlans: AutoDtoPlanIndex;
   modules: ReadonlyMap<string, ModuleCodegenView>;
 };
 
@@ -2730,7 +2742,9 @@ export const buildProgramCodegenView = (
     });
   });
 
-  return {
+  let program!: ProgramCodegenView;
+  const dtoPlans = createAutoDtoPlanIndex(() => program);
+  program = {
     effects,
     primitives: {
       bool: first.typing.primitives.bool,
@@ -2755,6 +2769,8 @@ export const buildProgramCodegenView = (
     callableAccesses,
     instances,
     imports,
+    dtoPlans,
     modules: moduleViews,
   };
+  return program;
 };
