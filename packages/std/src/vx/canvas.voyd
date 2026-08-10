@@ -106,7 +106,6 @@ type FrameDto = {
 }
 
 /// A typed segment in a Canvas path.
-@boundary(type: "payload", field: "payload")
 pub obj PathSegment {
   api payload: MsgPack,
   pri dto?: PathSegmentDto
@@ -145,20 +144,17 @@ pub enum CompositeOperation
   Luminosity
 
 /// A typed canvas draw or state operation produced by the Canvas constructors.
-@boundary(type: "payload", field: "payload")
 pub obj Draw {
   api payload: MsgPack,
   pri dto?: DrawDto
 }
 
 /// A versioned canvas frame ready for the browser VX runtime.
-@boundary(type: "payload", field: "payload")
 pub obj Frame {
   api payload: MsgPack
 }
 
 /// A radial fill used by canvas circles.
-@boundary(type: "payload", field: "payload")
 pub obj RadialGradient {
   api payload: MsgPack,
   pri dto?: RadialGradientDto

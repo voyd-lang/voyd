@@ -62,12 +62,7 @@ import {
   writeDtoValueToTree,
   readDtoValueFromTree,
 } from "./boundary/dto-tree-codec.js";
-import { findSerializerForType } from "./serializer.js";
 import { stableCallsiteIdFor } from "../stable-callsite-id.js";
-import {
-  boundaryMsgPackPayloadField,
-  isBoundaryMsgPackValue,
-} from "./boundary-metadata.js";
 import { currentHandlerValue } from "./expressions/call/shared.js";
 import { compileExternalCall } from "./external/imports.js";
 import { emitBoundaryShape } from "./boundary/shape.js";
@@ -401,7 +396,6 @@ const ensureTaskStarterHelper = ({
     getOutcomeValueBoxType({
       valueType: taskResultType,
       typeId: desc.returnType,
-      serializer: findSerializerForType(desc.returnType, ctx),
       ctx,
     });
   }
@@ -455,46 +449,23 @@ const ensureRetainedCallbackHelper = ({
   }
   ensureLinearMemoryExport(ctx);
   const msgpack = ensureMsgPackProviderFunctions(ctx);
-  const parameterCodecs = desc.parameters.map((parameter, index) => {
-    const serializer = findSerializerForType(parameter.type, ctx);
-    if (serializer && serializer.formatId !== "msgpack") {
-      throw new Error(
-        `callback parameter serializer format ${serializer.formatId} is not supported`,
-      );
-    }
-    return {
+  const parameterCodecs = desc.parameters.map((parameter, index) => ({
+    typeId: parameter.type,
+    schema: deriveBoundarySchema({
       typeId: parameter.type,
-      serializer,
-      schema: serializer
-        ? undefined
-        : deriveBoundarySchema({
-            typeId: parameter.type,
-            ctx,
-            label: `callback parameter ${index + 1}`,
-          }),
-    };
-  });
+      ctx,
+      label: `callback parameter ${index + 1}`,
+    }),
+  }));
   const returnWasmType = wasmTypeFor(desc.returnType, ctx);
   const returnsVoid = returnWasmType === binaryen.none;
-  const returnSerializer = returnsVoid
+  const returnSchema = returnsVoid
     ? undefined
-    : findSerializerForType(desc.returnType, ctx);
-  if (returnSerializer && returnSerializer.formatId !== "msgpack") {
-    throw new Error(
-      `callback return serializer format ${returnSerializer.formatId} is not supported`,
-    );
-  }
-  const returnUsesBoundary =
-    isBoundaryMsgPackValue(desc.returnType, ctx) ||
-    Boolean(boundaryMsgPackPayloadField(desc.returnType, ctx));
-  const returnSchema =
-    returnSerializer || returnsVoid || returnUsesBoundary
-      ? undefined
-      : deriveBoundarySchema({
-          typeId: desc.returnType,
-          ctx,
-          label: "callback return",
-        });
+    : deriveBoundarySchema({
+        typeId: desc.returnType,
+        ctx,
+        label: "callback return",
+      });
   const effectful =
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
@@ -629,21 +600,13 @@ const ensureRetainedCallbackHelper = ({
   };
   const payloadValues = parameterCodecs.map((codec, index) => {
     const value = payloadElementValue(index);
-    return codec.serializer
-      ? coerceValueToType({
-          value,
-          actualType: msgpack.valueTypeId,
-          targetType: codec.typeId,
-          ctx,
-          fnCtx: helperFnCtx,
-        })
-      : readDtoValueFromTree({
-          value,
-          schema: codec.schema!,
-          ctx,
-          fnCtx: helperFnCtx,
-          provider: msgpack,
-        });
+    return readDtoValueFromTree({
+      value,
+      schema: codec.schema,
+      ctx,
+      fnCtx: helperFnCtx,
+      provider: msgpack,
+    });
   });
   const fnField = structGetFieldValue({
     mod: ctx.mod,
@@ -742,44 +705,17 @@ const ensureRetainedCallbackHelper = ({
       });
   const returnFingerprint = returnSchema
     ? withDtoFingerprint(returnSchema).fingerprint
-    : `legacy:${desc.returnType}`;
+    : undefined;
   const encodedLength = returnsVoid
     ? ctx.mod.block(null, [resultValue, ctx.mod.i32.const(-2)], binaryen.i32)
     : (() => {
-        const payloadField = boundaryMsgPackPayloadField(desc.returnType, ctx);
-        const encodedResultValue = returnSerializer
-          ? coerceValueToType({
-              value: resultValue,
-              actualType: desc.returnType,
-              targetType: msgpack.valueTypeId,
-              ctx,
-              fnCtx: helperFnCtx,
-            })
-          : isBoundaryMsgPackValue(desc.returnType, ctx)
-            ? resultValue
-            : payloadField
-              ? (() => {
-                  const info = getStructuralTypeInfo(desc.returnType, ctx);
-                  if (!info) {
-                    throw new Error(
-                      `boundary payload callback return ${desc.returnType} is missing structural info`,
-                    );
-                  }
-                  return loadStructuralField({
-                    structInfo: info,
-                    field: payloadField,
-                    pointer: () => resultValue,
-                    ctx,
-                    fnCtx: helperFnCtx,
-                  });
-                })()
-              : writeDtoValueToTree({
-                  value: resultValue,
-                  schema: returnSchema!,
-                  ctx,
-                  fnCtx: helperFnCtx,
-                  provider: msgpack,
-                });
+        const encodedResultValue = writeDtoValueToTree({
+          value: resultValue,
+          schema: returnSchema!,
+          ctx,
+          fnCtx: helperFnCtx,
+          provider: msgpack,
+        });
         if (!returnFingerprint) {
           throw new Error("callback return is missing a DTO fingerprint");
         }
@@ -1536,21 +1472,6 @@ export const compileIntrinsicCall = ({
         ctx,
         instanceId,
       );
-      const serializer = findSerializerForType(valueTypeId, ctx);
-      if (serializer) {
-        if (serializer.formatId !== "msgpack") {
-          throw new Error(
-            `boundary value serializer format ${serializer.formatId} is not supported`,
-          );
-        }
-        return coerceValueToType({
-          value: args[0]!,
-          actualType: valueTypeId,
-          targetType: msgpack.valueTypeId,
-          ctx,
-          fnCtx,
-        });
-      }
       try {
         return writeDtoValueToTree({
           value: args[0]!,
@@ -2013,21 +1934,6 @@ const emitDtoTreeToValue = ({
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackProviderFunctions(ctx);
-  const serializer = findSerializerForType(returnTypeId, ctx);
-  if (serializer) {
-    if (serializer.formatId !== "msgpack") {
-      throw new Error(
-        `boundary value deserializer format ${serializer.formatId} is not supported`,
-      );
-    }
-    return coerceValueToType({
-      value,
-      actualType: msgpack.valueTypeId,
-      targetType: returnTypeId,
-      ctx,
-      fnCtx,
-    });
-  }
   return readDtoValueFromTree({
     value,
     schema: deriveBoundarySchema({

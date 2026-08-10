@@ -13,20 +13,16 @@ pub use std::msgpack::MsgPack
 pub self::canvas
 pub use self::command::{ Cmd, Ref, retain_message_mapper, retain_typed_message_mapper }
 
-@boundary(type: "value")
 pub type Html<Msg> = MsgPack
 pub type HtmlNode = MsgPack
-@boundary(type: "value")
 pub type Attr<Msg> = MsgPack
 pub type HtmlAttr = MsgPack
 pub type RenderKey = String
 
-@boundary(type: "payload", field: "payload")
 pub obj Program<Model, Msg> {
   api payload: MsgPack
 }
 
-@boundary(type: "payload", field: "payload")
 pub obj Sub<Msg> {
   api payload: MsgPack
 }

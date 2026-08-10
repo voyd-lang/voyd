@@ -1,5 +1,4 @@
 import type { HirExpression } from "../../semantics/hir/index.js";
-import type { ProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import type { AutoDtoPlan } from "../../semantics/codegen-view/auto-dto-plan.js";
 import type {
   HirExprId,
@@ -55,74 +54,6 @@ export const resolveIntrinsicFunction = ({
   return matched
     ? { moduleId: matched.moduleId, symbol: matched.symbol }
     : undefined;
-};
-
-export const serializerForType = ({
-  ir,
-  typeId,
-}: {
-  ir: ProgramOptimizationIR;
-  typeId: TypeId;
-}): ReturnType<ProgramCodegenView["symbols"]["getSerializer"]> => {
-  const serializers = [
-    ...ir.baseProgram.types
-      .getAliasSymbols(typeId)
-      .map((symbol) => ir.baseProgram.symbols.getSerializer(symbol)),
-    (() => {
-      const owner = ir.baseProgram.types.getNominalOwner(typeId);
-      return typeof owner === "number"
-        ? ir.baseProgram.symbols.getSerializer(owner)
-        : undefined;
-    })(),
-  ].filter((serializer): serializer is NonNullable<typeof serializer> =>
-    Boolean(serializer),
-  );
-  if (serializers.length === 0) {
-    return undefined;
-  }
-  const reference = serializers[0]!;
-  const mismatch = serializers.find(
-    (serializer) =>
-      serializer.formatId !== reference.formatId ||
-      serializer.encode.moduleId !== reference.encode.moduleId ||
-      serializer.encode.symbol !== reference.encode.symbol ||
-      serializer.decode.moduleId !== reference.decode.moduleId ||
-      serializer.decode.symbol !== reference.decode.symbol,
-  );
-  if (mismatch) {
-    throw new Error(`conflicting serializers for type ${typeId}`);
-  }
-  return reference;
-};
-
-export const serializerForTypes = ({
-  ir,
-  typeIds,
-}: {
-  ir: ProgramOptimizationIR;
-  typeIds: readonly TypeId[];
-}): ReturnType<ProgramCodegenView["symbols"]["getSerializer"]> => {
-  const serializers = typeIds
-    .map((typeId) => serializerForType({ ir, typeId }))
-    .filter((serializer): serializer is NonNullable<typeof serializer> =>
-      Boolean(serializer),
-    );
-  if (serializers.length === 0) {
-    return undefined;
-  }
-  const reference = serializers[0]!;
-  const mismatch = serializers.find(
-    (serializer) =>
-      serializer.formatId !== reference.formatId ||
-      serializer.encode.moduleId !== reference.encode.moduleId ||
-      serializer.encode.symbol !== reference.encode.symbol ||
-      serializer.decode.moduleId !== reference.decode.moduleId ||
-      serializer.decode.symbol !== reference.decode.symbol,
-  );
-  if (mismatch) {
-    throw new Error(`conflicting serializers for exported type list`);
-  }
-  return reference;
 };
 
 export const shouldConsiderBoundaryExportForOptimization = ({
@@ -530,20 +461,6 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       );
     };
 
-    const enqueueSerializersForTypes = (typeIds: readonly TypeId[]): void => {
-      typeIds.forEach((typeId) => {
-        const serializer = serializerForType({
-          ir: ctx.ir,
-          typeId,
-        });
-        if (!serializer) {
-          return;
-        }
-        enqueueKnownFunctionInstances(serializer.encode);
-        enqueueKnownFunctionInstances(serializer.decode);
-      });
-    };
-
     const exportedFunctionTypeLists = ({
       moduleId,
       symbol,
@@ -589,28 +506,6 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       });
     };
 
-    const enqueueSerializedExportDependencies = ({
-      moduleId,
-      symbol,
-    }: {
-      moduleId: string;
-      symbol: SymbolId;
-    }): void => {
-      exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
-        const serializer = serializerForTypes({
-          ir: ctx.ir,
-          typeIds,
-        });
-        if (!serializer) {
-          return;
-        }
-        enqueueSerializersForTypes(typeIds);
-        if (serializer.formatId === "msgpack") {
-          enqueueMsgPackProviderFunctions();
-        }
-      });
-    };
-
     const enqueueBoundaryExportDependencies = ({
       moduleId,
       symbol,
@@ -620,7 +515,6 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
     }): void => {
       enqueueMsgPackProviderFunctions();
       exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
-        enqueueSerializersForTypes(typeIds);
         typeIds.forEach((typeId) => {
           try {
             enqueueCustomDtoPlan(
@@ -879,10 +773,6 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
     rootModules.forEach((rootModule) => {
       rootModule.hir.module.exports.forEach((entry) => {
         recordResolvedSymbolReachability({
-          moduleId: rootModule.moduleId,
-          symbol: entry.symbol,
-        });
-        enqueueSerializedExportDependencies({
           moduleId: rootModule.moduleId,
           symbol: entry.symbol,
         });

@@ -5,8 +5,6 @@ import { compilerContractAttributeMacro } from "./compiler-contract-attribute.js
 import { intrinsicTypeAttributeMacro } from "./intrinsic-type-attribute.js";
 import { effectAttributeMacro } from "./effect-attribute.js";
 import { externalAttributeMacro } from "./external-attribute.js";
-import { serializerAttributeMacro } from "./serializer-attribute.js";
-import { boundaryAttributeMacro } from "./boundary-attribute.js";
 import { borrowContractAttributeMacro } from "./borrow-contract-attribute.js";
 import { primary } from "./primary.js";
 import { attachColonClauses } from "./colon-clauses.js";
@@ -30,8 +28,6 @@ export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
   borrowContractAttributeMacro,
   compilerContractAttributeMacro,
   intrinsicTypeAttributeMacro,
-  boundaryAttributeMacro,
-  serializerAttributeMacro,
   externalAttributeMacro,
   effectAttributeMacro,
   testBlockMacro,

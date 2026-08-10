@@ -59,7 +59,6 @@ import {
   getOptionalInfo,
   type OptionalResolverContext,
 } from "../typing/optionals.js";
-import type { SerializerMetadata } from "../symbol-index.js";
 import { buildProgramSymbolArena } from "../program-symbol-arena.js";
 import type { ProgramSymbolArena, SymbolRef } from "../program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "../canonical-symbol-ref.js";
@@ -255,7 +254,6 @@ export type CodegenFunctionSignature = {
   parameters: readonly {
     typeId: TypeId;
     declaredType?: HirTypeExpr;
-    declaredSerializer?: SerializerMetadata;
     label?: string;
     optional: boolean;
     defaulted?: boolean;
@@ -266,7 +264,6 @@ export type CodegenFunctionSignature = {
   }[];
   returnType: TypeId;
   declaredReturnType?: HirTypeExpr;
-  declaredReturnSerializer?: SerializerMetadata;
   effectRow: number;
   typeParams: readonly {
     symbol: SymbolId;
@@ -2573,7 +2570,6 @@ export const buildProgramCodegenView = (
         parameters: signature.parameters.map((param) => ({
           typeId: param.type,
           declaredType: param.declaredType,
-          declaredSerializer: param.declaredSerializer,
           label: param.label,
           optional: param.optional === true,
           defaulted: param.defaulted === true,
@@ -2589,7 +2585,6 @@ export const buildProgramCodegenView = (
         })),
         returnType: signature.returnType,
         declaredReturnType: signature.declaredReturnType,
-        declaredReturnSerializer: signature.declaredReturnSerializer,
         effectRow: signature.effectRow,
         typeParams: (signature.typeParams ?? []).map((param) => ({
           symbol: param.symbol,

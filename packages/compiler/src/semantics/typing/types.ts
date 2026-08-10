@@ -27,7 +27,6 @@ import type { TypeTable } from "./type-table.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import type { Diagnostic } from "../ids.js";
 import type { SymbolRef } from "./symbol-ref.js";
-import type { SerializerMetadata } from "../symbol-index.js";
 
 export type TypeCheckMode = "relaxed" | "strict";
 export type SymbolRefKey = string;
@@ -138,7 +137,6 @@ export interface FunctionSignature {
   parameters: readonly ParamSignature[];
   returnType: TypeId;
   declaredReturnType?: HirTypeExpr;
-  declaredReturnSerializer?: SerializerMetadata;
   hasExplicitReturn: boolean;
   annotatedReturn: boolean;
   effectRow: EffectRowId;
@@ -151,7 +149,6 @@ export interface FunctionSignature {
 export interface ParamSignature {
   type: TypeId;
   declaredType?: HirTypeExpr;
-  declaredSerializer?: SerializerMetadata;
   label?: string;
   bindingKind?: HirBindingKind;
   span?: SourceSpan;
@@ -853,7 +850,6 @@ const cloneFunctionSignature = (
   parameters: signature.parameters.map((param) => ({ ...param })),
   returnType: signature.returnType,
   declaredReturnType: signature.declaredReturnType,
-  declaredReturnSerializer: signature.declaredReturnSerializer,
   hasExplicitReturn: signature.hasExplicitReturn,
   annotatedReturn: signature.annotatedReturn,
   effectRow: signature.effectRow,

@@ -8,11 +8,7 @@ import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
 import { allocateTempLocal } from "../locals.js";
 import { ensureLinearMemoryExport } from "../memory-exports.js";
 import { ensureSelectedHostTransportProvider } from "../host-transport/selected-provider.js";
-import {
-  wasmTypeFor,
-  getStructuralTypeInfo,
-  getRequiredExprType,
-} from "../types.js";
+import { wasmTypeFor, getRequiredExprType } from "../types.js";
 import {
   deriveBoundarySchema,
   withDtoFingerprint,
@@ -22,12 +18,6 @@ import {
   writeDtoValueToTree,
   readDtoValueFromTree,
 } from "../boundary/dto-tree-codec.js";
-import { findSerializerForType } from "../serializer.js";
-import {
-  boundaryMsgPackPayloadField,
-  isBoundaryMsgPackValue,
-} from "../boundary-metadata.js";
-import { coerceValueToType, loadStructuralField } from "../structural.js";
 import type { EffectRegistry } from "../effects/effect-registry.js";
 import { murmurHash3 } from "@voyd-lang/lib/murmur-hash.js";
 import { arrayGet } from "@voyd-lang/lib/binaryen-gc/index.js";
@@ -172,11 +162,9 @@ export const compileExternalCall = ({
         fingerprint: schema.fingerprint,
         value: packExternalValue({
           value: arg,
-          typeId: paramTypeIds[index]!,
           schema,
           ctx,
           fnCtx,
-          label: `${identity.interfaceId}::${identity.functionName} arg${index}`,
         }),
       };
     }),
@@ -312,7 +300,6 @@ export const compileExternalCall = ({
 
   const value = unpackExternalValue({
     value: typedPayloadField(1),
-    typeId: resultTypeId,
     schema: result,
     ctx,
     fnCtx,
@@ -547,78 +534,31 @@ const externalRequirementKey = (
 
 const packExternalValue = ({
   value,
-  typeId,
   schema,
   ctx,
   fnCtx,
-  label,
 }: {
   value: binaryen.ExpressionRef;
-  typeId: TypeId;
   schema: BoundarySchema;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-  label: string;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureSelectedHostTransportProvider(ctx);
-  const serializer = findSerializerForType(typeId, ctx);
-  if (serializer) {
-    if (serializer.formatId !== "msgpack") {
-      throw new Error(`unsupported external serializer for ${label}`);
-    }
-    return coerceValueToType({
-      value,
-      actualType: typeId,
-      targetType: msgpack.valueTypeId,
-      ctx,
-      fnCtx,
-    });
-  }
-  if (isBoundaryMsgPackValue(typeId, ctx)) return value;
-  const payloadField = boundaryMsgPackPayloadField(typeId, ctx);
-  if (payloadField) {
-    const info = getStructuralTypeInfo(typeId, ctx);
-    if (!info)
-      throw new Error(`external payload ${label} is missing structural info`);
-    return loadStructuralField({
-      structInfo: info,
-      field: payloadField,
-      pointer: () => value,
-      ctx,
-      fnCtx,
-    });
-  }
   return writeDtoValueToTree({ value, schema, ctx, fnCtx, provider: msgpack });
 };
 
 const unpackExternalValue = ({
   value,
-  typeId,
   schema,
   ctx,
   fnCtx,
 }: {
   value: binaryen.ExpressionRef;
-  typeId: TypeId;
   schema: BoundarySchema;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureSelectedHostTransportProvider(ctx);
-  const serializer = findSerializerForType(typeId, ctx);
-  if (serializer) {
-    if (serializer.formatId !== "msgpack") {
-      throw new Error("unsupported external result serializer");
-    }
-    return coerceValueToType({
-      value,
-      actualType: msgpack.valueTypeId,
-      targetType: typeId,
-      ctx,
-      fnCtx,
-    });
-  }
-  if (isBoundaryMsgPackValue(typeId, ctx)) return value;
   return readDtoValueFromTree({ value, schema, ctx, fnCtx, provider: msgpack });
 };
 

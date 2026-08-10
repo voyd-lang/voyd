@@ -1,111 +1,71 @@
-import binaryen from "binaryen";
-import { refCast } from "@voyd-lang/lib/binaryen-gc/index.js";
-import { wasmTypeFor } from "../../types.js";
-import type { CodegenContext } from "../../context.js";
-import type { SerializerMetadata } from "../../../semantics/symbol-index.js";
+import type binaryen from "binaryen";
+import type { CodegenContext, FunctionContext } from "../../context.js";
 import { ensureMsgPackProviderFunctions } from "../../host-transport/providers/msgpack.js";
-import { hostBoundaryPayloadSupportForType } from "./payload-compatibility.js";
+import type { BoundarySchema } from "../../boundary/schema.js";
+import { deriveBoundarySchema } from "../../boundary/schema.js";
+import {
+  readDtoValueFromTree,
+  writeDtoValueToTree,
+} from "../../boundary/dto-tree-codec.js";
 
 export const packMsgPackValueForType = ({
   value,
   typeId,
-  msgPackType,
   msgpack,
   ctx,
+  fnCtx,
   label,
-  serializerOverride,
-  onUnsupported = "trap",
+  schema,
 }: {
   value: binaryen.ExpressionRef;
   typeId: number;
-  msgPackType: binaryen.Type;
   msgpack: ReturnType<typeof ensureMsgPackProviderFunctions>;
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
   label: string;
-  serializerOverride?: SerializerMetadata;
-  onUnsupported?: "trap" | "throw";
-}): binaryen.ExpressionRef => {
-  const support = hostBoundaryPayloadSupportForType({
-    typeId,
+  schema?: BoundarySchema;
+}): binaryen.ExpressionRef =>
+  writeDtoValueToTree({
+    value,
+    schema:
+      schema ??
+      deriveBoundarySchema({
+        typeId,
+        ctx,
+        label,
+      }),
     ctx,
-    serializerOverride,
+    fnCtx,
+    provider: msgpack,
   });
-  if (support.supported) {
-    if (support.strategy === "serializer-msgpack") {
-      return refCast(ctx.mod, value, msgPackType);
-    }
-    switch (support.primitive) {
-      case "bool":
-        return ctx.mod.call(msgpack.makeBool.wasmName, [value], msgPackType);
-      case "i32":
-        return ctx.mod.call(msgpack.makeI32.wasmName, [value], msgPackType);
-      case "i64":
-        return ctx.mod.call(msgpack.makeI64.wasmName, [value], msgPackType);
-      case "f32":
-        return ctx.mod.call(msgpack.makeF32.wasmName, [value], msgPackType);
-      case "f64":
-        return ctx.mod.call(msgpack.makeF64.wasmName, [value], msgPackType);
-      case "void":
-        return ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType);
-    }
-  }
-
-  if (support.reason.kind === "unsupported-serializer-format") {
-    throw new Error(
-      `unsupported serializer format for ${label}: ${support.reason.formatId}`
-    );
-  }
-
-  if (onUnsupported === "throw") {
-    throw new Error(`unsupported msgpack value for ${label}`);
-  }
-  return ctx.mod.block(null, [ctx.mod.unreachable()], msgPackType);
-};
 
 export const unpackMsgPackValueForType = ({
   value,
   typeId,
   msgpack,
   ctx,
+  fnCtx,
   label,
-  serializerOverride,
+  schema,
 }: {
   value: binaryen.ExpressionRef;
   typeId: number;
   msgpack: ReturnType<typeof ensureMsgPackProviderFunctions>;
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
   label: string;
-  serializerOverride?: SerializerMetadata;
-}): binaryen.ExpressionRef => {
-  const support = hostBoundaryPayloadSupportForType({
-    typeId,
+  schema?: BoundarySchema;
+}): binaryen.ExpressionRef =>
+  readDtoValueFromTree({
+    value,
+    schema:
+      schema ??
+      deriveBoundarySchema({
+        typeId,
+        ctx,
+        label,
+      }),
     ctx,
-    serializerOverride,
+    fnCtx,
+    provider: msgpack,
   });
-  if (support.supported) {
-    if (support.strategy === "serializer-msgpack") {
-      return refCast(ctx.mod, value, wasmTypeFor(typeId, ctx));
-    }
-    switch (support.primitive) {
-      case "bool":
-        return ctx.mod.call(msgpack.unpackBool.wasmName, [value], binaryen.i32);
-      case "i32":
-        return ctx.mod.call(msgpack.unpackI32.wasmName, [value], binaryen.i32);
-      case "i64":
-        return ctx.mod.call(msgpack.unpackI64.wasmName, [value], binaryen.i64);
-      case "f32":
-        return ctx.mod.call(msgpack.unpackF32.wasmName, [value], binaryen.f32);
-      case "f64":
-        return ctx.mod.call(msgpack.unpackF64.wasmName, [value], binaryen.f64);
-      case "void":
-        return ctx.mod.nop();
-    }
-  }
-
-  if (support.reason.kind === "unsupported-serializer-format") {
-    throw new Error(
-      `unsupported serializer format for ${label}: ${support.reason.formatId}`
-    );
-  }
-  throw new Error(`unsupported msgpack value for ${label}`);
-};

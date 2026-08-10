@@ -47,7 +47,6 @@ type ExpandFunctionalMacroOptions = {
 
 const DEFAULT_MAX_ATTRIBUTE_EXPANSION_DEPTH = 64;
 const RESERVED_ATTRIBUTE_NAMES = new Set([
-  "boundary",
   "borrow_contract",
   "compiler_contract",
   "effect",
@@ -55,7 +54,6 @@ const RESERVED_ATTRIBUTE_NAMES = new Set([
   "intrinsic",
   "intrinsic_type",
   "operation",
-  "serializer",
   "type",
 ]);
 

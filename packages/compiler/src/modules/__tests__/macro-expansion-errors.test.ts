@@ -83,29 +83,6 @@ describe("expandModuleMacros diagnostics", () => {
     expect(diagnostic?.span.file).toContain("main.voyd");
   });
 
-  it("reports @serializer macro errors as module-graph diagnostics", async () => {
-    const root = resolve("/proj/src");
-    const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: [
-        '@serializer("msgpack", encode, decode)',
-        '@serializer("msgpack", encode, decode)',
-        "pub type Foo = i32",
-      ].join("\n"),
-    });
-
-    const graph = await buildModuleGraph({
-      entryPath: `${root}${sep}main.voyd`,
-      host,
-      roots: { src: root },
-    });
-
-    const diagnostic = graph.diagnostics.find((entry) => entry.code === "MD0003");
-    expect(diagnostic).toBeTruthy();
-    expect(diagnostic?.message).toMatch(/serializer/i);
-    expect(diagnostic?.message).toMatch(/duplicate/i);
-    expect(diagnostic?.span.file).toContain("main.voyd");
-  });
-
   it("reports unknown declaration attributes at the invocation", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

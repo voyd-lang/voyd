@@ -92,9 +92,9 @@ The wire schema is deliberate and inspectable:
   dispatch or migrate it in application code. The codec does not inject a
   version or perform migrations.
 
-Types marked with `@boundary(type: "payload", field: "payload")` can carry the
-generated `MsgPack` value through existing host-boundary adapters. This keeps
-the typed schema inside Voyd while preserving the established envelope ABI.
+Exceptional nominal types declare one provider-neutral wire representation by
+implementing `CustomDto<T, Representation>`. The same representation is used
+by every codec and host boundary.
 
 Unsupported shapes and ambiguous variant payloads fail at compile time at the
 codec call. In particular, variant payload fields cannot be named `tag` or

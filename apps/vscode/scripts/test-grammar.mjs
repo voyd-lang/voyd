@@ -266,7 +266,7 @@ assertMatchesAny(
 );
 
 assert(attributePattern, "Expected attribute grammar pattern to exist");
-["boundary", "compiler_contract", "effect", "external", "instrument", "intrinsic", "intrinsic_type", "serializer"].forEach(
+["compiler_contract", "effect", "external", "instrument", "intrinsic", "intrinsic_type"].forEach(
   (attribute) =>
     assert(
       matchesEntirePattern(attributePattern, `@${attribute}`),

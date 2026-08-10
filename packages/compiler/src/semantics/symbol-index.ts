@@ -15,17 +15,6 @@ export type IntrinsicFunctionFlags = {
   external?: { interfaceId: string; functionName: string };
 };
 
-export type SerializerMetadata = {
-  formatId: string;
-  encode: { moduleId: string; symbol: SymbolId };
-  decode: { moduleId: string; symbol: SymbolId };
-};
-
-export type BoundaryMetadata = {
-  type: "value" | "payload";
-  field?: string;
-};
-
 export type ModuleSymbolIndex = {
   moduleId: string;
   packageId: string;
@@ -47,8 +36,6 @@ export type ModuleSymbolIndex = {
   resolveCompilerFunctionContract(
     id: CompilerFunctionContractId,
   ): SymbolId | undefined;
-  getSerializer(symbol: SymbolId): SerializerMetadata | undefined;
-  getBoundary(symbol: SymbolId): BoundaryMetadata | undefined;
 };
 
 export const buildModuleSymbolIndex = ({
@@ -82,16 +69,20 @@ export const buildModuleSymbolIndex = ({
     CompilerFunctionContractId,
     SymbolId[]
   >();
-  const serializerBySymbol = new Map<SymbolId, SerializerMetadata>();
-  const boundaryBySymbol = new Map<SymbolId, BoundaryMetadata>();
 
   const snapshot = symbolTable.snapshot();
   snapshot.symbols.forEach((record) => {
     if (!record) return;
     const symbol = record.id as SymbolId;
     nameBySymbol.set(symbol, record.name);
-    moduleScopedBySymbol.set(symbol, symbolTable.getScope(record.scope).kind === "module");
-    if (record.scope === symbolTable.rootScope && !topLevelByName.has(record.name)) {
+    moduleScopedBySymbol.set(
+      symbol,
+      symbolTable.getScope(record.scope).kind === "module",
+    );
+    if (
+      record.scope === symbolTable.rootScope &&
+      !topLevelByName.has(record.name)
+    ) {
       topLevelByName.set(record.name, symbol);
     }
 
@@ -106,8 +97,6 @@ export const buildModuleSymbolIndex = ({
       externalFunction?: unknown;
       compilerFunctionContract?: unknown;
       import?: unknown;
-      serializer?: unknown;
-      boundary?: unknown;
     };
 
     if (typeof metadata.intrinsicType === "string") {
@@ -130,7 +119,10 @@ export const buildModuleSymbolIndex = ({
     if (typeof metadata.intrinsicName === "string") {
       intrinsicNameBySymbol.set(symbol, metadata.intrinsicName);
     }
-    if (metadata.intrinsic === true || metadata.intrinsicUsesSignature === true) {
+    if (
+      metadata.intrinsic === true ||
+      metadata.intrinsicUsesSignature === true
+    ) {
       intrinsicFlagsBySymbol.set(symbol, {
         intrinsic: metadata.intrinsic === true,
         intrinsicUsesSignature: metadata.intrinsicUsesSignature === true,
@@ -152,12 +144,6 @@ export const buildModuleSymbolIndex = ({
         compilerFunctionContract.id,
         contractSymbols,
       );
-    }
-    if (isSerializerMetadata(metadata.serializer)) {
-      serializerBySymbol.set(symbol, metadata.serializer);
-    }
-    if (isBoundaryMetadata(metadata.boundary)) {
-      boundaryBySymbol.set(symbol, metadata.boundary);
     }
   });
 
@@ -200,8 +186,6 @@ export const buildModuleSymbolIndex = ({
       }
       return symbols[0];
     },
-    getSerializer: (symbol) => serializerBySymbol.get(symbol),
-    getBoundary: (symbol) => boundaryBySymbol.get(symbol),
   };
 };
 
@@ -291,33 +275,4 @@ const readCompilerFunctionContract = (
     return undefined;
   }
   return spec;
-};
-
-const isSerializerMetadata = (value: unknown): value is SerializerMetadata => {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const record = value as {
-    formatId?: unknown;
-    encode?: { moduleId?: unknown; symbol?: unknown };
-    decode?: { moduleId?: unknown; symbol?: unknown };
-  };
-  return (
-    typeof record.formatId === "string" &&
-    typeof record.encode?.moduleId === "string" &&
-    typeof record.encode?.symbol === "number" &&
-    typeof record.decode?.moduleId === "string" &&
-    typeof record.decode?.symbol === "number"
-  );
-};
-
-const isBoundaryMetadata = (value: unknown): value is BoundaryMetadata => {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const record = value as { type?: unknown; field?: unknown };
-  return (
-    (record.type === "value" || record.type === "payload") &&
-    (record.field === undefined || typeof record.field === "string")
-  );
 };

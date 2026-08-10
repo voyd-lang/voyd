@@ -42,10 +42,6 @@ import {
 } from "./types.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
 import { coerceExprToWasmType } from "./wasm-type-coercions.js";
-import {
-  findUnambiguousSerializerForType,
-  serializerKeyFor,
-} from "./serializer.js";
 import { captureMultivalueLanes } from "./multivalue.js";
 import { buildInstanceSubstitution } from "./type-substitution.js";
 import {
@@ -1541,20 +1537,6 @@ export const coerceValueToType = ({
     }
     return cloneTransferredValue({ value, typeId: targetType, ctx, fnCtx });
   }
-  const actualSerializer = findUnambiguousSerializerForType(actualType, ctx);
-  const targetSerializer = findUnambiguousSerializerForType(targetType, ctx);
-  if (
-    actualSerializer &&
-    targetSerializer &&
-    serializerKeyFor(actualSerializer) === serializerKeyFor(targetSerializer)
-  ) {
-    return coerceExprToWasmType({
-      expr: value,
-      targetType: wasmTypeFor(targetType, ctx),
-      ctx,
-    });
-  }
-
   if (targetDesc.kind === "recursive") {
     const unfolded = ctx.program.types.substitute(
       targetDesc.body,

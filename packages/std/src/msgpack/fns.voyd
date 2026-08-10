@@ -43,7 +43,6 @@ use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ new_string, String, StringSlice }
 
-@serializer("msgpack", encode_value_raw, decode_value_raw)
 /// Recursive MessagePack value union used by the serializer boundary.
 pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | MsgPackMap
 

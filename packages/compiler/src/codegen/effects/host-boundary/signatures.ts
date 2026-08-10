@@ -119,14 +119,6 @@ export const collectEffectOperationSignatures = (
             ),
           )?.external;
           const fingerprintFor = (typeId: number, label: string): string => {
-            if (
-              !siteCtx.program.dtoPlans.isEligible({
-                typeId,
-                moduleId: siteCtx.moduleId,
-              })
-            ) {
-              return `legacy:${typeId}`;
-            }
             const fingerprint = withDtoFingerprint(
               deriveBoundarySchema({ typeId, ctx: siteCtx, label }),
             ).fingerprint;
@@ -152,13 +144,11 @@ export const collectEffectOperationSignatures = (
                   external?.params[index]?.fingerprint ??
                   fingerprintFor(typeId, `${opInfo.label} arg${index}`),
               ),
-              paramSerializerOverrides: signature.paramSerializerOverrides,
               returnType,
               returnTypeId: signature.returnType,
               resultFingerprint:
                 external?.result.fingerprint ??
                 fingerprintFor(signature.returnType, `${opInfo.label} result`),
-              returnSerializerOverride: signature.returnSerializerOverride,
               argsType,
               label: opInfo.label,
               span:

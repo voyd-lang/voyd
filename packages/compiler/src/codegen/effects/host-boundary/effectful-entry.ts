@@ -5,7 +5,6 @@ import type {
   FunctionContext,
   FunctionMetadata,
 } from "../../context.js";
-import { findSerializerFormatForType } from "../../serializer.js";
 import { coerceValueToType } from "../../structural.js";
 import { wasmTypeFor } from "../../types.js";
 import type { EffectRuntime } from "../runtime-abi.js";
@@ -206,25 +205,13 @@ const buildEffectfulEntryBody = ({
       msgPackType,
       false,
     );
-    const serializerFormat =
-      meta.parameters[index]?.serializer?.formatId ??
-      findSerializerFormatForType(typeId, ctx);
-    if (serializerFormat === "msgpack") {
-      return coerceValueToType({
-        value: element,
-        actualType: msgpack.valueTypeId,
-        targetType: typeId,
-        ctx,
-        fnCtx,
-      });
-    }
     return unpackMsgPackValueForType({
       ctx,
       msgpack,
       value: element,
       typeId,
+      fnCtx,
       label: `${exportName} arg${index}`,
-      serializerOverride: meta.parameters[index]?.serializer,
     });
   });
   const result = effectfulCall({ ctx, runtime, meta, args: userArgs });

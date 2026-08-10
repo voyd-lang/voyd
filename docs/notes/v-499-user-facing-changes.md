@@ -23,6 +23,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - Compiler-generated DTO traversal, boundary shapes, schema fingerprints, and
   JavaScript host adapters use the declared `CustomDto` representation. The
   custom type itself never becomes a second wire shape.
+- The `@boundary` and `@serializer` attributes are removed. Automatic DTO plans
+  and `CustomDto` representations are the only typed boundary contracts.
 - Export, effect, and external-package DTO schemas carry stable SHA-256
   fingerprints at every typed payload position.
 - Every closed eligible type now has one cached `AutoDtoPlan` in
@@ -76,9 +78,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
   over JSON source text. Typed JSON source decoding validates against the
   requested shape without constructing an intermediate `JsonValue` tree.
 
-## Planned removals and replacements
+## Planned replacements
 
-- Remove `@boundary` and `@serializer` syntax and metadata.
 - Remove public MessagePack boundary helpers and compiler contracts.
 - Replace format-specific compiler traversal with the single `AutoDtoPlan`
   exposed through `ProgramCodegenView`.

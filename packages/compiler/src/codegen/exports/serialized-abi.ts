@@ -9,21 +9,11 @@ import type {
   FunctionMetadata,
   TypeId,
 } from "../context.js";
-import type { SerializerMetadata } from "../../semantics/symbol-index.js";
-import { findSerializerForType } from "../serializer.js";
 import {
-  coerceValueToType,
-  initStructuralValue,
   liftHeapValueToInline,
-  lowerValueForHeapField,
   storeValueIntoStorageRef,
 } from "../structural.js";
-import {
-  abiTypeFor,
-  getSignatureSpillBoxType,
-  getStructuralTypeInfo,
-  wasmTypeFor,
-} from "../types.js";
+import { abiTypeFor, getSignatureSpillBoxType, wasmTypeFor } from "../types.js";
 import { ensureLinearMemoryExport } from "../memory-exports.js";
 import { ensureSelectedHostTransportProvider } from "../host-transport/selected-provider.js";
 import {
@@ -45,53 +35,28 @@ import {
   unboxSignatureSpillValue,
 } from "../signature-spill.js";
 import {
-  boundaryMsgPackPayloadField,
-  isBoundaryMsgPackValue,
-} from "../boundary-metadata.js";
-import { compileOptionalNoneValue } from "../optionals.js";
-import {
   makeSelectedExportCompletion,
   SELECTED_HOST_FRAME_TAG,
   SELECTED_HOST_FRAME_VERSION,
 } from "../host-transport/frame-codec.js";
 import { hostExportId } from "./export-abi.js";
 
-export type SerializedExportTypeAdapter = {
-  acceptsType?: (params: { typeId: TypeId; ctx: CodegenContext }) => boolean;
-  packResultValue?: (params: {
-    value: binaryen.ExpressionRef;
-    typeId: TypeId;
-    ctx: CodegenContext;
-    fnCtx: FunctionContext;
-    exportName: string;
-  }) => binaryen.ExpressionRef | undefined;
-};
-
 export const emitSerializedExportWrapper = ({
   ctx,
   meta,
   exportName,
   wrapperExportName = exportName,
-  typeAdapter,
-  paramSerializerOverrides,
-  returnSerializerOverride,
 }: {
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
   wrapperExportName?: string;
-  typeAdapter?: SerializedExportTypeAdapter;
-  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
-  returnSerializerOverride?: SerializerMetadata;
 }): { wrapperName: string } => {
   ensureLinearMemoryExport(ctx);
   validateExportTypes({
     ctx,
     meta,
     exportName,
-    typeAdapter,
-    paramSerializerOverrides,
-    returnSerializerOverride,
   });
 
   const msgpack = ensureSelectedHostTransportProvider(ctx);
@@ -243,42 +208,6 @@ export const emitSerializedExportWrapper = ({
       msgPackType,
       false,
     );
-    const serializer =
-      paramSerializerOverrides?.[index] ?? findSerializerForType(typeId, ctx);
-    if (serializer) {
-      if (serializer.formatId !== "msgpack") {
-        throw new Error(
-          `unsupported export serializer format for ${exportName}: ${serializer.formatId}`,
-        );
-      }
-      return coerceValueToType({
-        value: payload,
-        actualType: msgpack.valueTypeId,
-        targetType: typeId,
-        ctx,
-        fnCtx,
-      });
-    }
-    if (isBoundaryMsgPackValue(typeId, ctx)) {
-      return coerceValueToType({
-        value: payload,
-        actualType: msgpack.valueTypeId,
-        targetType: typeId,
-        ctx,
-        fnCtx,
-      });
-    }
-    const payloadField = boundaryMsgPackPayloadField(typeId, ctx);
-    if (payloadField) {
-      return buildPayloadEnvelopeParamExpr({
-        value: payload,
-        typeId,
-        payloadField,
-        ctx,
-        fnCtx,
-        label: `${exportName} arg${index}`,
-      });
-    }
     return readDtoValueFromTree({
       ctx,
       value: payload,
@@ -307,21 +236,14 @@ export const emitSerializedExportWrapper = ({
     ctx,
     fnCtx,
     exportName,
-    typeAdapter,
-    serializerOverride: returnSerializerOverride,
   });
-  const resultFingerprint = ctx.program.dtoPlans.isEligible({
-    typeId: meta.resultTypeId,
-    moduleId: ctx.moduleId,
-  })
-    ? withDtoFingerprint(
-        deriveBoundarySchema({
-          typeId: meta.resultTypeId,
-          ctx,
-          label: `${exportName} result`,
-        }),
-      ).fingerprint
-    : `legacy:${meta.resultTypeId}`;
+  const resultFingerprint = withDtoFingerprint(
+    deriveBoundarySchema({
+      typeId: meta.resultTypeId,
+      ctx,
+      label: `${exportName} result`,
+    }),
+  ).fingerprint;
   if (!resultFingerprint) {
     throw new Error(`missing DTO fingerprint for ${exportName} result`);
   }
@@ -364,73 +286,6 @@ export const emitSerializedExportWrapper = ({
 
   ctx.mod.addFunctionExport(wrapperName, wrapperExportName);
   return { wrapperName: wrapperExportName };
-};
-
-const buildPayloadEnvelopeParamExpr = ({
-  value,
-  typeId,
-  payloadField,
-  ctx,
-  fnCtx,
-  label,
-}: {
-  value: binaryen.ExpressionRef;
-  typeId: TypeId;
-  payloadField: NonNullable<ReturnType<typeof boundaryMsgPackPayloadField>>;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-  label: string;
-}): binaryen.ExpressionRef => {
-  const msgpack = ensureSelectedHostTransportProvider(ctx);
-  const structInfo = getStructuralTypeInfo(typeId, ctx);
-  if (!structInfo) {
-    throw new Error(
-      `boundary payload envelope ${label} is missing structural info`,
-    );
-  }
-
-  const fieldValues = structInfo.fields.map((field) => {
-    if (field.name === payloadField.name) {
-      const payload = coerceValueToType({
-        value,
-        actualType: msgpack.valueTypeId,
-        targetType: field.typeId,
-        ctx,
-        fnCtx,
-      });
-      return structInfo.layoutKind === "value-object"
-        ? payload
-        : lowerValueForHeapField({
-            value: payload,
-            typeId: field.typeId,
-            targetType: field.heapWasmType,
-            ctx,
-            fnCtx,
-          });
-    }
-
-    if (!field.optional) {
-      throw new Error(
-        `boundary payload envelope ${label} has non-payload field ${field.name}`,
-      );
-    }
-    const none = compileOptionalNoneValue({
-      targetTypeId: field.typeId,
-      ctx,
-      fnCtx,
-    });
-    return structInfo.layoutKind === "value-object"
-      ? none
-      : lowerValueForHeapField({
-          value: none,
-          typeId: field.typeId,
-          targetType: field.heapWasmType,
-          ctx,
-          fnCtx,
-        });
-  });
-
-  return initStructuralValue({ structInfo, fieldValues, ctx, fnCtx });
 };
 
 const lowerSerializedExportCall = ({
@@ -683,35 +538,13 @@ const validateExportTypes = ({
   ctx,
   meta,
   exportName,
-  typeAdapter,
-  paramSerializerOverrides,
-  returnSerializerOverride,
 }: {
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
-  typeAdapter?: SerializedExportTypeAdapter;
-  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
-  returnSerializerOverride?: SerializerMetadata;
 }): void => {
   const allTypes = [...meta.paramTypeIds, meta.resultTypeId];
   allTypes.forEach((typeId, index) => {
-    const serializer =
-      index < meta.paramTypeIds.length
-        ? (paramSerializerOverrides?.[index] ??
-          findSerializerForType(typeId, ctx))
-        : (returnSerializerOverride ?? findSerializerForType(typeId, ctx));
-    if (serializer) {
-      if (serializer.formatId !== "msgpack") {
-        throw new Error(
-          `unsupported serializer format for ${exportName}: ${serializer.formatId}`,
-        );
-      }
-      return;
-    }
-    if (typeAdapter?.acceptsType?.({ typeId, ctx }) === true) {
-      return;
-    }
     const target =
       index < meta.paramTypeIds.length ? `parameter ${index + 1}` : "return";
     deriveBoundarySchema({
@@ -728,43 +561,14 @@ const packSerializedResultValue = ({
   ctx,
   fnCtx,
   exportName,
-  typeAdapter,
-  serializerOverride,
 }: {
   value: binaryen.ExpressionRef;
   typeId: TypeId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   exportName: string;
-  typeAdapter?: SerializedExportTypeAdapter;
-  serializerOverride?: SerializerMetadata;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureSelectedHostTransportProvider(ctx);
-  const serializer = serializerOverride ?? findSerializerForType(typeId, ctx);
-  if (serializer) {
-    if (serializer.formatId !== "msgpack") {
-      throw new Error(
-        `unsupported serializer format for ${exportName}: ${serializer.formatId}`,
-      );
-    }
-    return coerceValueToType({
-      value,
-      actualType: typeId,
-      targetType: msgpack.valueTypeId,
-      ctx,
-      fnCtx,
-    });
-  }
-  const adapted = typeAdapter?.packResultValue?.({
-    value,
-    typeId,
-    ctx,
-    fnCtx,
-    exportName,
-  });
-  if (adapted) {
-    return adapted;
-  }
   return writeDtoValueToTree({
     value,
     schema: deriveBoundarySchema({

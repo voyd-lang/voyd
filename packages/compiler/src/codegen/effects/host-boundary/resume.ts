@@ -227,8 +227,8 @@ export const createResumeContinuation = ({
                 typeId: sig.returnTypeId,
                 msgpack,
                 ctx,
+                fnCtx: scratch,
                 label: sig.label,
-                serializerOverride: sig.returnSerializerOverride,
               });
       const resumeBox =
         sig.returnType === binaryen.none
@@ -237,7 +237,6 @@ export const createResumeContinuation = ({
               value: resumeValue,
               valueType: sig.returnType,
               typeId: sig.returnTypeId,
-              serializer: sig.returnSerializerOverride,
               ctx,
               fnCtx: scratch,
             });
@@ -638,6 +637,7 @@ export const createEndRequestRaw = ({
                 typeId: siteInfo.typeId,
                 msgpack,
                 ctx,
+                fnCtx: scratch,
                 label: `end_request_raw(site ${siteInfo.siteOrder})`,
               }),
               valueType: returnType,
@@ -673,12 +673,11 @@ export const createEndRequestRaw = ({
                     typeId: sig.returnTypeId,
                     msgpack,
                     ctx,
+                    fnCtx: scratch,
                     label: sig.label,
-                    serializerOverride: sig.returnSerializerOverride,
                   }),
               valueType: sig.returnType,
               typeId: sig.returnTypeId,
-              serializer: sig.returnSerializerOverride,
               ctx,
               fnCtx: scratch,
             });

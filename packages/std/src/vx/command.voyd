@@ -10,7 +10,6 @@ use std::string::type::{ String, StringSlice }
 use std::task::{ Task, TaskRuntime }
 use std::task::self as tasks
 
-@boundary(type: "payload", field: "payload")
 pub obj Cmd<Msg> {
   api payload: MsgPack
 }

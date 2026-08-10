@@ -19,7 +19,6 @@ import type { SelectedHostTransportProvider } from "../../host-transport/selecte
 const buildArgsArray = ({
   sig,
   request,
-  msgPackType,
   msgpack,
   arrayLocal,
   ctx,
@@ -28,7 +27,6 @@ const buildArgsArray = ({
 }: {
   sig: EffectOpSignature;
   request: () => binaryen.ExpressionRef;
-  msgPackType: binaryen.Type;
   msgpack: ReturnType<typeof ensureMsgPackProviderFunctions>;
   arrayLocal: number;
   ctx: CodegenContext;
@@ -69,12 +67,10 @@ const buildArgsArray = ({
       : packMsgPackValueForType({
           value: argValue,
           typeId: paramTypeId,
-          msgPackType,
           msgpack,
           ctx,
+          fnCtx,
           label: `${sig.label} arg${index}`,
-          serializerOverride: sig.paramSerializerOverrides?.[index],
-          onUnsupported: "trap",
         });
     ops.push(
       ctx.mod.local.set(
@@ -126,7 +122,6 @@ export const buildEffectRequestMsgPack = ({
   const argsArray = buildArgsArray({
     sig,
     request,
-    msgPackType,
     msgpack,
     arrayLocal,
     ctx,

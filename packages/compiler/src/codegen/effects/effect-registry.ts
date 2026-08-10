@@ -18,12 +18,6 @@ import { walkHirExpression } from "../hir-walk.js";
 import type { ContinuationSite } from "./effect-lowering/types.js";
 import { performSiteArgTypes } from "./perform-site.js";
 import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
-import type { SerializerMetadata } from "../../semantics/symbol-index.js";
-import {
-  findSerializerForDeclaredType,
-  findSerializerForType,
-  serializerKeyFor,
-} from "../serializer.js";
 import {
   deriveBoundarySchema,
   withDtoFingerprint,
@@ -147,38 +141,41 @@ type SignatureTypeKeyState = {
   ctx: CodegenContext;
   active: Map<TypeId, number>;
   binders: Map<TypeParamId, number>;
-  serializerOverride?: SerializerMetadata;
 };
 
 const signatureTypeKeyFor = ({
   typeId,
   ctx,
-  serializerOverride,
 }: {
   typeId: TypeId;
   ctx: CodegenContext;
-  serializerOverride?: SerializerMetadata;
-}): string =>
-  signatureTypeKeyForInternal({
+}): string => {
+  const fingerprint = ctx.program.dtoPlans.isEligible({
+    typeId,
+    moduleId: ctx.moduleId,
+  })
+    ? ctx.program.dtoPlans.get({ typeId, moduleId: ctx.moduleId }).fingerprint
+    : undefined;
+  if (fingerprint) {
+    return `dto:${fingerprint}`;
+  }
+  return signatureTypeKeyForInternal({
     typeId,
     ctx,
     active: new Map<TypeId, number>(),
     binders: new Map<TypeParamId, number>(),
-    serializerOverride,
   });
+};
 
 const signatureTypeKeyForInternal = ({
   typeId,
   ctx,
   active,
   binders,
-  serializerOverride,
 }: SignatureTypeKeyState): string => {
   const activeIndex = active.get(typeId);
   if (typeof activeIndex === "number") {
-    const serializer = serializerOverride ?? findSerializerForType(typeId, ctx);
-    const suffix = serializer ? `#${serializerKeyFor(serializer)}` : "";
-    return `recursive:${activeIndex}${suffix}`;
+    return `recursive:${activeIndex}`;
   }
   active.set(typeId, active.size);
   try {
@@ -197,7 +194,6 @@ const signatureTypeKeyForInternal = ({
           ctx,
           active,
           binders: nextBinders,
-          serializerOverride,
         })}`;
         break;
       }
@@ -324,8 +320,7 @@ const signatureTypeKeyForInternal = ({
         baseKey = `${(desc as { kind: string }).kind}:${typeId}`;
         break;
     }
-    const serializer = serializerOverride ?? findSerializerForType(typeId, ctx);
-    return serializer ? `${baseKey}#${serializerKeyFor(serializer)}` : baseKey;
+    return baseKey;
   } finally {
     active.delete(typeId);
   }
@@ -335,26 +330,20 @@ export const signatureHashFor = ({
   params,
   returnType,
   ctx,
-  paramSerializerOverrides,
-  returnSerializerOverride,
 }: {
   params: readonly TypeId[];
   returnType: TypeId;
   ctx: CodegenContext;
-  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
-  returnSerializerOverride?: SerializerMetadata;
 }): number => {
-  const paramKeys = params.map((param, index) =>
+  const paramKeys = params.map((param) =>
     signatureTypeKeyFor({
       typeId: param,
       ctx,
-      serializerOverride: paramSerializerOverrides?.[index],
     }),
   );
   const returnKey = signatureTypeKeyFor({
     typeId: returnType,
     ctx,
-    serializerOverride: returnSerializerOverride,
   });
   return murmurHash3(`(${paramKeys.join(",")})->${returnKey}`);
 };
@@ -370,8 +359,6 @@ export const resolvePerformSignature = ({
 }): {
   params: readonly TypeId[];
   returnType: TypeId;
-  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
-  returnSerializerOverride?: SerializerMetadata;
 } => {
   const signature = ctx.program.functions.getSignature(
     ctx.moduleId,
@@ -405,14 +392,6 @@ export const resolvePerformSignature = ({
         returnType: signature.returnType,
         fallbackReturnType: signature.returnType,
       }),
-      paramSerializerOverrides: signature.parameters.map(
-        (param) =>
-          param.declaredSerializer ??
-          findSerializerForDeclaredType(param.declaredType, ctx),
-      ),
-      returnSerializerOverride:
-        signature.declaredReturnSerializer ??
-        findSerializerForDeclaredType(signature.declaredReturnType, ctx),
     };
   }
   const signatureParams =
@@ -434,14 +413,6 @@ export const resolvePerformSignature = ({
       returnType: exprType,
       fallbackReturnType: signature?.returnType,
     }),
-    paramSerializerOverrides: signature?.parameters.map(
-      (param) =>
-        param.declaredSerializer ??
-        findSerializerForDeclaredType(param.declaredType, ctx),
-    ),
-    returnSerializerOverride:
-      signature?.declaredReturnSerializer ??
-      findSerializerForDeclaredType(signature?.declaredReturnType, ctx),
   };
 };
 
@@ -615,8 +586,6 @@ export const buildEffectRegistry = (
           params: signature.params,
           returnType: signature.returnType,
           ctx,
-          paramSerializerOverrides: signature.paramSerializerOverrides,
-          returnSerializerOverride: signature.returnSerializerOverride,
         });
         const key = toEffectOpKey(effectId.hash, info.opIndex, signatureHash);
         const external = effectMeta?.external
@@ -771,14 +740,6 @@ export const buildEffectRegistry = (
             params,
             returnType: signature.returnType,
             ctx,
-            paramSerializerOverrides: signature.parameters.map(
-              (param) =>
-                param.declaredSerializer ??
-                findSerializerForDeclaredType(param.declaredType, ctx),
-            ),
-            returnSerializerOverride:
-              signature.declaredReturnSerializer ??
-              findSerializerForDeclaredType(signature.declaredReturnType, ctx),
           });
           const key = toEffectOpKey(effectId.hash, opId, signatureHash);
           const external = {
@@ -906,8 +867,6 @@ export const getEffectOpInstanceInfo = ({
     params: signature.params,
     returnType: signature.returnType,
     ctx,
-    paramSerializerOverrides: signature.paramSerializerOverrides,
-    returnSerializerOverride: signature.returnSerializerOverride,
   });
   const key = registry.keyFor(effectId.hash, info.opIndex, signatureHash);
   const opIndex = registry.getOpIndex(key);

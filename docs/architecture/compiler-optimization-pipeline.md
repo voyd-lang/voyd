@@ -81,7 +81,7 @@ The supported metadata has four distinct jobs:
   compiler-owned role. Role IDs use dotted capability names; the current
   catalog is the `voyd.std.host-transport.msgpack.*` family in
   `packages/compiler/src/compiler-contracts/function-contracts.ts`. The
-  boundary serializer, decoder, value constructors/accessors, array/map
+  transport decoder, encoder, value constructors/accessors, array/map
   helpers, and string constructor each have a separate role ID. Optimizer
   reachability and host-boundary codegen resolve those IDs through the program
   symbol arena instead of repeating function names and module paths.
@@ -96,11 +96,6 @@ The supported metadata has four distinct jobs:
   both the intrinsic type ID and std
   package ownership, so a user-defined `Array`, `Range`, or structurally similar
   object cannot enter a std-only fast path.
-- `@serializer(format, encode, decode)` describes a type's host serialization
-  contract. Binding resolves the named functions and boundary lowering checks
-  the supported format and payload/signature requirements. It does not by
-  itself identify all helper functions used by that format; those dependencies
-  use `@compiler_contract` roles.
 - `@intrinsic(name: ..., uses_signature: ...)` identifies a function wrapper
   whose implementation is compiler-owned, while `@effect(id: "...")` gives a
   public effect a stable host capability ID. These annotations remain the
@@ -119,7 +114,7 @@ a missing or incompatible role fails with a diagnostic instead of silently
 selecting a name-based fallback. Attribute syntax rejects duplicate attributes,
 invalid targets, unknown labels, and invalid value types.
 The owning binder or lowering stage performs the additional semantic validation
-specific to `@serializer`, `@intrinsic_type`, `@intrinsic`, and `@effect`.
+specific to `@intrinsic_type`, `@intrinsic`, and `@effect`.
 
 Changing a contract ID, its meaning, or its required signature is a compiler/std
 compatibility change. Renaming or moving the annotated implementation is not,

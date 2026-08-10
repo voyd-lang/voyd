@@ -23,7 +23,6 @@ import { buildEffectRequestMsgPack } from "./effect-request-msgpack.js";
 import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
-import { findSerializerFormatForType } from "../../serializer.js";
 import {
   makeSelectedCompletion,
   SELECTED_HOST_FRAME_TAG,
@@ -96,10 +95,6 @@ export const createHandleOutcomeDynamic = ({
     const boxTypeI64 = getOutcomeValueBoxType({ valueType: binaryen.i64, ctx });
     const boxTypeF32 = getOutcomeValueBoxType({ valueType: binaryen.f32, ctx });
     const boxTypeF64 = getOutcomeValueBoxType({ valueType: binaryen.f64, ctx });
-    const boxTypeMsgPack = getOutcomeValueBoxType({
-      valueType: msgPackType,
-      ctx,
-    });
     const isFixedBox = ({
       valueType,
       typeId,
@@ -369,28 +364,6 @@ export const createHandleOutcomeDynamic = ({
           finishValue(),
         ]),
       ),
-      ctx.mod.if(
-        refTest(
-          ctx.mod,
-          ctx.mod.local.get(payloadLocal, binaryen.eqref),
-          boxTypeMsgPack,
-        ),
-        ctx.mod.block(null, [
-          encodeCompletionToBuffer({
-            value: refCast(
-              ctx.mod,
-              unboxOutcomeValue({
-                payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
-                valueType: msgPackType,
-                ctx,
-              }),
-              msgPackType,
-            ),
-            fingerprint: "legacy:msgpack",
-          }),
-          finishValue(),
-        ]),
-      ),
       ...getOutcomeValueBoxes(ctx)
         .filter(
           (box) =>
@@ -408,38 +381,6 @@ export const createHandleOutcomeDynamic = ({
             markerFieldIndex: box.abiTypes.length,
             markerValue,
           });
-          const serializerFormat =
-            box.serializer?.formatId ??
-            findSerializerFormatForType(box.typeId!, ctx);
-          if (serializerFormat) {
-            if (serializerFormat !== "msgpack") {
-              return [];
-            }
-            return [
-              ctx.mod.if(
-                matchesBox,
-                ctx.mod.block(null, [
-                  encodeCompletionToBuffer({
-                    value: refCast(
-                      ctx.mod,
-                      unboxOutcomeValue({
-                        payload: ctx.mod.local.get(
-                          payloadLocal,
-                          binaryen.eqref,
-                        ),
-                        valueType: box.valueType,
-                        typeId: box.typeId,
-                        ctx,
-                      }),
-                      msgPackType,
-                    ),
-                    fingerprint: `legacy:${box.typeId}`,
-                  }),
-                  finishValue(),
-                ]),
-              ),
-            ];
-          }
           try {
             const schema = deriveBoundarySchema({
               typeId: box.typeId!,

@@ -1,9 +1,5 @@
 import type { ProgramSymbolId, SymbolId } from "./ids.js";
-import type {
-  BoundaryMetadata,
-  IntrinsicFunctionFlags,
-  SerializerMetadata,
-} from "./symbol-index.js";
+import type { IntrinsicFunctionFlags } from "./symbol-index.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import type {
@@ -41,8 +37,6 @@ export type ProgramSymbolArena = {
   resolveCompilerFunctionContract(
     id: CompilerFunctionContractId,
   ): ProgramSymbolId | undefined;
-  getSerializer(id: ProgramSymbolId): SerializerMetadata | undefined;
-  getBoundary(id: ProgramSymbolId): BoundaryMetadata | undefined;
   isModuleScoped(id: ProgramSymbolId): boolean;
 };
 
@@ -91,8 +85,6 @@ export const buildProgramSymbolArena = (
     CompilerFunctionContractId,
     ProgramSymbolId
   >();
-  const serializerById: (SerializerMetadata | undefined)[] = [];
-  const boundaryById: (BoundaryMetadata | undefined)[] = [];
   const moduleScopedById: boolean[] = [];
 
   let nextId = 0;
@@ -152,8 +144,6 @@ export const buildProgramSymbolArena = (
         }
         idsByCompilerFunctionContract.set(compilerFunctionContract.id, id);
       }
-      serializerById[id] = mod.symbols.getSerializer(symbol);
-      boundaryById[id] = mod.symbols.getBoundary(symbol);
       moduleScopedById[id] = mod.symbols.isModuleScoped(symbol);
     });
   });
@@ -210,8 +200,6 @@ export const buildProgramSymbolArena = (
     getCompilerFunctionContract: (id) => compilerFunctionContractsById[id],
     resolveCompilerFunctionContract: (id) =>
       idsByCompilerFunctionContract.get(id),
-    getSerializer: (id) => serializerById[id],
-    getBoundary: (id) => boundaryById[id],
     isModuleScoped: (id) => moduleScopedById[id] === true,
   };
 };
