@@ -41,7 +41,7 @@ const analyze = (source: string) => {
     !source.includes("__array_len(") &&
     !source.includes("__ref_is_null(") &&
     !source.includes("__retain_callback") &&
-    !source.includes("__boundary_retain_callback") &&
+    !source.includes("__host_retain_callback") &&
     !source.includes("__render_retain_callback") &&
     !source.includes("__task_spawn") &&
     !source.includes("__task_detach")

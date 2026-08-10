@@ -19,13 +19,13 @@ pub obj Ref<T> {
   api id: String
 }
 
-@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+@intrinsic(name: "__host_retain_callback", uses_signature: true)
 fn retain_message_mapper_id(handler: fn(MsgPack) -> MsgPack): () -> i32
   0
 
-@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+@intrinsic(name: "__host_retain_callback", uses_signature: true)
 fn retain_typed_message_mapper_id<From, To>(handler: fn(From) -> To): () -> i32
-  __boundary_retain_callback(handler)
+  __host_retain_callback(handler)
 
 fn retain_message_mapper(handler: fn(MsgPack) -> MsgPack): () -> i32
   retain_message_mapper_id(handler)

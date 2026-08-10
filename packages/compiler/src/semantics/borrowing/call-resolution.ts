@@ -475,7 +475,7 @@ const conservativeContractForArguments = (
 
 const RETAINING_INTRINSICS = new Set([
   "__retain_callback",
-  "__boundary_retain_callback",
+  "__host_retain_callback",
   "__render_retain_callback",
   "__task_spawn",
   "__task_detach",

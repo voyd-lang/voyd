@@ -593,8 +593,8 @@ export const typeCallExpr = (
         applyCurrentSubstitution(calleeType, ctx, state),
       );
       if (
-        (intrinsicName === "__boundary_shape_of" ||
-          intrinsicName === "__boundary_try_shape_of") &&
+        (intrinsicName === "__dto_shape_of" ||
+          intrinsicName === "__dto_try_shape_of") &&
         signature &&
         instantiation &&
         (signature.typeParams?.length ?? 0) > 0
@@ -8423,7 +8423,7 @@ const typeIntrinsicCall = (
         expectedReturnType,
       });
     case "__retain_callback":
-    case "__boundary_retain_callback":
+    case "__host_retain_callback":
     case "__render_retain_callback":
       return typeBoundaryRetainCallbackIntrinsic({
         name,
@@ -8472,26 +8472,26 @@ const typeIntrinsicCall = (
         typeArguments,
         detail: "target DTO type",
       });
-    case "__boundary_shape_of":
+    case "__dto_shape_of":
       assertIntrinsicArgCount({
-        name: "__boundary_shape_of",
+        name: "__dto_shape_of",
         args,
         expected: 0,
       });
       requireSingleTypeArgument({
-        name: "__boundary_shape_of",
+        name: "__dto_shape_of",
         typeArguments,
         detail: "reified type",
       });
       return expectedReturnType ?? ctx.primitives.unknown;
-    case "__boundary_try_shape_of":
+    case "__dto_try_shape_of":
       assertIntrinsicArgCount({
-        name: "__boundary_try_shape_of",
+        name: "__dto_try_shape_of",
         args,
         expected: 0,
       });
       requireSingleTypeArgument({
-        name: "__boundary_try_shape_of",
+        name: "__dto_try_shape_of",
         typeArguments,
         detail: "optionally reified type",
       });

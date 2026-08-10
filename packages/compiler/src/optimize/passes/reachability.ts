@@ -31,11 +31,11 @@ import {
 
 export const HOST_TRANSPORT_DEPENDENT_INTRINSICS = new Set([
   "__retain_callback",
-  "__boundary_retain_callback",
+  "__host_retain_callback",
   "__render_retain_callback",
 ]);
 
-const SHAPE_REIFICATION_INTRINSICS = new Set(["__boundary_shape_of"]);
+const SHAPE_REIFICATION_INTRINSICS = new Set(["__dto_shape_of"]);
 const DATA_DTO_INTRINSICS = new Set([
   "__dto_value_to_data",
   "__data_to_dto_value",

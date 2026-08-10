@@ -101,7 +101,7 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
   [
-    "__boundary_retain_callback",
+    "__host_retain_callback",
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
   [
@@ -115,11 +115,11 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
   ["__dto_value_to_data", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__data_to_dto_value", { intrinsicUsesSignature: false, access: "std-only" }],
   [
-    "__boundary_shape_of",
+    "__dto_shape_of",
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
   [
-    "__boundary_try_shape_of",
+    "__dto_try_shape_of",
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
   ["__shift_l", { intrinsicUsesSignature: false, access: "std-only" }],

@@ -122,11 +122,11 @@ pub type ShapeNode = BoolShape
 /// Reifies a closed boundary-compatible type as a portable runtime graph.
 ///
 /// Unsupported or unresolved type arguments produce a compile-time diagnostic.
-@intrinsic(name: "__boundary_shape_of")
+@intrinsic(name: "__dto_shape_of")
 pub fn shape_of<T>() -> Shape
-  __boundary_shape_of<T>()
+  __dto_shape_of<T>()
 
 /// Reifies a boundary-compatible type, or returns `None` when no honest shape exists.
-@intrinsic(name: "__boundary_try_shape_of")
+@intrinsic(name: "__dto_try_shape_of")
 pub fn try_shape_of<T>() -> Option<Shape>
-  __boundary_try_shape_of<T>()
+  __dto_try_shape_of<T>()

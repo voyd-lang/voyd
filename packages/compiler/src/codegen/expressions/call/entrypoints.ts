@@ -1065,7 +1065,7 @@ const shouldCompileIntrinsicCall = ({
   usesSignature !== true ||
   external ||
   intrinsicName === "__retain_callback" ||
-  intrinsicName === "__boundary_retain_callback" ||
+  intrinsicName === "__host_retain_callback" ||
   intrinsicName === "__render_retain_callback" ||
   intrinsicName === "__render_claim_callback";
 

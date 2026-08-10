@@ -1415,7 +1415,7 @@ export const compileIntrinsicCall = ({
       });
     }
     case "__retain_callback":
-    case "__boundary_retain_callback":
+    case "__host_retain_callback":
     case "__render_retain_callback": {
       assertArgCount(name, args, 1);
       const handlerTypeId = getRequiredExprType(
@@ -1433,7 +1433,7 @@ export const compileIntrinsicCall = ({
       });
       const closureInfo = getClosureTypeInfo(handlerTypeId, ctx);
       const render = name === "__render_retain_callback";
-      const boundary = name === "__boundary_retain_callback";
+      const boundary = name === "__host_retain_callback";
       const importName = render
         ? `__voyd_render_retain_callback_${sanitizeTaskKey(helperExport)}`
         : boundary
@@ -1523,7 +1523,7 @@ export const compileIntrinsicCall = ({
         rethrowBoundarySchemaDiagnostic({ error, call });
       }
     }
-    case "__boundary_shape_of": {
+    case "__dto_shape_of": {
       assertArgCount(name, args, 0);
       const [targetTypeId] = intrinsicCallTypeArgs({ call, ctx, instanceId });
       if (targetTypeId === undefined) {
@@ -1558,7 +1558,7 @@ export const compileIntrinsicCall = ({
         throw error;
       }
     }
-    case "__boundary_try_shape_of": {
+    case "__dto_try_shape_of": {
       assertArgCount(name, args, 0);
       const [targetTypeId] = intrinsicCallTypeArgs({ call, ctx, instanceId });
       if (targetTypeId === undefined) {
