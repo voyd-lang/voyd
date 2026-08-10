@@ -168,6 +168,13 @@ const emitShapeNode = ({
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   switch (schema.kind) {
+    case "custom":
+      return emitShapeNode({
+        schema: schema.representation,
+        state,
+        ctx,
+        fnCtx,
+      });
     case "bool":
       return emitShapeVariant({ name: "BoolShape", state, ctx, fnCtx });
     case "i32":

@@ -1,5 +1,6 @@
 import type { HirExpression } from "../../semantics/hir/index.js";
 import type { ProgramCodegenView } from "../../semantics/codegen-view/index.js";
+import type { AutoDtoPlan } from "../../semantics/codegen-view/auto-dto-plan.js";
 import type {
   HirExprId,
   ProgramFunctionId,
@@ -620,7 +621,56 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       enqueueMsgPackProviderFunctions();
       exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
         enqueueSerializersForTypes(typeIds);
+        typeIds.forEach((typeId) => {
+          try {
+            enqueueCustomDtoPlan(
+              ctx.ir.baseProgram.dtoPlans.get({ typeId, moduleId }),
+            );
+          } catch {
+            // Unsupported types are diagnosed by boundary export codegen.
+          }
+        });
       });
+    };
+
+    const enqueueCustomDtoPlan = (plan: AutoDtoPlan): void => {
+      if (plan.kind === "custom") {
+        const desc = ctx.ir.baseProgram.types.getTypeDesc(plan.typeId);
+        const nominal =
+          desc.kind === "intersection" && desc.nominal !== undefined
+            ? desc.nominal
+            : plan.typeId;
+        const impl = ctx.ir.baseProgram.traits
+          .getImplsByNominal(nominal)
+          .find((candidate) => {
+            const ref = ctx.ir.baseProgram.symbols.refOf(candidate.traitSymbol);
+            return (
+              ref.moduleId === "std::data" &&
+              ctx.ir.baseProgram.symbols.getName(candidate.traitSymbol) ===
+                "CustomDto"
+            );
+          });
+        impl?.staticMethods.forEach(({ implMethod }) =>
+          enqueueKnownFunctionInstances(
+            ctx.ir.baseProgram.symbols.refOf(implMethod),
+          ),
+        );
+        enqueueCustomDtoPlan(plan.representation);
+        return;
+      }
+      if (plan.kind === "array") {
+        enqueueCustomDtoPlan(plan.element);
+        return;
+      }
+      if (plan.kind === "record") {
+        plan.fields.forEach((field) => enqueueCustomDtoPlan(field.schema));
+        return;
+      }
+      if (plan.kind === "union") {
+        plan.variants.forEach((variant) =>
+          variant.fields.forEach((field) => enqueueCustomDtoPlan(field.schema)),
+        );
+      }
     };
 
     const exportedFunctionUsesEffectsHostBoundary = ({

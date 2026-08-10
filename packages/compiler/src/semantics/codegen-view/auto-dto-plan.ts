@@ -4,10 +4,7 @@ import {
 } from "../../compiler-contracts/types.js";
 import type { TypeId } from "../ids.js";
 import { sha256Hex } from "../../utils/sha256.js";
-import type {
-  CodegenStructuralField,
-  ProgramCodegenView,
-} from "./index.js";
+import type { CodegenStructuralField, ProgramCodegenView } from "./index.js";
 
 export type AutoDtoPrimitivePlan =
   | { kind: "bool"; typeId: TypeId }
@@ -57,6 +54,12 @@ export type AutoDtoPlan = (
         documentation?: string;
         fields: readonly AutoDtoFieldPlan[];
       }[];
+    }
+  | {
+      kind: "custom";
+      typeId: TypeId;
+      representationTypeId: TypeId;
+      representation: AutoDtoPlan;
     }
   | { kind: "ref"; typeId: TypeId; name: string }
 ) & { fingerprint?: string };
@@ -162,6 +165,8 @@ const canonicalNode = (plan: AutoDtoPlan): unknown => {
           ]),
         ]),
       ];
+    case "custom":
+      return canonicalNode(plan.representation);
     case "ref":
       return ["ref", plan.name];
   }
@@ -190,6 +195,36 @@ const derive = ({
   }
   if (isIntrinsic(typeId, STD_INTRINSIC_TYPE.bytes, program)) {
     return { kind: "bytes", typeId };
+  }
+
+  const customRepresentation = customDtoRepresentation(typeId, program);
+  if (customRepresentation !== undefined) {
+    if (
+      customRepresentation === typeId ||
+      nominalOwnerOf(customRepresentation, program) ===
+        nominalOwnerOf(typeId, program)
+    ) {
+      throw new AutoDtoPlanError(
+        `${path} has a CustomDto representation that reintroduces itself`,
+      );
+    }
+    active.add(typeId);
+    try {
+      return {
+        kind: "custom",
+        typeId,
+        representationTypeId: customRepresentation,
+        representation: derive({
+          typeId: customRepresentation,
+          moduleId,
+          path: `${path} custom representation`,
+          active,
+          program,
+        }),
+      };
+    } finally {
+      active.delete(typeId);
+    }
   }
 
   active.add(typeId);
@@ -251,6 +286,53 @@ const derive = ({
   }
 };
 
+const customDtoRepresentation = (
+  typeId: TypeId,
+  program: ProgramCodegenView,
+): TypeId | undefined => {
+  const owner = nominalOwnerOf(typeId, program);
+  if (owner === undefined) return undefined;
+  const desc = program.types.getTypeDesc(typeId);
+  const nominalTypeId =
+    desc.kind === "intersection" && desc.nominal !== undefined
+      ? desc.nominal
+      : typeId;
+  const matches = program.traits
+    .getImplsByNominal(nominalTypeId)
+    .filter((impl) => {
+      const traitRef = program.symbols.refOf(impl.traitSymbol);
+      return (
+        traitRef.moduleId === "std::data" &&
+        program.symbols.getName(impl.traitSymbol) === "CustomDto"
+      );
+    });
+  if (matches.length > 1) {
+    throw new AutoDtoPlanError(
+      `${portableName(typeId, program)} has multiple CustomDto representations`,
+    );
+  }
+  const match = matches[0];
+  if (!match) return undefined;
+  const trait = program.types.getTypeDesc(match.trait);
+  if (trait.kind !== "trait" || trait.typeArgs.length !== 2) {
+    throw new AutoDtoPlanError("CustomDto must declare T and Representation");
+  }
+  const representedOwner = nominalOwnerOf(trait.typeArgs[0]!, program);
+  if (representedOwner !== owner) {
+    throw new AutoDtoPlanError(
+      `${portableName(typeId, program)} has a mismatched CustomDto target`,
+    );
+  }
+  return trait.typeArgs[1]!;
+};
+
+const nominalOwnerOf = (typeId: TypeId, program: ProgramCodegenView) => {
+  const desc = program.types.getTypeDesc(typeId);
+  return desc.kind === "intersection" && desc.nominal !== undefined
+    ? program.types.getNominalOwner(desc.nominal)
+    : program.types.getNominalOwner(typeId);
+};
+
 const deriveRecord = ({
   typeId,
   moduleId,
@@ -265,7 +347,8 @@ const deriveRecord = ({
   program: ProgramCodegenView;
 }): AutoDtoPlan => {
   const fields = structuralFields(typeId, program);
-  if (!fields) return unsupported(typeId, path, program, "record layout is unavailable");
+  if (!fields)
+    return unsupported(typeId, path, program, "record layout is unavailable");
   const tag = program.types.getStandaloneVariantTag(typeId);
   const reserved = tag
     ? fields.find((field) => RESERVED_VARIANT_FIELD_NAMES.has(field.name))
@@ -284,7 +367,9 @@ const deriveRecord = ({
     typeId,
     name: identity.name,
     ...(tag ? { tag } : {}),
-    ...(identity.documentation ? { documentation: identity.documentation } : {}),
+    ...(identity.documentation
+      ? { documentation: identity.documentation }
+      : {}),
     fields: deriveFields({
       fields,
       moduleId,
@@ -313,7 +398,12 @@ const deriveUnion = ({
   const variants = desc.members.map((member) => {
     const fields = structuralFields(member, program);
     if (!fields) {
-      return unsupported(member, path, program, "union variants must be named records");
+      return unsupported(
+        member,
+        path,
+        program,
+        "union variants must be named records",
+      );
     }
     const name = variantName(member, program);
     const reserved = fields.find((field) =>
@@ -331,7 +421,9 @@ const deriveUnion = ({
     return {
       name,
       typeId: member,
-      ...(identity.documentation ? { documentation: identity.documentation } : {}),
+      ...(identity.documentation
+        ? { documentation: identity.documentation }
+        : {}),
       fields: deriveFields({
         fields,
         moduleId,
@@ -343,7 +435,8 @@ const deriveUnion = ({
   });
   const duplicate = variants.find(
     (variant, index) =>
-      variants.findIndex((candidate) => candidate.name === variant.name) !== index,
+      variants.findIndex((candidate) => candidate.name === variant.name) !==
+      index,
   );
   if (duplicate) {
     return unsupported(
@@ -358,7 +451,9 @@ const deriveUnion = ({
     kind: "union",
     typeId,
     name: identity.name,
-    ...(identity.documentation ? { documentation: identity.documentation } : {}),
+    ...(identity.documentation
+      ? { documentation: identity.documentation }
+      : {}),
     variants,
   };
 };
@@ -432,7 +527,10 @@ const assertArrayStorage = (
   const storage = structuralFields(typeId, program)?.find(
     (field) => field.name === "storage",
   );
-  if (!storage || program.types.getTypeDesc(storage.type).kind !== "fixed-array") {
+  if (
+    !storage ||
+    program.types.getTypeDesc(storage.type).kind !== "fixed-array"
+  ) {
     unsupported(typeId, path, program, "array storage layout is unavailable");
   }
 };
@@ -552,8 +650,12 @@ const formatType = (
       case "value-object":
       case "trait": {
         const name =
-          desc.name ?? program.symbols.getName(desc.owner) ?? `symbol#${desc.owner}`;
-        const args = desc.typeArgs.map((arg) => formatType(arg, program, active));
+          desc.name ??
+          program.symbols.getName(desc.owner) ??
+          `symbol#${desc.owner}`;
+        const args = desc.typeArgs.map((arg) =>
+          formatType(arg, program, active),
+        );
         return args.length > 0 ? `${name}<${args.join(", ")}>` : name;
       }
       case "structural-object":
@@ -568,7 +670,9 @@ const formatType = (
           .map((param) => formatType(param.type, program, active))
           .join(", ")}) -> ${formatType(desc.returnType, program, active)}`;
       case "union":
-        return desc.members.map((member) => formatType(member, program, active)).join(" | ");
+        return desc.members
+          .map((member) => formatType(member, program, active))
+          .join(" | ");
       case "intersection":
         return [desc.nominal, desc.structural, ...(desc.traits ?? [])]
           .filter((part): part is TypeId => typeof part === "number")
@@ -593,6 +697,7 @@ const withAlias = (plan: AutoDtoPlan, typeId: TypeId): AutoDtoPlan => {
     plan.kind === "void" ||
     plan.kind === "string" ||
     plan.kind === "bytes" ||
+    plan.kind === "custom" ||
     plan.typeId === typeId ||
     plan.aliases?.includes(typeId)
   ) {

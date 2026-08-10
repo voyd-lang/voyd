@@ -391,6 +391,20 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
         result: expect.objectContaining({ kind: "i64" }),
       },
       expect.objectContaining({
+        name: "echo_user_id",
+        abi: "serialized",
+        params: [
+          expect.objectContaining({
+            kind: "custom",
+            representation: expect.objectContaining({ kind: "record" }),
+          }),
+        ],
+        result: expect.objectContaining({
+          kind: "custom",
+          representation: expect.objectContaining({ kind: "record" }),
+        }),
+      }),
+      expect.objectContaining({
         name: "get_point",
         abi: "serialized",
         wrapperName: "__voyd_serialized_export_get_point",
@@ -448,6 +462,19 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
 
     expect(result).toBeInstanceOf(Uint8Array);
     expect(Array.from(result)).toEqual(Array.from(source));
+  });
+
+  it("round-trips a custom DTO through its single representation", async () => {
+    const wasm = await buildModule({
+      entryFile: "boundary-export.voyd",
+      codegenOptions: { boundaryExports: "auto" },
+    });
+    const host = await createVoydHost({ wasm });
+
+    await expect(host.runPure("echo_user_id", [{ id: 7 }])).resolves.toEqual({
+      id: 7,
+    });
+    await expect(host.runPure("echo_user_id", [{ id: 0 }])).rejects.toThrow();
   });
 
   it("rejects integers outside the byte domain before transport encoding", async () => {

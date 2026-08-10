@@ -302,26 +302,80 @@ const boundarySchemasForExport = ({
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
-}): { params: BoundarySchema[]; result: BoundarySchema } => ({
-  params: meta.paramTypeIds.map((typeId, index) =>
-    withDtoFingerprint(
+}): { params: BoundarySchema[]; result: BoundarySchema } => {
+  const schemas = {
+    params: meta.paramTypeIds.map((typeId, index) =>
+      withDtoFingerprint(
+        deriveBoundarySchema({
+          typeId,
+          ctx,
+          label: `${exportName} arg${index}`,
+          options: { tagStandaloneVariants: true, portableNames: true },
+        }),
+      ),
+    ),
+    result: withDtoFingerprint(
       deriveBoundarySchema({
-        typeId,
+        typeId: meta.resultTypeId,
         ctx,
-        label: `${exportName} arg${index}`,
+        label: `${exportName} result`,
         options: { tagStandaloneVariants: true, portableNames: true },
       }),
     ),
-  ),
-  result: withDtoFingerprint(
-    deriveBoundarySchema({
-      typeId: meta.resultTypeId,
-      ctx,
-      label: `${exportName} result`,
-      options: { tagStandaloneVariants: true, portableNames: true },
-    }),
-  ),
-});
+  };
+  [...schemas.params, schemas.result].forEach((schema) =>
+    markCustomDtoPlanReachable({ schema, ctx }),
+  );
+  return schemas;
+};
+
+const markCustomDtoPlanReachable = ({
+  schema,
+  ctx,
+}: {
+  schema: BoundarySchema;
+  ctx: CodegenContext;
+}): void => {
+  if (schema.kind === "custom") {
+    const desc = ctx.program.types.getTypeDesc(schema.typeId);
+    const nominal =
+      desc.kind === "intersection" && desc.nominal !== undefined
+        ? desc.nominal
+        : schema.typeId;
+    const impl = ctx.program.traits
+      .getImplsByNominal(nominal)
+      .find((candidate) => {
+        const ref = ctx.program.symbols.refOf(candidate.traitSymbol);
+        return (
+          ref.moduleId === "std::data" &&
+          ctx.program.symbols.getName(candidate.traitSymbol) === "CustomDto"
+        );
+      });
+    impl?.staticMethods.forEach(({ implMethod }) => {
+      const ref = ctx.program.symbols.refOf(implMethod);
+      markFunctionReachable({ ctx, ...ref });
+    });
+    markCustomDtoPlanReachable({ schema: schema.representation, ctx });
+    return;
+  }
+  if (schema.kind === "array") {
+    markCustomDtoPlanReachable({ schema: schema.element, ctx });
+    return;
+  }
+  if (schema.kind === "record") {
+    schema.fields.forEach((field) =>
+      markCustomDtoPlanReachable({ schema: field.schema, ctx }),
+    );
+    return;
+  }
+  if (schema.kind === "union") {
+    schema.variants.forEach((variant) =>
+      variant.fields.forEach((field) =>
+        markCustomDtoPlanReachable({ schema: field.schema, ctx }),
+      ),
+    );
+  }
+};
 
 const scalarBoundaryWasmType = (
   schema: BoundarySchema,

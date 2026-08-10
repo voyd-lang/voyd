@@ -156,6 +156,16 @@ const writeDtoValueToTreeInternal = ({
   const provider = state.provider;
   const treeValueType = wasmTypeFor(provider.valueTypeId, ctx);
   switch (schema.kind) {
+    case "custom":
+      return writeDtoValueToTreeInternal({
+        value: callCustomDtoWrite({ value, schema, ctx, fnCtx }),
+        schema: schema.representation,
+        ctx,
+        fnCtx,
+        state,
+        packAncestors,
+        packAncestorCount,
+      });
     case "bool":
       return ctx.mod.call(provider.makeBool.wasmName, [value], treeValueType);
     case "i32":
@@ -281,6 +291,19 @@ const readDtoValueFromTreeInternal = ({
   }
   const provider = state.provider;
   switch (schema.kind) {
+    case "custom":
+      return callCustomDtoRead({
+        value: readDtoValueFromTreeInternal({
+          value,
+          schema: schema.representation,
+          ctx,
+          fnCtx,
+          state,
+        }),
+        schema,
+        ctx,
+        fnCtx,
+      });
     case "bool":
       return ctx.mod.call(provider.unpackBool.wasmName, [value], binaryen.i32);
     case "i32":
@@ -326,6 +349,154 @@ const readDtoValueFromTreeInternal = ({
   }
 };
 
+type CustomDtoSchema = Extract<BoundarySchema, { kind: "custom" }>;
+
+const callCustomDtoWrite = ({
+  value,
+  schema,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  schema: CustomDtoSchema;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const method = customDtoMethod({ schema, name: "write", ctx });
+  assertSingleLaneCustomDtoMethod({ method, name: "write" });
+  return ctx.mod.call(
+    method.wasmName,
+    [
+      coerceValueToType({
+        value,
+        actualType: schema.typeId,
+        targetType: method.paramTypeIds[0]!,
+        ctx,
+        fnCtx,
+      }),
+    ],
+    method.resultType,
+  );
+};
+
+const callCustomDtoRead = ({
+  value,
+  schema,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  schema: CustomDtoSchema;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const method = customDtoMethod({ schema, name: "read", ctx });
+  assertSingleLaneCustomDtoMethod({ method, name: "read" });
+  const result = ctx.mod.call(
+    method.wasmName,
+    [
+      coerceValueToType({
+        value,
+        actualType: schema.representationTypeId,
+        targetType: method.paramTypeIds[0]!,
+        ctx,
+        fnCtx,
+      }),
+    ],
+    method.resultType,
+  );
+  const resultDesc = ctx.program.types.getTypeDesc(method.resultTypeId);
+  if (resultDesc.kind !== "union") {
+    throw new Error("CustomDto.read must return Result<T, CustomDtoError>");
+  }
+  const okType = resultDesc.members.find((member) => {
+    const desc = ctx.program.types.getTypeDesc(member);
+    const owner = ctx.program.types.getNominalOwner(
+      desc.kind === "intersection" && desc.nominal !== undefined
+        ? desc.nominal
+        : member,
+    );
+    return owner !== undefined && ctx.program.symbols.getName(owner) === "Ok";
+  });
+  const okInfo =
+    okType === undefined ? undefined : getStructuralTypeInfo(okType, ctx);
+  const valueField = okInfo?.fieldMap.get("value");
+  if (okType === undefined || !okInfo || !valueField) {
+    throw new Error("CustomDto.read Result is missing Ok.value");
+  }
+  return coerceValueToType({
+    value: loadStructuralField({
+      structInfo: okInfo,
+      field: valueField,
+      pointer: () => refCast(ctx.mod, result, okInfo.runtimeType),
+      ctx,
+      fnCtx,
+    }),
+    actualType: valueField.typeId,
+    targetType: schema.typeId,
+    ctx,
+    fnCtx,
+  });
+};
+
+const customDtoMethod = ({
+  schema,
+  name,
+  ctx,
+}: {
+  schema: CustomDtoSchema;
+  name: "write" | "read";
+  ctx: CodegenContext;
+}): FunctionMetadata => {
+  const desc = ctx.program.types.getTypeDesc(schema.typeId);
+  const nominal =
+    desc.kind === "intersection" && desc.nominal !== undefined
+      ? desc.nominal
+      : schema.typeId;
+  const impl = ctx.program.traits
+    .getImplsByNominal(nominal)
+    .find((candidate) => {
+      const ref = ctx.program.symbols.refOf(candidate.traitSymbol);
+      return (
+        ref.moduleId === "std::data" &&
+        ctx.program.symbols.getName(candidate.traitSymbol) === "CustomDto"
+      );
+    });
+  const methodRef = impl?.staticMethods
+    .map(({ traitMethod, implMethod }) => ({
+      name: ctx.program.symbols.getName(traitMethod),
+      ref: ctx.program.symbols.refOf(implMethod),
+    }))
+    .find((entry) => entry.name === name)?.ref;
+  const method = methodRef
+    ? ctx.functions.get(methodRef.moduleId)?.get(methodRef.symbol)?.[0]
+    : undefined;
+  if (!method) {
+    throw new Error(
+      `CustomDto.${name} is not linked for type ${schema.typeId}`,
+    );
+  }
+  return method;
+};
+
+const assertSingleLaneCustomDtoMethod = ({
+  method,
+  name,
+}: {
+  method: FunctionMetadata;
+  name: "write" | "read";
+}): void => {
+  if (
+    method.userParamOffset !== 0 ||
+    method.paramTypeIds.length !== 1 ||
+    method.paramAbiTypes[0]?.length !== 1 ||
+    method.paramAbiKinds[0] !== "direct" ||
+    method.resultAbiKind !== "direct"
+  ) {
+    throw new Error(`CustomDto.${name} must use the direct single-value ABI`);
+  }
+};
+
 const createDtoTreeCodecState = (
   schema: BoundarySchema,
   provider: DtoTreeProvider,
@@ -360,6 +531,9 @@ const registerDtoPlan = ({
     schema.aliases?.forEach((alias) => registry.set(alias, schema));
   }
   switch (schema.kind) {
+    case "custom":
+      registerDtoPlan({ schema: schema.representation, registry });
+      return;
     case "array":
       registerDtoPlan({ schema: schema.element, registry });
       return;
@@ -403,9 +577,7 @@ const resolveDtoPlanRef = ({
     });
   }
   if (!resolved || resolved.kind === "ref") {
-    throw new Error(
-      `DTO plan has unresolved recursive ref ${schema.typeId}`,
-    );
+    throw new Error(`DTO plan has unresolved recursive ref ${schema.typeId}`);
   }
   return resolved;
 };

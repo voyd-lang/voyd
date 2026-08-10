@@ -20,6 +20,9 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - `std::data::CustomDto<T, Representation>` defines one provider-neutral DTO
   representation for exceptional nominal types. Its fallible read operation
   validates representation invariants with `CustomDtoError`.
+- Compiler-generated DTO traversal, boundary shapes, schema fingerprints, and
+  JavaScript host adapters use the declared `CustomDto` representation. The
+  custom type itself never becomes a second wire shape.
 - Export, effect, and external-package DTO schemas carry stable SHA-256
   fingerprints at every typed payload position.
 - Every closed eligible type now has one cached `AutoDtoPlan` in

@@ -23,6 +23,7 @@ use std::data::{
   encode
 }
 use std::optional::all
+use std::meta::{ RecordShape, shape_of }
 use std::result::types::all
 use std::string::type::String
 use std::test::assertions::all
@@ -113,6 +114,13 @@ test "CustomDto uses one DTO-eligible representation and validates reads":
       Test::fail()
     Err<CustomDtoError> { error }:
       assert(error.message, eq: "positive id must be greater than zero")
+
+  shape_of<PositiveId>().root.match(root)
+    RecordShape:
+      assert(root.name, eq: "PositiveIdDto")
+      assert(root.fields.at(0).name, eq: "value")
+    else:
+      Test::fail()
 
   let ~fields = Array<DataField>::init()
   fields.push(DataField { name: "value", value: DataString { value: "ready" } })

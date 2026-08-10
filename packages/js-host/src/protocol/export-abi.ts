@@ -51,11 +51,19 @@ export type BoundaryRefSchema = {
   typeId: number;
 };
 
+export type BoundaryCustomSchema = {
+  kind: "custom";
+  typeId: number;
+  representationTypeId: number;
+  representation: BoundarySchema;
+};
+
 export type BoundarySchema = (
   | BoundaryPrimitiveSchema
   | BoundaryArraySchema
   | BoundaryRecordSchema
   | BoundaryUnionSchema
+  | BoundaryCustomSchema
   | BoundaryRefSchema
 ) & { fingerprint?: string };
 

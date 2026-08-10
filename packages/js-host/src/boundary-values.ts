@@ -163,9 +163,25 @@ const encodeBoundaryValue = ({
       ancestors,
     });
   }
+  if (schema.kind === "custom") {
+    return encodeBoundaryValue({
+      exportName,
+      schema: schema.representation,
+      value,
+      path,
+      registry,
+      ancestors,
+    });
+  }
   switch (schema.kind) {
     case "bool":
-      return expectType({ exportName, path, expected: "bool", value, guard: isBool });
+      return expectType({
+        exportName,
+        path,
+        expected: "bool",
+        value,
+        guard: isBool,
+      });
     case "i32":
       return expectI32({ exportName, path, value });
     case "i64":
@@ -218,7 +234,14 @@ const encodeBoundaryValue = ({
         ancestors,
       });
     case "union":
-      return encodeUnion({ exportName, schema, value, path, registry, ancestors });
+      return encodeUnion({
+        exportName,
+        schema,
+        value,
+        path,
+        registry,
+        ancestors,
+      });
   }
 };
 
@@ -242,6 +265,15 @@ const decodeBoundaryValue = ({
     return decodeBoundaryValue({
       exportName,
       schema: resolveSchemaRef({ schema, registry, path }),
+      value,
+      path,
+      registry,
+    });
+  }
+  if (schema.kind === "custom") {
+    return decodeBoundaryValue({
+      exportName,
+      schema: schema.representation,
       value,
       path,
       registry,
@@ -303,36 +335,44 @@ const encodeRecord = ({
   registry: ReadonlyMap<number, BoundarySchema>;
   ancestors: WeakSet<object>;
 }): Record<string, unknown> => {
-  return withCycleCheck({ exportName, path, value: toCycleObject(value), ancestors }, () => {
-    const record = toRecord({ exportName, path, value });
-    if (tag) {
-      const actualTag = record.tag ?? record.$variant;
-      if (actualTag !== tag) {
-        throw new Error(
-          `typed export ${exportName} ${path} expected variant tag ${tag}`,
-        );
-      }
-    }
-    return Object.fromEntries(
-      fields.flatMap((field) => {
-        const fieldValue = record[field.name];
-        if (field.optional && (fieldValue === undefined || fieldValue === null)) {
-          return [];
+  return withCycleCheck(
+    { exportName, path, value: toCycleObject(value), ancestors },
+    () => {
+      const record = toRecord({ exportName, path, value });
+      if (tag) {
+        const actualTag = record.tag ?? record.$variant;
+        if (actualTag !== tag) {
+          throw new Error(
+            `typed export ${exportName} ${path} expected variant tag ${tag}`,
+          );
         }
-        return [[
-          field.name,
-          encodeBoundaryValue({
-            exportName,
-            schema: field.schema,
-            value: fieldValue,
-            path: `${path}.${field.name}`,
-            registry,
-            ancestors,
-          }),
-        ]];
-      }),
-    );
-  });
+      }
+      return Object.fromEntries(
+        fields.flatMap((field) => {
+          const fieldValue = record[field.name];
+          if (
+            field.optional &&
+            (fieldValue === undefined || fieldValue === null)
+          ) {
+            return [];
+          }
+          return [
+            [
+              field.name,
+              encodeBoundaryValue({
+                exportName,
+                schema: field.schema,
+                value: fieldValue,
+                path: `${path}.${field.name}`,
+                registry,
+                ancestors,
+              }),
+            ],
+          ];
+        }),
+      );
+    },
+  );
 };
 
 const decodeRecord = ({
@@ -357,16 +397,18 @@ const decodeRecord = ({
         if (field.optional && !(field.name in record)) {
           return [];
         }
-        return [[
-          field.name,
-          decodeBoundaryValue({
-            exportName,
-            schema: field.schema,
-            value: record[field.name],
-            path: `${path}.${field.name}`,
-            registry,
-          }),
-        ]];
+        return [
+          [
+            field.name,
+            decodeBoundaryValue({
+              exportName,
+              schema: field.schema,
+              value: record[field.name],
+              path: `${path}.${field.name}`,
+              registry,
+            }),
+          ],
+        ];
       }),
     ),
     ...(tag ? { tag } : {}),
@@ -471,6 +513,9 @@ const buildSchemaRegistry = (
           variant.fields.forEach((field) => visit(field.schema)),
         );
         return;
+      case "custom":
+        visit(schema.representation);
+        return;
       default:
         return;
     }
@@ -490,7 +535,9 @@ const resolveSchemaRef = ({
 }): BoundarySchema => {
   const resolved = registry.get(schema.typeId);
   if (!resolved || resolved.kind === "ref") {
-    throw new Error(`typed export ${path} has unresolved recursive schema ref ${schema.typeId}`);
+    throw new Error(
+      `typed export ${path} has unresolved recursive schema ref ${schema.typeId}`,
+    );
   }
   return resolved;
 };
