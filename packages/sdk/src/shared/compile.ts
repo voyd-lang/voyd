@@ -145,6 +145,7 @@ export const compileWithLoader = async ({
         roots,
         host,
         includeTests: shouldIncludeTests,
+        includeSelectedHostTransport: true,
       });
       perf.mark("loadModuleGraph", loadStartedAt);
     } catch (error) {

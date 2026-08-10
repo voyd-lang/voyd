@@ -40,6 +40,9 @@ import {
   isCompilerPerfEnabled,
   recordCompilerPerfDuration,
 } from "../perf.js";
+import {
+  MSGPACK_HOST_TRANSPORT_CONTRACT_PROVIDER_MODULES,
+} from "../compiler-contracts/function-contracts.js";
 
 type BuildGraphOptions = {
   entryPath: string;
@@ -69,20 +72,21 @@ const IMPLICIT_PRELUDE_USE_DECL = (() => {
   }
   return entry;
 })();
-const IMPLICIT_HOST_TRANSPORT_USE_DECL = (() => {
-  const ast = parseBase(
-    "use std::msgpack::self as __voyd_host_transport_provider",
-    "<implicit-host-transport>",
-  );
-  if (!formCallsInternal(ast, "ast")) {
-    throw new Error("failed to parse implicit host transport import");
-  }
-  const entry = ast.rest[0];
-  if (!isForm(entry)) {
-    throw new Error("failed to parse implicit host transport use declaration");
-  }
-  return entry;
-})();
+const IMPLICIT_HOST_TRANSPORT_USE_DECLS =
+  MSGPACK_HOST_TRANSPORT_CONTRACT_PROVIDER_MODULES.map((moduleId, index) => {
+    const ast = parseBase(
+      `use ${moduleId}::self as __voyd_host_transport_provider_${index}`,
+      "<implicit-host-transport>",
+    );
+    if (!formCallsInternal(ast, "ast")) {
+      throw new Error("failed to parse implicit host transport import");
+    }
+    const entry = ast.rest[0];
+    if (!isForm(entry)) {
+      throw new Error("failed to parse implicit host transport use declaration");
+    }
+    return entry;
+  });
 
 const formatErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -1109,7 +1113,7 @@ const loadFileModule = async ({
       location: ast.location?.clone(),
       elements: [
         astHead,
-        IMPLICIT_HOST_TRANSPORT_USE_DECL.clone(),
+        ...IMPLICIT_HOST_TRANSPORT_USE_DECLS.map((decl) => decl.clone()),
         ...ast.rest,
       ],
     }).toCall();

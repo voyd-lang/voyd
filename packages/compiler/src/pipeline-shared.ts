@@ -57,6 +57,7 @@ export type LoadModulesOptions = {
   roots: ModuleRoots;
   host?: ModuleHost;
   includeTests?: boolean;
+  includeSelectedHostTransport?: boolean;
 };
 
 export type AnalyzeModulesOptions = {

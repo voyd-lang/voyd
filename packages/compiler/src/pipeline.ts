@@ -19,6 +19,7 @@ export const loadModuleGraph = async (
     host,
     roots: options.roots,
     includeTests: options.includeTests,
+    includeSelectedHostTransport: options.includeSelectedHostTransport,
   });
 };
 
