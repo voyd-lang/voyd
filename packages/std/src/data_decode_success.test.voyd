@@ -16,6 +16,8 @@ use std::data::{
   DataValueWriteError,
   DataValueWriter,
   DataWriter,
+  CustomDto,
+  CustomDtoError,
   DecodeError,
   decode,
   encode
@@ -39,6 +41,21 @@ obj DataSuccessCreated { id: i32 }
 obj DataSuccessDeleted { reason: String }
 type DataSuccessEvent = DataSuccessCreated | DataSuccessDeleted
 type DataSuccessId = i64
+
+obj PositiveId { value: i32 }
+obj PositiveIdDto { value: i32 }
+
+impl CustomDto<PositiveId, PositiveIdDto> for PositiveId
+  fn write(value: PositiveId) -> PositiveIdDto
+    PositiveIdDto { value: value.value }
+
+  fn read(value: PositiveIdDto) -> Result<PositiveId, CustomDtoError>
+    if value.value > 0:
+      Ok<PositiveId> { value: PositiveId { value: value.value } }
+    else:
+      Err<CustomDtoError> {
+        error: CustomDtoError { message: "positive id must be greater than zero" }
+      }
 
 test "decode converts valid nested values and permits missing optional fields":
   let ~profile_fields = Array<DataField>::init()
@@ -82,6 +99,20 @@ test "decode handles primitive aliases and options":
       assert(value, eq: 91i64)
     Err<DecodeError>:
       Test::fail()
+
+test "CustomDto uses one DTO-eligible representation and validates reads":
+  let representation = PositiveId::write(PositiveId { value: 7 })
+  assert(representation.value, eq: 7)
+  match(PositiveId::read(PositiveIdDto { value: 8 }))
+    Err<CustomDtoError>:
+      Test::fail()
+    Ok<PositiveId> { value }:
+      assert(value.value, eq: 8)
+  match(PositiveId::read(PositiveIdDto { value: 0 }))
+    Ok<PositiveId>:
+      Test::fail()
+    Err<CustomDtoError> { error }:
+      assert(error.message, eq: "positive id must be greater than zero")
 
   let ~fields = Array<DataField>::init()
   fields.push(DataField { name: "value", value: DataString { value: "ready" } })

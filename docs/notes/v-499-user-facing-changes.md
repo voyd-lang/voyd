@@ -17,6 +17,9 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
   callers that need an explicit neutral value.
 - DTO decoding rejects unknown fields by default. Callers must explicitly use
   `IgnoreUnknownFields` for forward-compatible input.
+- `std::data::CustomDto<T, Representation>` defines one provider-neutral DTO
+  representation for exceptional nominal types. Its fallible read operation
+  validates representation invariants with `CustomDtoError`.
 - Export, effect, and external-package DTO schemas carry stable SHA-256
   fingerprints at every typed payload position.
 - Every closed eligible type now has one cached `AutoDtoPlan` in
@@ -79,5 +82,3 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - Generate typed JSON and MessagePack traversal directly against `DataReader`
   and `DataWriter` without constructing an intermediate `DataValue` tree.
 - Replace raw VX MessagePack payloads with typed plans and final wire lowering.
-- Add custom DTO representations for types that cannot use automatic structural
-  DTO derivation.

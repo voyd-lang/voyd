@@ -89,6 +89,19 @@ pub type DataValue = DataNull
   | DataObject
   | DataVariant
 
+/// Validation failure reported by a custom DTO representation.
+pub obj CustomDtoError {
+  api message: String
+}
+
+/// One provider-neutral external representation for an exceptional nominal type.
+///
+/// `Representation` must itself be eligible for automatic DTO derivation.
+/// Implementations are format-independent and singular for `T`.
+pub trait CustomDto<T, Representation>
+  fn write(value: T) -> Representation
+  fn read(value: Representation) -> Result<T, CustomDtoError>
+
 /// Ignore object fields absent from the target Voyd type.
 pub obj IgnoreUnknownFields {}
 
