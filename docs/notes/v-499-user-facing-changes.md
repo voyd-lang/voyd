@@ -38,6 +38,9 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - Custom JavaScript host transport adapters must provide `encodedPayloadSize`
   together with frame encoding and decoding. Default adapters use this hook to
   enforce transport buffer limits without depending on a concrete wire format.
+- Web route parameters, query values, headers, and cookies decode through the
+  provider-neutral DTO data model. Rejection messages now identify failures
+  with rooted DTO paths such as `$.page`.
 
 This record will be extended as the remaining obsolete boundary and VX APIs are
 removed.
