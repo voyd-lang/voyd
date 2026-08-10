@@ -1,4 +1,5 @@
 import { msgPackHostTransport } from "../transports/msgpack.js";
+import type { HostFrame } from "./host-frame.js";
 
 export const HOST_ABI_VERSION = 1;
 export const DTO_SCHEMA_ABI_VERSION = 1;
@@ -15,7 +16,11 @@ export type HostTransportMetadata = {
 };
 
 export type HostTransportAdapter = HostTransportIdentity & {
+  encodeFrame(frame: HostFrame): Uint8Array;
+  decodeFrame(bytes: Uint8Array): HostFrame;
+  /** Removed when Host ABI v2 replaces the current unframed ABI. */
   encode(value: unknown): Uint8Array;
+  /** Removed when Host ABI v2 replaces the current unframed ABI. */
   decode(bytes: Uint8Array): unknown;
 };
 

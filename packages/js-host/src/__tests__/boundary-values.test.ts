@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { decodeBoundaryArgs } from "../boundary-values.js";
 import { resolveHostTransport } from "../protocol/host-transport.js";
+import type { HostFrame } from "../protocol/host-frame.js";
+import { msgPackHostTransport } from "../transports/msgpack.js";
 
 describe("boundary DTO decoding", () => {
   it("restores adapter-facing tags for unions and standalone variants", () => {
@@ -11,7 +13,10 @@ describe("boundary DTO decoding", () => {
           kind: "union",
           variants: [
             { name: "None", fields: [] },
-            { name: "Some", fields: [{ name: "value", schema: { kind: "i32" } }] },
+            {
+              name: "Some",
+              fields: [{ name: "value", schema: { kind: "i32" } }],
+            },
           ],
         },
         {
@@ -33,6 +38,12 @@ describe("host transport negotiation", () => {
     const adapter = {
       id: "example.transport",
       version: 3,
+      encodeFrame: () => new Uint8Array([2]),
+      decodeFrame: () => ({
+        kind: "cancellation-acknowledgement" as const,
+        operationId: 1,
+        accepted: true,
+      }),
       encode: () => new Uint8Array([1]),
       decode: () => "decoded",
     };
@@ -71,5 +82,85 @@ describe("host transport negotiation", () => {
         },
       }),
     ).toThrow("Missing Voyd host transport adapter voyd.std.msgpack@2");
+  });
+});
+
+describe("host ABI v2 frames", () => {
+  it("round-trips every complete frame category through MessagePack", () => {
+    const value = { fingerprint: "sha256:abc", value: { count: 2 } };
+    const outcome = { kind: "success" as const, value };
+    const frames: readonly HostFrame[] = [
+      { kind: "export-invocation", exportName: "main", args: [value] },
+      { kind: "export-completion", exportName: "main", outcome },
+      {
+        kind: "effect-request",
+        requestId: 1,
+        effectId: "voyd.std.fs",
+        operationId: 2,
+        args: [value],
+      },
+      { kind: "effect-outcome", requestId: 1, outcome },
+      {
+        kind: "callback-invocation",
+        invocationId: 3,
+        callbackId: 4,
+        args: [value],
+      },
+      { kind: "callback-completion", invocationId: 3, outcome },
+      { kind: "cancellation", operationId: 5, reason: "stopped" },
+      {
+        kind: "cancellation-acknowledgement",
+        operationId: 5,
+        accepted: true,
+      },
+      { kind: "vx-command", sessionId: 6, commandId: 7, command: value },
+      { kind: "vx-event", sessionId: 6, event: value },
+      {
+        kind: "vx-extension-request",
+        sessionId: 6,
+        requestId: 8,
+        extensionId: "example",
+        request: value,
+      },
+      {
+        kind: "vx-extension-outcome",
+        sessionId: 6,
+        requestId: 8,
+        outcome,
+      },
+      {
+        kind: "external-invocation",
+        interfaceId: "example.interface",
+        functionName: "read",
+        args: [value],
+      },
+      {
+        kind: "external-completion",
+        interfaceId: "example.interface",
+        functionName: "read",
+        outcome: {
+          kind: "failure",
+          failure: {
+            code: "example.failure",
+            message: "failed",
+            path: ["field", 1],
+          },
+        },
+      },
+    ];
+
+    frames.forEach((frame) => {
+      expect(
+        msgPackHostTransport.decodeFrame(
+          msgPackHostTransport.encodeFrame(frame),
+        ),
+      ).toEqual(frame);
+    });
+  });
+
+  it("rejects a value that is not a complete frame", () => {
+    expect(() =>
+      msgPackHostTransport.decodeFrame(msgPackHostTransport.encode([2, 99])),
+    ).toThrow("Unknown Voyd host frame tag 99");
   });
 });

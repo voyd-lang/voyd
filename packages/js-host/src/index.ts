@@ -17,6 +17,14 @@ export type {
   DefaultAdapterRuntimeHooks,
 } from "./adapters/default.js";
 export {
+  HOST_FRAME_VERSION,
+  type DtoFingerprint,
+  type HostFailure,
+  type HostFrame,
+  type HostOutcome,
+  type TypedHostPayload,
+} from "./protocol/host-frame.js";
+export {
   buildHandlersByLabelSuffix,
   registerHandlersByLabelSuffix,
 } from "./handlers.js";
@@ -117,5 +125,8 @@ export type {
   VoydTrapAnnotation,
   VoydTrapDiagnostics,
 } from "./runtime/trap-diagnostics.js";
-export { detectHostRuntime, scheduleTaskForRuntime } from "./runtime/environment.js";
+export {
+  detectHostRuntime,
+  scheduleTaskForRuntime,
+} from "./runtime/environment.js";
 export type { HostRuntimeKind } from "./runtime/environment.js";
