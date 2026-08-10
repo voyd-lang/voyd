@@ -92,7 +92,7 @@ pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
 
 /// Encodes a DTO-compatible value into immutable MessagePack bytes.
 pub fn encode<T>(value: T): () -> Result<Bytes, MsgPackError>
-  msgpack_fns::encode_value_bytes(data_value_to_msgpack(dto_value_to_data(value)))
+  msgpack_fns::encode_data_value_bytes(dto_value_to_data(value))
 
 /// Encodes an explicitly constructed MessagePack value into immutable bytes.
 pub fn encode_value_bytes(value: MsgPack): () -> Result<Bytes, MsgPackError>
@@ -100,11 +100,11 @@ pub fn encode_value_bytes(value: MsgPack): () -> Result<Bytes, MsgPackError>
 
 /// Decodes immutable MessagePack bytes into a DTO-compatible value.
 pub fn decode<T>(bytes: Bytes): () -> Result<T, MsgPackError>
-  match(msgpack_fns::decode_value_bytes(bytes))
+  match(msgpack_fns::decode_data_value_bytes(bytes))
     Err<MsgPackError> { error }:
       Err<MsgPackError> { error }
-    Ok<MsgPack> { value }:
-      match(decode_data<T>(msgpack_to_data_value(value)))
+    Ok<DataValue> { value }:
+      match(decode_data<T>(value))
         Ok<T> { value }:
           Ok<T> { value }
         Err { error }:

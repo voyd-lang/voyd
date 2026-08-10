@@ -10,7 +10,20 @@ use std::data::{
   BoolKind,
   BytesKind,
   DataKind,
+  DataArray,
+  DataBool,
+  DataBytes,
+  DataF32,
+  DataF64,
+  DataField,
+  DataI32,
+  DataI64,
+  DataNull,
+  DataObject,
   DataReader,
+  DataString,
+  DataValue,
+  DataVariant,
   DataWriter,
   F32Kind,
   F64Kind,
@@ -213,6 +226,16 @@ impl MsgPackWriter
     self.container_kinds.pop()
     self.remaining_values.pop()
     self.pending_fields.pop()
+    msgpack_writer_success()
+
+  fn write_dynamic_field(~self, name: String) -> Result<Unit, MsgPackError>
+    if self.container_kinds.is_empty():
+      return self.fail("msgpack writer field is outside a record or variant")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) == 0 or self.pending_fields.at(index) != 0:
+      return self.fail("msgpack writer field is not ready")
+    self.encoder.encode_string(name)
+    self.pending_fields.replace(index, with: 1)
     msgpack_writer_success()
 
 impl DataWriter<MsgPackError> for MsgPackWriter
@@ -535,6 +558,231 @@ fn msgpack_reader_failure<T>(message: String) -> Result<T, MsgPackError>
   Err<MsgPackError> {
     error: make_error(error_code_decode_failed(), message)
   }
+
+/// Encodes a neutral data value directly to MessagePack bytes.
+pub fn encode_data_value_bytes(value: DataValue) -> Result<Bytes, MsgPackError>
+  let ~writer = MsgPackWriter::init()
+  match(write_data_value(writer, value))
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<Unit>:
+      writer.finish()
+
+/// Decodes MessagePack bytes directly into one neutral data value.
+pub fn decode_data_value_bytes(bytes: Bytes) -> Result<DataValue, MsgPackError>
+  let ~reader = MsgPackReader::init(bytes)
+  match(read_data_value(reader))
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<DataValue> { value }:
+      if reader.is_complete():
+        return Ok<DataValue> { value }
+      msgpack_reader_failure<DataValue>("msgpack decode has trailing bytes")
+
+fn write_data_value(
+  ~writer: MsgPackWriter,
+  value: DataValue
+) -> Result<Unit, MsgPackError>
+  value.match(data)
+    DataNull:
+      writer.write_null()
+    DataBool:
+      writer.write_bool(data.value)
+    DataI32:
+      writer.write_i32(data.value)
+    DataI64:
+      writer.write_i64(data.value)
+    DataF32:
+      writer.write_f32(data.value)
+    DataF64:
+      writer.write_f64(data.value)
+    DataString:
+      writer.write_string(data.value)
+    DataBytes:
+      writer.write_bytes(data.value)
+    DataArray:
+      match(writer.begin_array(length: data.values.len()))
+        Err<MsgPackError> { error }:
+          Err<MsgPackError> { error }
+        Ok<Unit>:
+          var index = 0
+          while index < data.values.len():
+            match(write_data_value(writer, data.values.at(index)))
+              Err<MsgPackError> { error }:
+                return Err<MsgPackError> { error }
+              Ok<Unit>:
+                void
+            index = index + 1
+          writer.end_array()
+    DataObject:
+      write_data_fields(writer, data.fields, variant_name: None {})
+    DataVariant:
+      write_data_fields(
+        writer,
+        data.fields,
+        variant_name: Some<String> { value: data.name }
+      )
+
+fn write_data_fields(
+  ~writer: MsgPackWriter,
+  fields: Array<DataField>,
+  { variant_name: Option<String> }
+) -> Result<Unit, MsgPackError>
+  let extra = variant_name.match(value)
+    Some<String>: 1
+    None: 0
+  let kind = if extra == 1 then: 2 else: 1
+  match(writer.begin_container(kind: kind, length: fields.len() + extra))
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<Unit>:
+      match(variant_name)
+        Some<String> { value: name }:
+          match(writer.write_dynamic_field("$variant"))
+            Err<MsgPackError> { error }:
+              return Err<MsgPackError> { error }
+            Ok<Unit>:
+              match(writer.write_string(name))
+                Err<MsgPackError> { error }:
+                  return Err<MsgPackError> { error }
+                Ok<Unit>:
+                  void
+        None:
+          void
+      var index = 0
+      while index < fields.len():
+        let field = fields.at(index)
+        match(writer.write_dynamic_field(field.name))
+          Err<MsgPackError> { error }:
+            return Err<MsgPackError> { error }
+          Ok<Unit>:
+            match(write_data_value(writer, field.value))
+              Err<MsgPackError> { error }:
+                return Err<MsgPackError> { error }
+              Ok<Unit>:
+                void
+        index = index + 1
+      writer.end_container(kind: kind)
+
+fn read_data_value(~reader: MsgPackReader) -> Result<DataValue, MsgPackError>
+  match(reader.kind())
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<DataKind> { value: kind }:
+      kind.match(active)
+        NullKind:
+          match(reader.read_null())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<Unit>:
+              Ok<DataValue> { value: DataNull {} }
+        BoolKind:
+          match(reader.read_bool())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<bool> { value }:
+              Ok<DataValue> { value: DataBool { value } }
+        I32Kind:
+          match(reader.read_i32())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<i32> { value }:
+              Ok<DataValue> { value: DataI32 { value } }
+        I64Kind:
+          match(reader.read_i64())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<i64> { value }:
+              Ok<DataValue> { value: DataI64 { value } }
+        F32Kind:
+          match(reader.read_f32())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<f32> { value }:
+              Ok<DataValue> { value: DataF32 { value } }
+        F64Kind:
+          match(reader.read_f64())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<f64> { value }:
+              Ok<DataValue> { value: DataF64 { value } }
+        StringKind:
+          match(reader.read_string())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<String> { value }:
+              Ok<DataValue> { value: DataString { value } }
+        BytesKind:
+          match(reader.read_bytes())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<Bytes> { value }:
+              Ok<DataValue> { value: DataBytes { value } }
+        ArrayKind:
+          read_data_array(reader)
+        RecordKind:
+          read_data_fields(reader)
+        else:
+          msgpack_reader_failure<DataValue>("msgpack reader found an unsupported kind")
+
+fn read_data_array(~reader: MsgPackReader) -> Result<DataValue, MsgPackError>
+  match(reader.begin_array())
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<i32> { value: length }:
+      let ~values = Array<DataValue>::with_capacity(length)
+      while values.len() < length:
+        match(read_data_value(reader))
+          Err<MsgPackError> { error }:
+            return Err<MsgPackError> { error }
+          Ok<DataValue> { value }:
+            values.push(value)
+      match(reader.end_array())
+        Err<MsgPackError> { error }:
+          Err<MsgPackError> { error }
+        Ok<Unit>:
+          Ok<DataValue> { value: DataArray { values } }
+
+fn read_data_fields(~reader: MsgPackReader) -> Result<DataValue, MsgPackError>
+  match(reader.begin_record())
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<Unit>:
+      let ~fields = Array<DataField>::init()
+      var variant_name = "".to_string()
+      var has_variant = false
+      var reading = true
+      while reading:
+        match(reader.next_field())
+          Err<MsgPackError> { error }:
+            return Err<MsgPackError> { error }
+          Ok<Option<String>> { value }:
+            value.match(field)
+              None:
+                reading = false
+              Some<String> { value: name }:
+                if name == "$variant":
+                  match(reader.read_string())
+                    Err<MsgPackError> { error }:
+                      return Err<MsgPackError> { error }
+                    Ok<String> { value }:
+                      variant_name = value
+                      has_variant = true
+                else:
+                  match(read_data_value(reader))
+                    Err<MsgPackError> { error }:
+                      return Err<MsgPackError> { error }
+                    Ok<DataValue> { value }:
+                      fields.push(DataField { name, value })
+      match(reader.end_record())
+        Err<MsgPackError> { error }:
+          Err<MsgPackError> { error }
+        Ok<Unit>:
+          if has_variant:
+            return Ok<DataValue> {
+              value: DataVariant { name: variant_name, fields }
+            }
+          Ok<DataValue> { value: DataObject { fields } }
 
 obj MemoryDecoderSource {
   ptr: i32,

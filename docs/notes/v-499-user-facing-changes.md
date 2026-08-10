@@ -51,6 +51,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - `MsgPackWriter` and `MsgPackReader` implement the provider-neutral data
   contracts directly over immutable MessagePack bytes, including balanced
   containers and allocation-free value skipping.
+- Typed MessagePack encoding and decoding now use those byte streams and no
+  longer construct an intermediate parsed `MsgPack` tree.
 - `std::json::encode<T>` produces compact JSON and rejects `i64` values outside
   JavaScript's exact integer range. `Bytes` requires an explicit application
   representation in JSON.
