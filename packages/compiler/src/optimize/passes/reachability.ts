@@ -525,24 +525,9 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
 
     const enqueueCustomDtoPlan = (plan: AutoDtoPlan): void => {
       if (plan.kind === "custom") {
-        const desc = ctx.ir.baseProgram.types.getTypeDesc(plan.typeId);
-        const nominal =
-          desc.kind === "intersection" && desc.nominal !== undefined
-            ? desc.nominal
-            : plan.typeId;
-        const impl = ctx.ir.baseProgram.traits
-          .getImplsByNominal(nominal)
-          .find((candidate) => {
-            const ref = ctx.ir.baseProgram.symbols.refOf(candidate.traitSymbol);
-            return (
-              ref.moduleId === "std::data" &&
-              ctx.ir.baseProgram.symbols.getName(candidate.traitSymbol) ===
-                "CustomDto"
-            );
-          });
-        impl?.staticMethods.forEach(({ implMethod }) =>
+        [plan.writeFunction, plan.readFunction].forEach((functionId) =>
           enqueueKnownFunctionInstances(
-            ctx.ir.baseProgram.symbols.refOf(implMethod),
+            ctx.ir.baseProgram.symbols.refOf(functionId),
           ),
         );
         enqueueCustomDtoPlan(plan.representation);

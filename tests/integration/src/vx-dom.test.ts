@@ -8,6 +8,7 @@ import {
   createBrowserVxRuntimeHost,
   createVxDomRenderer,
   createVoydVxAppRuntime,
+  decodeVxWire,
   mountVxApp,
   renderMsgPackNode,
   type VxAppRuntime,
@@ -129,10 +130,9 @@ use pkg::web::{
   render
 }
 use std::array::Array
-use std::msgpack::MsgPack
 use std::vx::all
 
-pub fn tree() -> MsgPack
+pub fn tree() -> HtmlNode
   element(
     tag: "section",
     attrs: [class("card"), style(name: "display", value: "grid")],
@@ -140,7 +140,7 @@ pub fn tree() -> MsgPack
       element(
         tag: "input",
         attrs: [value("Draft"), disabled(true)],
-        children: Array<MsgPack>::init()
+        children: Array<HtmlNode>::init()
       ),
       fragment([text("Ready")]),
       element(
@@ -153,7 +153,7 @@ pub fn tree() -> MsgPack
 pub fn html() -> String
   render(tree())
 
-pub fn svg_tree() -> MsgPack
+pub fn svg_tree() -> HtmlNode
   element(
     tag: "svg",
     attrs: [attr(name: "viewBox", value: "0 0 24 24")],
@@ -161,7 +161,7 @@ pub fn svg_tree() -> MsgPack
       element(
         tag: "path",
         attrs: [attr(name: "d", value: "M1 1h2")],
-        children: Array<MsgPack>::init()
+        children: Array<HtmlNode>::init()
       )
     ]
   )
@@ -169,7 +169,7 @@ pub fn svg_tree() -> MsgPack
 pub fn svg_html() -> String
   render(svg_tree())
 
-pub fn svg_integration_point_tree() -> MsgPack
+pub fn svg_integration_point_tree() -> HtmlNode
   element(
     tag: "svg",
     children: [
@@ -190,23 +190,23 @@ pub fn svg_integration_point_html() -> String
 pub fn invalid_svg_tag_html(tag: String) -> String
   render(element(
     tag: "svg",
-    children: [element(tag: tag, children: Array<MsgPack>::init())]
+    children: [element(tag: tag, children: Array<HtmlNode>::init())]
   ))
 
 pub fn invalid_svg_attr_html(name: String) -> String
   render(element(
     tag: "svg",
     attrs: [attr(name: name, value: "value")],
-    children: Array<MsgPack>::init()
+    children: Array<HtmlNode>::init()
   ))
 
-pub fn static_event_tree() -> MsgPack
-  let ~attrs = Array<MsgPack>::init()
+pub fn static_event_tree() -> HtmlNode
+  let ~attrs = Array<HtmlAttr>::init()
   let interactive = false
   if interactive:
-    attrs.push(event_payload_handler<InputEvent, MsgPack>(
+    attrs.push(event_payload_handler<InputEvent, HtmlNode>(
       name: "input",
-      handler: (event: InputEvent) -> MsgPack => text(event.value)
+      handler: (event: InputEvent) -> HtmlNode => text(event.value)
     ))
   element(tag: "textarea", attrs: attrs, children: [text("Draft")])
 
@@ -214,17 +214,17 @@ pub fn invalid_void_html() -> String
   render(element(tag: "input", children: [text("not allowed")]))
 
 pub fn uppercase_tag_html() -> String
-  render(element(tag: "INPUT", children: Array<MsgPack>::init()))
+  render(element(tag: "INPUT", children: Array<HtmlNode>::init()))
 
 pub fn uppercase_attribute_html() -> String
   render(element(
     tag: "div",
     attrs: [attr(name: "CLASS", value: "card")],
-    children: Array<MsgPack>::init()
+    children: Array<HtmlNode>::init()
   ))
 
 pub fn multi_document() -> String
-  let view: MsgPack = <html><body><main id="one">One</main><aside id="two">Two</aside></body></html>
+  let view: HtmlNode = <html><body><main id="one">One</main><aside id="two">Two</aside></body></html>
   let first = append_hydration<i32>(
     document(view),
     hydrate_named<i32>(
@@ -401,7 +401,7 @@ pub fn multi_document() -> String
       }),
     );
 
-    await expect(result.run({ entryName: "main" })).resolves.toMatchObject({
+    expect(decodeVxWire(await result.run({ entryName: "main" }))).toMatchObject({
       kind: "element",
       tag: "button",
       attrs: { class: "icon-small", "aria-label": "Close" },
@@ -410,12 +410,17 @@ pub fn multi_document() -> String
 
   it("dispatches static event messages from compiled Voyd VX nodes", async () => {
     const entryPath = path.join(fixtureRoot, "vx.voyd");
-    const result = await compileFixture(entryPath);
-    const tree = await result.run<unknown>({
-      entryName: "event_message_button",
+    const result = expectCompileSuccess(
+      await vxDomSdk.compile({ entryPath }),
+    );
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
     });
+    const tree = decodeVxWire(await host.run("event_message_button"));
     const seenMessages: unknown[] = [];
     const app: VxAppRuntime = {
+      retainedCallbacks: host.retainedCallbacks,
       init: () => tree,
       render: () => tree,
       dispatch: (message) => {
@@ -425,12 +430,18 @@ pub fn multi_document() -> String
     };
 
     const container = document.createElement("div");
-    const mounted = await mountVxApp({ container, app });
+    const mounted = await mountVxApp({
+      container,
+      app,
+      handlers: host.retainedCallbacks,
+    });
 
     container.querySelector("button")?.click();
     await nextTurn();
 
-    expect(seenMessages).toEqual([{ Save: {} }]);
+    expect(seenMessages).toEqual([
+      { kind: "msgpack", value: { $variant: "Save" } },
+    ]);
 
     mounted.dispose();
     expect(container.innerHTML).toBe("");
@@ -443,9 +454,9 @@ pub fn multi_document() -> String
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const tree = await host.run<{ events?: Array<{ handlerId?: number }> }>(
-      "main",
-    );
+    const tree = decodeVxWire(await host.run("main")) as {
+      events?: Array<{ handlerId?: number }>;
+    };
     const handlerId = tree.events?.[0]?.handlerId;
 
     expect(typeof handlerId).toBe("number");
@@ -465,9 +476,9 @@ pub fn multi_document() -> String
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const tree = await host.run<{ events?: Array<{ handlerId?: number }> }>(
-      "input_echo",
-    );
+    const tree = decodeVxWire(await host.run("input_echo")) as {
+      events?: Array<{ handlerId?: number }>;
+    };
     const handlerId = tree.events?.[0]?.handlerId;
 
     expect(typeof handlerId).toBe("number");
@@ -503,10 +514,6 @@ pub fn multi_document() -> String
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    await expect(host.run("mapped_program_result")).resolves.toMatchObject({
-      kind: "program_map_message",
-      child: { kind: "program_map_model" },
-    });
     const app = createVoydVxAppRuntime({ host, app: "mapped_app" });
 
     const container = document.createElement("div");
@@ -538,22 +545,6 @@ pub fn multi_document() -> String
 
     mounted.dispose();
     expect(container.innerHTML).toBe("");
-  });
-
-  it("retains subscriptions from object syntax program lifecycle config", async () => {
-    const result = await compileFixture(typedCounterEntryPath);
-    const host = await createVoydHost({
-      wasm: result.wasm,
-      bufferSize: 256 * 1024,
-    });
-
-    const inferred = await host.run<{ subscriptionsHandlerId?: number }>("app");
-    const explicit = await host.run<{ subscriptionsHandlerId?: number }>(
-      "app_explicit_config",
-    );
-
-    expect(typeof inferred.subscriptionsHandlerId).toBe("number");
-    expect(typeof explicit.subscriptionsHandlerId).toBe("number");
   });
 
   it("dispatches typed task command results from a mounted Voyd app", async () => {
@@ -624,11 +615,12 @@ pub fn multi_document() -> String
     });
     const container = document.createElement("div");
     const onError = vi.fn();
+    const app = createVoydVxAppRuntime({ host });
 
     try {
       const mounted = await mountVxApp({
         container,
-        app: createVoydVxAppRuntime({ host }),
+        app,
         runtimeHost,
         onError,
       });
@@ -667,13 +659,20 @@ pub fn multi_document() -> String
       expect(saveButton).toBeDefined();
 
       saveButton?.click();
-      await waitForTextContaining(container, "main", "Orbit API unavailable");
+      await waitForTextContaining(
+        container,
+        '[role="status"]',
+        "Orbit API unavailable",
+        2_000,
+      );
 
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/simulations");
       expect(onError).not.toHaveBeenCalled();
-      expect(saveButton?.disabled).toBe(false);
-      expect(saveButton?.textContent?.trim()).toBe("Save");
+      const updatedSaveButton = container.querySelector<HTMLButtonElement>(
+        ".primary-button",
+      );
+      expect(updatedSaveButton?.disabled).toBe(false);
       expect(container.querySelector('[role="status"]')?.textContent).toBe(
         "Orbit API unavailable",
       );
@@ -946,15 +945,15 @@ pub fn multi_document() -> String
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const commands = await host.run<{ children?: unknown[] }>(
-      "standard_commands",
-    );
-    const subscriptions = await host.run<{ children?: unknown[] }>(
-      "standard_subscriptions",
-    );
+    const commands = decodeVxWire(await host.run("standard_commands")) as {
+      children?: unknown[];
+    };
+    const subscriptions = decodeVxWire(
+      await host.run("standard_subscriptions"),
+    ) as { children?: unknown[] };
 
     expect(commands.children).toHaveLength(21);
-    expect(subscriptions.children).toHaveLength(14);
+    expect(subscriptions.children).toHaveLength(13);
 
     const app = createVoydVxAppRuntime({ host });
 

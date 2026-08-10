@@ -1,6 +1,8 @@
 import { decode } from "@msgpack/msgpack";
 import type { CallOptions, VoydComponentFn } from "./types.js";
 
+const taskObserverProperty = Symbol.for("voyd.taskObserver");
+
 export function callComponentFn(
   componentFn: VoydComponentFn,
   options: CallOptions,
@@ -15,6 +17,26 @@ export function callComponentFn(
   const length = componentFn();
   const view = memory.buffer.slice(0, length);
   return decode(view);
+}
+
+export function decodeVxWire(value: unknown): unknown {
+  if (!(value instanceof Uint8Array)) return value;
+  const decoded = decode(value);
+  const observer = (value as unknown as Record<PropertyKey, unknown>)[
+    taskObserverProperty
+  ];
+  if (
+    typeof observer === "function" &&
+    decoded !== null &&
+    typeof decoded === "object"
+  ) {
+    Object.defineProperty(decoded, taskObserverProperty, {
+      configurable: true,
+      enumerable: false,
+      value: observer,
+    });
+  }
+  return decoded;
 }
 
 export function resolveMemory(options: CallOptions): WebAssembly.Memory | undefined {

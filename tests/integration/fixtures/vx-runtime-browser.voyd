@@ -25,7 +25,7 @@ pub fn app() -> Program<Model, Msg>
   program({ init, step, view, subscriptions })
 
 fn init() -> Program<Model, Msg>
-  next<Model, Msg>(
+  next(
     model: Model { status: "ready", key: "none", code: "none", ctrl: false },
     cmd: Cmd<Msg>::copy_to_clipboard("Copied from Voyd")
   )
@@ -33,9 +33,9 @@ fn init() -> Program<Model, Msg>
 fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::KeyDown { key, code, ctrl }:
-      next<Model, Msg>(Model { status: "key", key: key, code: code, ctrl: ctrl })
+      next(Model { status: "key", key: key, code: code, ctrl: ctrl })
     else:
-      next<Model, Msg>(model)
+      next(model)
 
 fn view(model: Model) -> Html<Msg>
   <div>
@@ -79,7 +79,7 @@ pub fn standard_commands() -> Cmd<Msg>
   ])
 
 pub fn standard_subscriptions() -> Sub<Msg>
-  Sub::batch([
+  Sub<Msg>::batch([
     keyboard_on_key_down(key: "s", value: Msg::Changed {}),
     keyboard_on_key_up(
       key: "s",

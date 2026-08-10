@@ -72,12 +72,6 @@
     "rationale": "Keep co-located: protects the mini-wikipedia example's Voyd-owned article model and behavior through the native test runner."
   },
   {
-    "file": "examples/voyd-orbit/src/client/view.test.voyd",
-    "owner": "voyd-library",
-    "disposition": "library-local",
-    "rationale": "Keep co-located: protects Orbit's user-visible metric and saved-timestamp presentation policy while std owns the underlying formatting semantics."
-  },
-  {
     "file": "examples/voyd-orbit/src/server/app.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
@@ -2288,18 +2282,6 @@
     "owner": "voyd-library",
     "disposition": "library-local",
     "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
-  },
-  {
-    "file": "packages/std/src/vx.test.voyd",
-    "owner": "voyd-library",
-    "disposition": "library-local",
-    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
-  },
-  {
-    "file": "packages/std/src/vx_canvas.test.voyd",
-    "owner": "voyd-library",
-    "disposition": "library-local",
-    "rationale": "Keep co-located: protects the public std::vx::canvas module's typed constructors, frame encoding, and command envelopes through the native test runner."
   },
   {
     "file": "packages/voyd_semver/src/parse.test.voyd",

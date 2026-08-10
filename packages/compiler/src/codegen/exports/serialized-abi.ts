@@ -17,8 +17,8 @@ import { abiTypeFor, getSignatureSpillBoxType, wasmTypeFor } from "../types.js";
 import { ensureLinearMemoryExport } from "../memory-exports.js";
 import { ensureSelectedHostTransportProvider } from "../host-transport/selected-provider.js";
 import {
-  deriveBoundarySchema,
   withDtoFingerprint,
+  type BoundarySchema,
 } from "../boundary/schema.js";
 import {
   writeDtoValueToTree,
@@ -45,19 +45,16 @@ export const emitSerializedExportWrapper = ({
   ctx,
   meta,
   exportName,
+  schemas,
   wrapperExportName = exportName,
 }: {
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
+  schemas: { params: BoundarySchema[]; result: BoundarySchema };
   wrapperExportName?: string;
 }): { wrapperName: string } => {
   ensureLinearMemoryExport(ctx);
-  validateExportTypes({
-    ctx,
-    meta,
-    exportName,
-  });
 
   const provider = ensureSelectedHostTransportProvider(ctx);
   const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
@@ -180,10 +177,7 @@ export const emitSerializedExportWrapper = ({
     ctx.mod.nop(),
   );
 
-  const buildParamExpr = (
-    typeId: number,
-    index: number,
-  ): binaryen.ExpressionRef => {
+  const buildParamExpr = (index: number): binaryen.ExpressionRef => {
     const element = arrayGet(
       ctx.mod,
       ctx.mod.local.get(argsStorageLocal, storageType),
@@ -211,18 +205,14 @@ export const emitSerializedExportWrapper = ({
     return readDtoValueFromTree({
       ctx,
       value: payload,
-      schema: deriveBoundarySchema({
-        typeId,
-        ctx,
-        label: `${exportName} arg${index}`,
-      }),
+      schema: schemas.params[index]!,
       fnCtx,
       provider,
     });
   };
 
-  const callArgs = meta.paramTypeIds.map((typeId, index) =>
-    buildParamExpr(typeId, index),
+  const callArgs = meta.paramTypeIds.map((_typeId, index) =>
+    buildParamExpr(index),
   );
   const loweredCall = lowerSerializedExportCall({
     meta,
@@ -232,18 +222,11 @@ export const emitSerializedExportWrapper = ({
   });
   const encodeValue = packSerializedResultValue({
     value: loweredCall.value,
-    typeId: meta.resultTypeId,
+    schema: schemas.result,
     ctx,
     fnCtx,
-    exportName,
   });
-  const resultFingerprint = withDtoFingerprint(
-    deriveBoundarySchema({
-      typeId: meta.resultTypeId,
-      ctx,
-      label: `${exportName} result`,
-    }),
-  ).fingerprint;
+  const resultFingerprint = withDtoFingerprint(schemas.result).fingerprint;
   if (!resultFingerprint) {
     throw new Error(`missing DTO fingerprint for ${exportName} result`);
   }
@@ -534,48 +517,21 @@ const stabilizeMultivalueResult = ({
     : ctx.mod.block(null, [...captured.setup, tuple], abiTypeFor(abiTypes));
 };
 
-const validateExportTypes = ({
-  ctx,
-  meta,
-  exportName,
-}: {
-  ctx: CodegenContext;
-  meta: FunctionMetadata;
-  exportName: string;
-}): void => {
-  const allTypes = [...meta.paramTypeIds, meta.resultTypeId];
-  allTypes.forEach((typeId, index) => {
-    const target =
-      index < meta.paramTypeIds.length ? `parameter ${index + 1}` : "return";
-    deriveBoundarySchema({
-      typeId,
-      ctx,
-      label: `${exportName} ${target}`,
-    });
-  });
-};
-
 const packSerializedResultValue = ({
   value,
-  typeId,
+  schema,
   ctx,
   fnCtx,
-  exportName,
 }: {
   value: binaryen.ExpressionRef;
-  typeId: TypeId;
+  schema: BoundarySchema;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-  exportName: string;
 }): binaryen.ExpressionRef => {
   const provider = ensureSelectedHostTransportProvider(ctx);
   return writeDtoValueToTree({
     value,
-    schema: deriveBoundarySchema({
-      typeId,
-      ctx,
-      label: `${exportName} result`,
-    }),
+    schema,
     ctx,
     fnCtx,
     provider,

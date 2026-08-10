@@ -1,11 +1,10 @@
 use std::array::Array
-use std::msgpack::MsgPack
 use std::optional::types::all
 use std::string::type::String
 use std::vx::self as vx
 
-type View<Msg> = MsgPack
-type Child<Msg> = MsgPack
+type View<Msg> = vx::Html<Msg>
+type Child<Msg> = vx::HtmlNode
 
 enum ButtonSize
   Default
@@ -14,10 +13,10 @@ enum ButtonSize
 enum TestMsg
   Clicked
 
-fn icon() -> MsgPack
+fn icon() -> vx::HtmlNode
   vx::html_element(
     tag: "span",
-    children: Array<MsgPack>::init()
+    children: Array<vx::HtmlNode>::init()
   )
 
 fn Button<Msg>({

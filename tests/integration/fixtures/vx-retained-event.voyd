@@ -1,18 +1,16 @@
-use std::msgpack
-use std::msgpack::MsgPack
 use std::vx::all
 
-fn clicked(payload: MsgPack) -> MsgPack
+fn clicked(payload: GenericEvent) -> GenericEvent
   payload
 
-pub fn main() -> MsgPack
-  <button on_click={(payload: MsgPack) -> MsgPack => clicked(payload)}>Click</button>
+pub fn main() -> HtmlNode
+  <button on_click={(payload: GenericEvent) -> GenericEvent => clicked(payload)}>Click</button>
 
-pub fn input_echo() -> MsgPack
-  <input value="hello" on_input={(payload: MsgPack) -> MsgPack => clicked(payload)} />
+pub fn input_echo() -> HtmlNode
+  <input value="hello" on_input={(payload: InputEvent) -> InputEvent => payload} />
 
-fn ValueField({ value: String }) -> MsgPack
+fn ValueField({ value: String }) -> HtmlNode
   <input value={value} />
 
-pub fn value_shadow() -> MsgPack
+pub fn value_shadow() -> HtmlNode
   <ValueField value="hello" />

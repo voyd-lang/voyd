@@ -838,12 +838,45 @@ export const registerImportedTraitImplTemplates = ({
     });
 
     new Map([...methods, ...staticMethods]).forEach(
-      (implMethodSymbol, traitMethodSymbol) =>
+      (implMethodSymbol, traitMethodSymbol) => {
+        const existing = ctx.traitMethodImpls.get(implMethodSymbol);
+        const sameImportedContract = existing
+          ? (() => {
+              const existingTrait = canonicalSymbolRefInTypingContext(
+                { moduleId: ctx.moduleId, symbol: existing.traitSymbol },
+                ctx,
+              );
+              const incomingTrait = canonicalSymbolRefInTypingContext(
+                { moduleId: ctx.moduleId, symbol: localTraitSymbol },
+                ctx,
+              );
+              const existingMethod = canonicalSymbolRefInTypingContext(
+                { moduleId: ctx.moduleId, symbol: existing.traitMethodSymbol },
+                ctx,
+              );
+              const incomingMethod = canonicalSymbolRefInTypingContext(
+                { moduleId: ctx.moduleId, symbol: traitMethodSymbol },
+                ctx,
+              );
+              return (
+                existingTrait.moduleId === incomingTrait.moduleId &&
+                existingTrait.symbol === incomingTrait.symbol &&
+                existingMethod.moduleId === incomingMethod.moduleId &&
+                existingMethod.symbol === incomingMethod.symbol
+              );
+            })()
+          : false;
         registerTraitMethodImplMapping({
           traitMethodImpls: ctx.traitMethodImpls,
           implMethodSymbol,
-          traitSymbol: localTraitSymbol,
-          traitMethodSymbol,
+          traitSymbol:
+            sameImportedContract && existing
+              ? existing.traitSymbol
+              : localTraitSymbol,
+          traitMethodSymbol:
+            sameImportedContract && existing
+              ? existing.traitMethodSymbol
+              : traitMethodSymbol,
           buildConflictMessage: ({ implMethodSymbol, existing, incoming }) =>
             [
               "imported impl method mapped to multiple trait methods",
@@ -851,7 +884,8 @@ export const registerImportedTraitImplTemplates = ({
               `existing trait/method: ${existing.traitSymbol}/${existing.traitMethodSymbol}`,
               `incoming trait/method: ${incoming.traitSymbol}/${incoming.traitMethodSymbol}`,
             ].join("\n"),
-        }),
+        });
+      },
     );
   });
 };

@@ -13,7 +13,6 @@ use super::update::Msg
 use src::shared::SimulationSummary
 use src::simulation::{ Body, BodyKind, BuiltInScenario, built_in_scenarios }
 use std::array::Array
-use std::msgpack::MsgPack
 use std::number::cast::{ format_fixed, format_significant, to_string }
 use std::optional::types::all
 use std::result::types::all
@@ -92,7 +91,7 @@ fn SimulationCanvas({ model: Model }) -> Html<Msg>
         }
       )
     ],
-    children: Array<MsgPack>::init()
+    children: Array<HtmlNode>::init()
   )
 
 fn TopBar({ model: Model }) -> Html<Msg>
@@ -202,7 +201,7 @@ fn BodyGlyph({ kind: BodyKind, color: String }) -> Html<Msg>
       style(name: "--glyph-size", value: glyph_size(kind)),
       style(name: "--glyph-glow", value: glyph_glow(kind))
     ],
-    children: Array<MsgPack>::init()
+    children: Array<HtmlNode>::init()
   )
 
 fn PlacementHint({ model: Model }) -> Html<Msg>
@@ -730,4 +729,4 @@ fn library_status(model: Model) -> String
   to_string(count).concat(" saved systems")
 
 fn empty() -> Html<Msg>
-  fragment(Array<MsgPack>::init())
+  fragment(Array<HtmlNode>::init())

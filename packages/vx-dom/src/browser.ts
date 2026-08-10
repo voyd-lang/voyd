@@ -1,4 +1,4 @@
-import { callComponentFn } from "./memory.js";
+import { callComponentFn, decodeVxWire } from "./memory.js";
 import {
   childNamespace,
   elementNamespace,
@@ -301,7 +301,7 @@ export function renderMsgPackNode(
   options: { handlers?: RetainedEventHandlerRegistry } = {},
 ): VxDomRenderer {
   const renderer = createVxDomRenderer(container, options);
-  renderer.render(tree);
+  renderer.render(decodeVxWire(tree));
   return renderer;
 }
 
@@ -360,13 +360,17 @@ export function createVxDomRenderer(
 
   return {
     render(input: unknown) {
-      const nextFrame = flattenRenderFrame(normalizeRenderFrame(input));
+      const nextFrame = flattenRenderFrame(
+        normalizeRenderFrame(decodeVxWire(input)),
+      );
       applyFrame(nextFrame, () => {
         patchContainer(container, currentFrame?.root, nextFrame.root, options.handlers);
       });
     },
     hydrate(input: unknown) {
-      const nextFrame = flattenRenderFrame(normalizeRenderFrame(input));
+      const nextFrame = flattenRenderFrame(
+        normalizeRenderFrame(decodeVxWire(input)),
+      );
       try {
         applyFrame(nextFrame, () => {
           hydrateContainer(

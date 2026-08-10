@@ -56,9 +56,10 @@ const buildModule = async ({
 };
 
 describe("export abi metadata", { timeout: 60_000 }, () => {
-  it("does not serialize unrelated DTO-compatible exports in boundary modules", async () => {
+  it("derives automatic DTO exports for opaque VX values", async () => {
     const wasm = await buildModule({
       entryFile: "boundary-export-contract.voyd",
+      codegenOptions: { boundaryExports: "auto" },
     });
     const module = new WebAssembly.Module(wasmBufferSource(wasm));
     const abi = parseExportAbi(module);
@@ -69,29 +70,9 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
           name: "app",
           abi: "serialized",
         }),
-        expect.objectContaining({
-          name: "echo_command",
-          abi: "serialized",
-        }),
         expect.objectContaining({ name: "add", abi: "direct" }),
       ]),
     );
-  });
-
-  it("decodes boundary payload envelopes in serialized params", async () => {
-    const wasm = await buildModule({
-      entryFile: "boundary-export-contract.voyd",
-    });
-    const host = await createVoydHost({ wasm });
-    const payload = {
-      type: "cmd",
-      kind: "message",
-      value: { Increment: {} },
-    };
-
-    const result = await host.runPure("echo_command", [payload]);
-
-    expect(result).toEqual(payload);
   });
 
   it("unwraps compiler-derived canvas payloads through boundary metadata", async () => {
@@ -141,7 +122,7 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     });
   });
 
-  it("does not activate companion boundary exports from unrelated boundary helpers", async () => {
+  it("does not activate typed boundary exports from unrelated boundary helpers", async () => {
     const wasm = await buildModule({
       entryFile: "boundary-preview-export-contract.voyd",
     });
@@ -152,7 +133,7 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
       expect.arrayContaining([
         expect.objectContaining({
           name: "view",
-          abi: "serialized",
+          abi: "direct",
         }),
         expect.objectContaining({ name: "init", abi: "direct" }),
       ]),
@@ -220,7 +201,10 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
 
   it("exports memory for serialized wrappers under linearMemoryExport: auto", async () => {
     const wasm = await buildModule({
-      codegenOptions: { linearMemoryExport: "auto" },
+      codegenOptions: {
+        boundaryExports: "auto",
+        linearMemoryExport: "auto",
+      },
     });
     const module = new WebAssembly.Module(wasmBufferSource(wasm));
     const exports = WebAssembly.Module.exports(module).map(

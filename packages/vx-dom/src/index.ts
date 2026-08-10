@@ -8,6 +8,7 @@ export type {
 } from "./app-runtime.js";
 export {
   callComponentFn,
+  decodeVxWire,
   resolveMemory,
 } from "./memory.js";
 export {

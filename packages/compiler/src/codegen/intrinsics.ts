@@ -451,8 +451,7 @@ const ensureRetainedCallbackHelper = ({
   const provider = ensureSelectedHostTransportProvider(ctx);
   const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
   const parameterCodecs = desc.parameters.map((parameter, index) => {
-    const isProviderValue =
-      wasmTypeFor(parameter.type, ctx) === providerValueType;
+    const isProviderValue = parameter.type === provider.valueTypeId;
     return {
       typeId: parameter.type,
       isProviderValue,
@@ -468,7 +467,7 @@ const ensureRetainedCallbackHelper = ({
   const returnWasmType = wasmTypeFor(desc.returnType, ctx);
   const returnsVoid = returnWasmType === binaryen.none;
   const returnsProviderValue =
-    !returnsVoid && returnWasmType === providerValueType;
+    !returnsVoid && desc.returnType === provider.valueTypeId;
   const returnSchema = returnsVoid || returnsProviderValue
     ? undefined
     : deriveBoundarySchema({

@@ -1,6 +1,6 @@
 use std::string::type::{ String, StringSlice }
 use std::array::Array
-use std::vx::{ HtmlNode, attr, element, fragment, text }
+use std::vx::{ HtmlAttr, HtmlNode, attr, element, fragment, text }
 use super::external::{ StaticHtml, StaticHtmlNode, render_static }
 
 /// Renders Markdown as a VX component.
@@ -38,7 +38,7 @@ fn render_node(nodes: Array<StaticHtmlNode>, index: i32): () -> HtmlNode
   if node.kind == "fragment":
     return fragment(children)
 
-  let ~attrs = Array<HtmlNode>::with_capacity(node.attrs.len())
+  let ~attrs = Array<HtmlAttr>::with_capacity(node.attrs.len())
   var attr_index = 0
   while attr_index < node.attrs.len():
     let item = node.attrs.at(attr_index)

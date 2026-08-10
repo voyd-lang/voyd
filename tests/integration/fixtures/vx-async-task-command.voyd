@@ -1,6 +1,4 @@
 use std::enums::{ enum }
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
 use std::string::type::String
 use std::task::self as tasks
 use std::vx::all
@@ -28,7 +26,7 @@ fn step(model: Model, msg: Msg): tasks::TaskRuntime -> Program<Model, Msg>
     Msg::Save:
       next(
         model: Model { status: "Saving..." },
-        cmd: Cmd<Msg>::task(
+        cmd: Cmd<Msg>::perform<WorkResult>(
           work: () -> WorkResult => WorkResult::Done { value: 41 },
           handler: (result: WorkResult) -> Msg => Msg::Saved {
             value: work_result_value(result)
@@ -38,7 +36,10 @@ fn step(model: Model, msg: Msg): tasks::TaskRuntime -> Program<Model, Msg>
     Msg::SaveIgnored:
       next(
         model: Model { status: "Ignoring..." },
-        cmd: ignored_task()
+        cmd: Cmd<Msg>::perform<i32>(
+          work: () -> i32 => 99,
+          handler: (_value: i32) -> Msg => Msg::Saved { value: 42 }
+        )
       )
     Msg::Saved { value }:
       next(Model { status: saved_label(value) })
@@ -48,13 +49,6 @@ fn view(model: Model) -> Html<Msg>
     <button type="button" data-testid="typed-result" on_click={Msg::Save {}}>{model.status}</button>
     <button type="button" data-testid="ignored-result" on_click={Msg::SaveIgnored {}}>Ignore result</button>
   </div>
-
-fn ignored_task(): tasks::TaskRuntime -> Cmd<Msg>
-  Cmd<Msg>::task
-    work():
-      msgpack::make_i32(99)
-    handler():
-      Msg::Saved { value: 42 }
 
 fn saved_label(value: i32) -> String
   if

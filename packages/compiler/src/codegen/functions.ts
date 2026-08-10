@@ -100,11 +100,16 @@ import {
   type DefaultIdentityGuardEntry,
 } from "./default-identity-guard-entry.js";
 import { wasmSymbolName } from "./symbol-names.js";
+import {
+  isCustomDtoFunctionReachable,
+  markCustomDtoFunctionReachable as markCustomDtoBoundaryFunctionReachable,
+} from "./boundary/custom-dto-reachability.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
   "voyd.codegen.functionMetadataRegistrationState",
 );
+const SHARED_REACHABILITY = new WeakMap<object, Set<ProgramSymbolId>>();
 
 type ReachabilityState = {
   symbols?: Set<ProgramSymbolId>;
@@ -249,23 +254,8 @@ const markCustomDtoPlanReachable = ({
   ctx: CodegenContext;
 }): void => {
   if (schema.kind === "custom") {
-    const desc = ctx.program.types.getTypeDesc(schema.typeId);
-    const nominal =
-      desc.kind === "intersection" && desc.nominal !== undefined
-        ? desc.nominal
-        : schema.typeId;
-    const impl = ctx.program.traits
-      .getImplsByNominal(nominal)
-      .find((candidate) => {
-        const ref = ctx.program.symbols.refOf(candidate.traitSymbol);
-        return (
-          ref.moduleId === "std::data" &&
-          ctx.program.symbols.getName(candidate.traitSymbol) === "CustomDto"
-        );
-      });
-    impl?.staticMethods.forEach(({ implMethod }) => {
-      const ref = ctx.program.symbols.refOf(implMethod);
-      markFunctionReachable({ ctx, ...ref });
+    [schema.writeFunction, schema.readFunction].forEach((functionId) => {
+      markCustomDtoFunctionReachable(ctx, functionId);
     });
     markCustomDtoPlanReachable({ schema: schema.representation, ctx });
     return;
@@ -614,6 +604,58 @@ const collectReachableFunctionSymbols = ({
     queue.push(symbolId);
   };
 
+  const enqueueCustomDtoPlan = (plan: BoundarySchema): void => {
+    if (plan.kind === "custom") {
+      [plan.writeFunction, plan.readFunction].forEach((functionId) => {
+        markCustomDtoFunctionReachable(ctx, functionId);
+        enqueue(functionId);
+        const ref = ctx.program.symbols.refOf(functionId);
+        enqueue(
+          ctx.program.symbols.canonicalIdOf(
+            ref.moduleId,
+            ref.symbol,
+          ) as ProgramSymbolId,
+        );
+      });
+      enqueueCustomDtoPlan(plan.representation);
+      return;
+    }
+    if (plan.kind === "array") {
+      enqueueCustomDtoPlan(plan.element);
+      return;
+    }
+    if (plan.kind === "record") {
+      plan.fields.forEach((field) => enqueueCustomDtoPlan(field.schema));
+      return;
+    }
+    if (plan.kind === "union") {
+      plan.variants.forEach((variant) =>
+        variant.fields.forEach((field) => enqueueCustomDtoPlan(field.schema)),
+      );
+    }
+  };
+
+  const enqueueExportDtoMethods = ({
+    moduleId,
+    symbol,
+  }: {
+    moduleId: string;
+    symbol: number;
+  }): void => {
+    const signature = ctx.program.functions.getSignature(moduleId, symbol);
+    if (!signature) return;
+    [...signature.parameters.map((parameter) => parameter.typeId), signature.returnType]
+      .forEach((typeId) => {
+        try {
+          enqueueCustomDtoPlan(
+            ctx.program.dtoPlans.get({ typeId, moduleId }),
+          );
+        } catch {
+          // Unsupported export types are handled by normal boundary diagnostics.
+        }
+      });
+  };
+
   const testScope = entryCtx.options.testScope ?? "all";
   const exportContexts =
     entryCtx.options.testMode && testScope === "all" ? contexts : [entryCtx];
@@ -635,6 +677,7 @@ const collectReachableFunctionSymbols = ({
       );
       if (typeof targetId === "number") {
         const targetRef = exportCtx.program.symbols.refOf(targetId);
+        enqueueExportDtoMethods(targetRef);
         enqueue(
           exportCtx.program.symbols.canonicalIdOf(
             targetRef.moduleId,
@@ -643,6 +686,10 @@ const collectReachableFunctionSymbols = ({
         );
         return;
       }
+      enqueueExportDtoMethods({
+        moduleId: exportCtx.moduleId,
+        symbol: entry.symbol,
+      });
       enqueue(
         exportCtx.program.symbols.canonicalIdOf(
           exportCtx.moduleId,
@@ -761,7 +808,8 @@ const reachabilitySetOf = (ctx: CodegenContext): Set<ProgramSymbolId> => {
   if (state.symbols) {
     return state.symbols;
   }
-  const symbols = new Set<ProgramSymbolId>();
+  const symbols = SHARED_REACHABILITY.get(ctx.mod) ?? new Set<ProgramSymbolId>();
+  SHARED_REACHABILITY.set(ctx.mod, symbols);
   state.symbols = symbols;
   return symbols;
 };
@@ -780,6 +828,19 @@ const markFunctionReachable = ({
   (reachable ?? reachabilitySetOf(ctx)).add(
     ctx.program.symbols.canonicalIdOf(moduleId, symbol) as ProgramSymbolId,
   );
+};
+
+const markCustomDtoFunctionReachable = (
+  ctx: CodegenContext,
+  functionId: ProgramSymbolId,
+): void => {
+  const ref = ctx.program.symbols.refOf(functionId);
+  markCustomDtoBoundaryFunctionReachable({
+    mod: ctx.mod,
+    program: ctx.program,
+    functionId,
+  });
+  markFunctionReachable({ ctx, ...ref });
 };
 
 const markStringLiteralCtorReachable = ({
@@ -865,8 +926,10 @@ const getReachableFunctionSymbols = ({
     return state.symbols;
   }
   if (ctx.optimization?.reachableFunctionSymbols) {
-    const symbols = new Set(ctx.optimization.reachableFunctionSymbols);
-    state.symbols = symbols;
+    const symbols = reachabilitySetOf(ctx);
+    ctx.optimization.reachableFunctionSymbols.forEach((symbol) =>
+      symbols.add(symbol),
+    );
     return symbols;
   }
   const symbols = collectReachableFunctionSymbols({
@@ -1111,6 +1174,11 @@ export const compileFunctions = ({
     contexts,
     entryModuleId,
   }) as Set<ProgramSymbolId>;
+  contexts.forEach((candidate) => {
+    reachabilityStateOf(candidate).symbols?.forEach((symbolId) =>
+      reachableFunctions.add(symbolId),
+    );
+  });
   let compiledCount = 0;
   for (const item of ctx.module.hir.items.values()) {
     if (item.kind !== "function") continue;
@@ -1131,7 +1199,12 @@ export const compileFunctions = ({
       ctx.moduleId,
       item.symbol,
     ) as ProgramSymbolId;
-    if (!reachableFunctions.has(canonicalId)) {
+    const customDtoReachable = isCustomDtoFunctionReachable({
+      mod: ctx.mod,
+      moduleId: ctx.moduleId,
+      symbol: item.symbol,
+    });
+    if (!reachableFunctions.has(canonicalId) && !customDtoReachable) {
       continue;
     }
     const hasPendingMeta = metas.some(
@@ -1553,6 +1626,7 @@ export const emitModuleExports = (
             ctx: exportCtx,
             meta,
             exportName,
+            schemas,
             wrapperExportName,
           });
           exportAbiEntries.push({

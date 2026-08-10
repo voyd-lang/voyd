@@ -8,7 +8,7 @@ use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
-use std::task::{ Task, TaskRuntime }
+use std::task::Task
 use std::task::self as tasks
 
 pub obj Cmd<Msg> {
@@ -218,15 +218,9 @@ impl<Msg> Cmd<Msg>
     let handler_id = retain_typed_message_mapper(handler)
     mark_owned_handler(Cmd<Msg>::perform_task_with_handler_id<T>(task: task, handler_id: handler_id), handler_id)
 
-  /// Starts one-off async work and dispatches the mapped result when it completes.
-  api fn task<T>({
-    work: fn() : (open) -> T,
-    handler: fn(T) -> Msg
-  }): (TaskRuntime, open) -> Cmd<Msg>
-    Cmd<Msg>::perform<T>(
-      task: tasks::detach(work),
-      handler: handler
-    )
+  /// Detaches effectful work and dispatches its typed result through a retained mapper.
+  api fn perform<T>({ work: fn() : (open) -> T, handler: fn(T) -> Msg }): tasks::TaskRuntime -> Cmd<Msg>
+    Cmd<Msg>::perform<T>(task: tasks::detach(work), handler: handler)
 
   /// Creates a timer command that dispatches a typed message after the delay.
   api fn delay({ millis: i64, value: Msg }) -> Cmd<Msg>

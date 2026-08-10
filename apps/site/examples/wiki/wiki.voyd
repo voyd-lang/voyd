@@ -161,16 +161,16 @@ fn view(model: WikiModel) -> Html<WikiMsg>
     <Editor model={model} />
   </main>
 
-pub fn main() -> MsgPack
+pub fn main() -> Html<WikiMsg>
   view(init())
 
-pub fn component_state_init() -> MsgPack
+pub fn component_state_init() -> HtmlNode
   text("")
 
-pub fn component_state_step(model: MsgPack, message: MsgPack) -> MsgPack
+pub fn component_state_step(model: HtmlNode, message: HtmlNode) -> HtmlNode
   model
 
-pub fn component_state_view(): Component -> MsgPack
+pub fn component_state_view(): Component -> HtmlNode
   let (local_clicks, set_local_clicks) = state(initial: 0)
 
   <section class="wiki-demo-inspector wiki-demo-component-state">
@@ -206,13 +206,13 @@ fn MaybePageButton({ id: String, title: String, model: WikiModel }) -> Html<Wiki
   if page_matches_query(title, model.query):
     <PageButton id={id} title={title} model={model} />
   else:
-    fragment(Array<MsgPack>::init())
+    fragment(Array<HtmlNode>::init())
 
 fn MaybeDraftButton({ model: WikiModel }) -> Html<WikiMsg>
   if model.selected == "draft" and page_matches_query(model.title, model.query):
     <PageButton id="draft" title={draft_page_title(model)} model={model} />
   else:
-    fragment(Array<MsgPack>::init())
+    fragment(Array<HtmlNode>::init())
 
 fn PageButton({ id: String, title: String, model: WikiModel }) -> Html<WikiMsg>
   <button
@@ -270,7 +270,7 @@ fn Inspector({ model: WikiModel }) -> Html<WikiMsg>
       </dl>
     </PanelSection>
 
-fn PanelSection({ class: String, children: Array<MsgPack> }) -> Html<WikiMsg>
+fn PanelSection({ class: String, children: Array<HtmlNode> }) -> Html<WikiMsg>
   element(
     tag: "section",
     attrs: [attr(name: "class", value: class)],

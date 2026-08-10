@@ -120,10 +120,11 @@ export const isStdIntrinsicNominalType = ({
   if (desc.kind !== "nominal-object" && desc.kind !== "value-object") {
     return false;
   }
+  const ownerRef = program.symbols.refOf(desc.owner);
+  const owner = program.symbols.canonicalIdOf(ownerRef.moduleId, ownerRef.symbol);
   return (
-    program.symbols.getPackageId(desc.owner) === "std" &&
-    program.symbols.getStdIntrinsicTypeContract(desc.owner)?.id ===
-      intrinsicType
+    program.symbols.getPackageId(owner) === "std" &&
+    program.symbols.getStdIntrinsicTypeContract(owner)?.id === intrinsicType
   );
 };
 

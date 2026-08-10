@@ -55,6 +55,7 @@ import type {
   BoundaryVariantSchema,
 } from "./schema.js";
 import { deriveBoundarySchema } from "./schema.js";
+import { markCustomDtoFunctionReachable } from "./custom-dto-reachability.js";
 
 type DtoTreeCodecState = {
   provider: DtoTreeProvider;
@@ -448,29 +449,35 @@ const customDtoMethod = ({
   name: "write" | "read";
   ctx: CodegenContext;
 }): FunctionMetadata => {
-  const desc = ctx.program.types.getTypeDesc(schema.typeId);
-  const nominal =
-    desc.kind === "intersection" && desc.nominal !== undefined
-      ? desc.nominal
-      : schema.typeId;
-  const impl = ctx.program.traits
-    .getImplsByNominal(nominal)
-    .find((candidate) => {
-      const ref = ctx.program.symbols.refOf(candidate.traitSymbol);
-      return (
-        ref.moduleId === "std::data" &&
-        ctx.program.symbols.getName(candidate.traitSymbol) === "CustomDto"
-      );
-    });
-  const methodRef = impl?.staticMethods
-    .map(({ traitMethod, implMethod }) => ({
-      name: ctx.program.symbols.getName(traitMethod),
-      ref: ctx.program.symbols.refOf(implMethod),
-    }))
-    .find((entry) => entry.name === name)?.ref;
-  const method = methodRef
-    ? ctx.functions.get(methodRef.moduleId)?.get(methodRef.symbol)?.[0]
-    : undefined;
+  const methodRef = ctx.program.symbols.refOf(
+    name === "write" ? schema.writeFunction : schema.readFunction,
+  );
+  markCustomDtoFunctionReachable({
+    mod: ctx.mod,
+    program: ctx.program,
+    functionId:
+      name === "write" ? schema.writeFunction : schema.readFunction,
+  });
+  const methods = ctx.functions
+    .get(methodRef.moduleId)
+    ?.get(methodRef.symbol);
+  const nominalDesc = (() => {
+    const desc = ctx.program.types.getTypeDesc(schema.typeId);
+    return desc.kind === "intersection" && desc.nominal !== undefined
+      ? ctx.program.types.getTypeDesc(desc.nominal)
+      : desc;
+  })();
+  const typeArgs =
+    nominalDesc.kind === "nominal-object" ||
+    nominalDesc.kind === "value-object"
+      ? nominalDesc.typeArgs
+      : [];
+  const method =
+    methods?.find(
+      (candidate) =>
+        candidate.typeArgs.length === typeArgs.length &&
+        candidate.typeArgs.every((arg, index) => arg === typeArgs[index]),
+    ) ?? (methods?.length === 1 ? methods[0] : undefined);
   if (!method) {
     throw new Error(
       `CustomDto.${name} is not linked for type ${schema.typeId}`,

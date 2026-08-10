@@ -4,7 +4,6 @@ import { createVoydHost } from "@voyd-lang/js-host";
 type SmokeRunner = () => Promise<number>;
 
 const source = `use std::array::Array
-use std::msgpack::MsgPack
 use std::string::type::{ String, new_string }
 use std::vx::all
 
@@ -16,7 +15,7 @@ fn App()
     <List value={features} />
   </Card>
 
-fn Title({ children: Array<MsgPack> })
+fn Title({ children: Array<HtmlNode> })
   <h2 style="
     margin: 0 0 8px 0;
     font-size: 20px;
@@ -27,7 +26,7 @@ fn Title({ children: Array<MsgPack> })
     {children}
   </h2>
 
-fn Card({ children: Array<MsgPack> })
+fn Card({ children: Array<HtmlNode> })
   <div style="
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     margin: 8px;

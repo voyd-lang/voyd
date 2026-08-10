@@ -1,14 +1,13 @@
 
 use std::array::Array
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
 use std::string::type::{ String, new_string }
 use std::vx::all
 
 enum VxMessage
   Save
+  Cancel
 
-fn App() -> MsgPack
+fn App() -> HtmlNode
   let features = feature_list()
   <Card>
     <Title>Voyd + VX</Title>
@@ -16,7 +15,7 @@ fn App() -> MsgPack
     <List value={features} />
   </Card>
 
-fn Title({ children: Array<MsgPack> })
+fn Title({ children: Array<HtmlNode> }) -> HtmlNode
   <h2 style="
     margin: 0 0 8px 0;
     font-size: 20px;
@@ -27,7 +26,7 @@ fn Title({ children: Array<MsgPack> })
     {children}
   </h2>
 
-fn Card({ children: Array<MsgPack> })
+fn Card({ children: Array<HtmlNode> }) -> HtmlNode
   <div style="
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     margin: 8px;
@@ -40,7 +39,7 @@ fn Card({ children: Array<MsgPack> })
     {children}
   </div>
 
-fn List({ value: Array<String> })
+fn List({ value: Array<String> }) -> HtmlNode
   <ul style="margin: 0; padding-left: 16px;">
     {value.map(f => <li key={f} style="line-height: 1.6;">{f}</li>)}
   </ul>
@@ -51,10 +50,10 @@ fn feature_list() -> Array<String>
 pub fn main()
   App()
 
-pub fn event_message_button() -> MsgPack
+pub fn event_message_button() -> HtmlNode
   <button on_click={VxMessage::Save {}}>Save</button>
 
-pub fn full_event_options_form() -> MsgPack
+pub fn full_event_options_form() -> HtmlNode
   <form
     on_submit={on_submit_with(
       options: EventOptions {

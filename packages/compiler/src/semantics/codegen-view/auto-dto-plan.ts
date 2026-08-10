@@ -2,7 +2,7 @@ import {
   isStdIntrinsicNominalType,
   STD_INTRINSIC_TYPE,
 } from "../../compiler-contracts/types.js";
-import type { TypeId } from "../ids.js";
+import type { ProgramSymbolId, TypeId } from "../ids.js";
 import { sha256Hex } from "../../utils/sha256.js";
 import type { CodegenStructuralField, ProgramCodegenView } from "./index.js";
 
@@ -59,6 +59,8 @@ export type AutoDtoPlan = (
       kind: "custom";
       typeId: TypeId;
       representationTypeId: TypeId;
+      writeFunction: ProgramSymbolId;
+      readFunction: ProgramSymbolId;
       representation: AutoDtoPlan;
     }
   | { kind: "ref"; typeId: TypeId; name: string }
@@ -197,11 +199,11 @@ const derive = ({
     return { kind: "bytes", typeId };
   }
 
-  const customRepresentation = customDtoRepresentation(typeId, program);
-  if (customRepresentation !== undefined) {
+  const customDto = customDtoRepresentation(typeId, program);
+  if (customDto !== undefined) {
     if (
-      customRepresentation === typeId ||
-      nominalOwnerOf(customRepresentation, program) ===
+      customDto.representationTypeId === typeId ||
+      nominalOwnerOf(customDto.representationTypeId, program) ===
         nominalOwnerOf(typeId, program)
     ) {
       throw new AutoDtoPlanError(
@@ -213,9 +215,11 @@ const derive = ({
       return {
         kind: "custom",
         typeId,
-        representationTypeId: customRepresentation,
+        representationTypeId: customDto.representationTypeId,
+        writeFunction: customDto.writeFunction,
+        readFunction: customDto.readFunction,
         representation: derive({
-          typeId: customRepresentation,
+          typeId: customDto.representationTypeId,
           moduleId,
           path: `${path} custom representation`,
           active,
@@ -289,7 +293,13 @@ const derive = ({
 const customDtoRepresentation = (
   typeId: TypeId,
   program: ProgramCodegenView,
-): TypeId | undefined => {
+):
+  | {
+      representationTypeId: TypeId;
+      writeFunction: ProgramSymbolId;
+      readFunction: ProgramSymbolId;
+    }
+  | undefined => {
   const owner = nominalOwnerOf(typeId, program);
   if (owner === undefined) return undefined;
   const desc = program.types.getTypeDesc(typeId);
@@ -323,7 +333,32 @@ const customDtoRepresentation = (
       `${portableName(typeId, program)} has a mismatched CustomDto target`,
     );
   }
-  return trait.typeArgs[1]!;
+  const methods = new Map(
+    match.staticMethods.map(({ traitMethod, implMethod }) => [
+      program.symbols.getName(traitMethod),
+      (() => {
+        const ref = program.symbols.refOf(implMethod);
+        const target = program.imports.getTarget(ref.moduleId, ref.symbol);
+        if (typeof target === "number") {
+          return target as ProgramSymbolId;
+        }
+        return program.symbols.canonicalIdOf(
+          ref.moduleId,
+          ref.symbol,
+        ) as ProgramSymbolId;
+      })(),
+    ]),
+  );
+  const writeFunction = methods.get("write");
+  const readFunction = methods.get("read");
+  if (writeFunction === undefined || readFunction === undefined) {
+    throw new AutoDtoPlanError("CustomDto must implement write and read");
+  }
+  return {
+    representationTypeId: trait.typeArgs[1]!,
+    writeFunction,
+    readFunction,
+  };
 };
 
 const nominalOwnerOf = (typeId: TypeId, program: ProgramCodegenView) => {

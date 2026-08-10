@@ -350,7 +350,9 @@ export class HTMLParser {
     }
 
     const result =
-      children.length > 0 ? arrayLiteral(...children) : emptyHtmlChildren();
+      children.length > 0
+        ? arrayLiteral(...children.map((child) => vxHelperCall("html_child", child)))
+        : emptyHtmlChildren();
 
     // Restore mode on exiting children
     this.whitespaceMode = prevMode;
