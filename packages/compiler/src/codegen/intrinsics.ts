@@ -62,6 +62,7 @@ import {
   writeDtoValueToTree,
   readDtoValueFromTree,
 } from "./boundary/dto-tree-codec.js";
+import { writeDtoValueToStream } from "./boundary/dto-stream-writer.js";
 import { stableCallsiteIdFor } from "../stable-callsite-id.js";
 import { currentHandlerValue } from "./expressions/call/shared.js";
 import { compileExternalCall } from "./external/imports.js";
@@ -468,13 +469,14 @@ const ensureRetainedCallbackHelper = ({
   const returnsVoid = returnWasmType === binaryen.none;
   const returnsProviderValue =
     !returnsVoid && desc.returnType === provider.valueTypeId;
-  const returnSchema = returnsVoid || returnsProviderValue
-    ? undefined
-    : deriveBoundarySchema({
-        typeId: desc.returnType,
-        ctx,
-        label: "callback return",
-      });
+  const returnSchema =
+    returnsVoid || returnsProviderValue
+      ? undefined
+      : deriveBoundarySchema({
+          typeId: desc.returnType,
+          ctx,
+          label: "callback return",
+        });
   const effectful =
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
@@ -1498,6 +1500,38 @@ export const compileIntrinsicCall = ({
           ctx,
           fnCtx,
           provider: ensureDataValueFunctions(ctx),
+        });
+      } catch (error) {
+        rethrowBoundarySchemaDiagnostic({ error, call });
+      }
+    }
+    case "__dto_write": {
+      assertArgCount(name, args, 2);
+      const [intrinsicValueTypeId, , intrinsicWriterTypeId] =
+        intrinsicCallTypeArgs({ call, ctx, instanceId });
+      const writerTypeId =
+        intrinsicWriterTypeId ??
+        paramTypeIds?.[0] ??
+        getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      const valueTypeId =
+        intrinsicValueTypeId ??
+        paramTypeIds?.[1] ??
+        getRequiredExprType(call.args[1]!.expr, ctx, instanceId);
+      const resultTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      try {
+        return writeDtoValueToStream({
+          writer: args[0]!,
+          writerTypeId,
+          value: args[1]!,
+          schema: deriveBoundarySchema({
+            typeId: valueTypeId,
+            ctx,
+            label: "data::write value",
+            options: { tagStandaloneVariants: true },
+          }),
+          resultTypeId,
+          ctx,
+          fnCtx,
         });
       } catch (error) {
         rethrowBoundarySchemaDiagnostic({ error, call });

@@ -36,7 +36,8 @@ use std::data::{
   StringKind,
   VariantKind,
   UnknownFieldPolicy,
-  decode as decode_data
+  decode as decode_data,
+  write as write_dto
 }
 use std::dict::Dict
 use std::meta::{
@@ -179,6 +180,9 @@ impl JsonWriter
     json_writer_success()
 
 impl DataWriter<JsonError> for JsonWriter
+  fn reject(~self, message: String) -> Result<Unit, JsonError>
+    self.fail(message)
+
   fn write_null(~self) -> Result<Unit, JsonError>
     match(self.before_value())
       Err<JsonError> { error }:
@@ -253,21 +257,21 @@ impl DataWriter<JsonError> for JsonWriter
 
   fn begin_record(
     ~self,
-    { shape: RecordShape, field_count: i32 }
+    { name: String, field_count: i32 }
   ) -> Result<Unit, JsonError>
     self.begin_container(kind: 1, length: field_count)
 
-  fn write_field(~self, { field: ShapeField }) -> Result<Unit, JsonError>
-    self.write_dynamic_field(field.name)
+  fn write_field(~self, name: String) -> Result<Unit, JsonError>
+    self.write_dynamic_field(name)
 
   fn end_record(~self) -> Result<Unit, JsonError>
     self.end_container(kind: 1)
 
   fn begin_variant(
     ~self,
-    { shape: UnionShape, variant: ShapeVariant }
+    { union: String, variant: String, field_count: i32 }
   ) -> Result<Unit, JsonError>
-    match(self.begin_container(kind: 2, length: variant.fields.len() + 1))
+    match(self.begin_container(kind: 2, length: field_count + 1))
       Err<JsonError> { error }:
         Err<JsonError> { error }
       Ok<Unit>:
@@ -275,7 +279,7 @@ impl DataWriter<JsonError> for JsonWriter
           Err<JsonError> { error }:
             Err<JsonError> { error }
           Ok<Unit>:
-            self.write_string(variant.name)
+            self.write_string(variant)
 
   fn end_variant(~self) -> Result<Unit, JsonError>
     self.end_container(kind: 2)
@@ -821,7 +825,7 @@ pub fn permissive_decode_options() -> JsonDecodeOptions
 /// rejected. `Bytes` requires an explicit application representation.
 pub fn encode<T>(value: T): () -> Result<String, JsonError>
   let ~writer = JsonWriter::init()
-  match(write_data_value_json(writer, dto_value_to_data(value)))
+  match(write_dto<T, JsonError, JsonWriter>(writer, value))
     Err<JsonError> { error }:
       Err<JsonError> { error }
     Ok<Unit>:

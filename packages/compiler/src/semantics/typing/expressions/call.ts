@@ -8460,6 +8460,14 @@ const typeIntrinsicCall = (
       });
       assertNoIntrinsicTypeArgs("__dto_value_to_data", typeArguments);
       return expectedReturnType ?? ctx.primitives.unknown;
+    case "__dto_write":
+      assertIntrinsicArgCount({
+        name: "__dto_write",
+        args,
+        expected: 2,
+        detail: "writer and DTO value",
+      });
+      return expectedReturnType ?? ctx.primitives.unknown;
     case "__data_to_dto_value":
       assertIntrinsicArgCount({
         name: "__data_to_dto_value",

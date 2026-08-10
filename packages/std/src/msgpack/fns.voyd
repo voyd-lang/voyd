@@ -238,6 +238,9 @@ impl MsgPackWriter
     msgpack_writer_success()
 
 impl DataWriter<MsgPackError> for MsgPackWriter
+  fn reject(~self, message: String) -> Result<Unit, MsgPackError>
+    self.fail(message)
+
   fn write_null(~self) -> Result<Unit, MsgPackError>
     match(self.consume_value())
       Err<MsgPackError> { error }:
@@ -310,11 +313,11 @@ impl DataWriter<MsgPackError> for MsgPackWriter
 
   fn begin_record(
     ~self,
-    { shape: RecordShape, field_count: i32 }
+    { name: String, field_count: i32 }
   ) -> Result<Unit, MsgPackError>
     self.begin_container(kind: 1, length: field_count)
 
-  fn write_field(~self, { field: ShapeField }) -> Result<Unit, MsgPackError>
+  fn write_field(~self, name: String) -> Result<Unit, MsgPackError>
     if self.container_kinds.is_empty():
       return self.fail("msgpack writer field is outside a record or variant")
     let index = self.container_kinds.len() - 1
@@ -322,7 +325,7 @@ impl DataWriter<MsgPackError> for MsgPackWriter
       return self.fail("msgpack writer field is outside a record or variant")
     if self.pending_fields.at(index) != 0:
       return self.fail("msgpack writer field is missing its value")
-    self.encoder.encode_string(field.name)
+    self.encoder.encode_string(name)
     self.pending_fields.replace(index, with: 1)
     msgpack_writer_success()
 
@@ -331,15 +334,15 @@ impl DataWriter<MsgPackError> for MsgPackWriter
 
   fn begin_variant(
     ~self,
-    { shape: UnionShape, variant: ShapeVariant }
+    { union: String, variant: String, field_count: i32 }
   ) -> Result<Unit, MsgPackError>
-    match(self.begin_container(kind: 2, length: variant.fields.len() + 1))
+    match(self.begin_container(kind: 2, length: field_count + 1))
       Err<MsgPackError> { error }:
         Err<MsgPackError> { error }
       Ok<Unit>:
         let index = self.container_kinds.len() - 1
         self.encoder.encode_string("$variant")
-        self.encoder.encode_string(variant.name)
+        self.encoder.encode_string(variant)
         self.remaining_values.replace(
           index,
           with: self.remaining_values.at(index) - 1

@@ -24,6 +24,7 @@ use std::data::{
   DataValue,
   DataVariant,
   decode as decode_data,
+  write as write_dto,
 }
 use std::dict::{ Dict, DictKey }
 use std::msgpack::errors::{
@@ -91,7 +92,12 @@ pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
 
 /// Encodes a DTO-compatible value into immutable MessagePack bytes.
 pub fn encode<T>(value: T): () -> Result<Bytes, MsgPackError>
-  msgpack_fns::encode_data_value_bytes(dto_value_to_data(value))
+  let ~writer = MsgPackWriter::init()
+  match(write_dto<T, MsgPackError, MsgPackWriter>(writer, value))
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<Unit>:
+      writer.finish()
 
 /// Encodes an explicitly constructed MessagePack value into immutable bytes.
 pub fn encode_value_bytes(value: MsgPack): () -> Result<Bytes, MsgPackError>

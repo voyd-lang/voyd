@@ -211,17 +211,17 @@ write_bytes(value)
 begin_array(length:)
 end_array()
 
-begin_record(shape:, field_count:)
-write_field(field:)
+begin_record(name:, field_count:)
+write_field(name)
 end_record()
 
-begin_variant(union:, variant:)
+begin_variant(union:, variant:, field_count:)
 end_variant()
 ```
 
-`field`, `union`, and `variant` are compact descriptors from `Shape`. A normal
-writer must not require the generated traversal to allocate or repeat a field
-string for every record.
+The names are interned literals from the compiler-derived plan. A normal writer
+does not require the generated traversal to allocate a reflective `Shape` graph
+or a new field string for every record.
 
 Writer calls form a balanced stream. Each `begin_*` has exactly one matching
 `end_*`; a scalar fills one expected value; a field label is followed by exactly

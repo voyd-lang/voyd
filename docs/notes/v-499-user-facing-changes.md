@@ -14,8 +14,10 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - `Bytes` is a first-class DTO primitive and crosses JavaScript boundaries as
   `Uint8Array`.
 - Typed JSON and MessagePack APIs share the provider-neutral data reader and
-  writer contract. Explicit `JsonValue`, `MsgPack`, and `DataValue` trees remain
-  available for callers that intentionally need dynamic values.
+  writer contract. Typed encoding traverses directly into the selected writer
+  without allocating a `DataValue` tree. Explicit `JsonValue`, `MsgPack`, and
+  `DataValue` trees remain available for callers that intentionally need
+  dynamic values.
 - `CustomDto<T>` can define a type's boundary representation and conversion
   functions. The representation participates in the canonical DTO plan.
 - The `@boundary` and `@serializer` annotations have been removed.

@@ -38,6 +38,7 @@ export const HOST_TRANSPORT_DEPENDENT_INTRINSICS = new Set([
 const SHAPE_REIFICATION_INTRINSICS = new Set(["__dto_shape_of"]);
 const DATA_DTO_INTRINSICS = new Set([
   "__dto_value_to_data",
+  "__dto_write",
   "__data_to_dto_value",
 ]);
 
@@ -448,7 +449,9 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
     };
 
     const enqueueSelectedProviderFunctions = (): void => {
-      SELECTED_HOST_TRANSPORT_CONTRACT_IDS.forEach(enqueueCompilerFunctionContract);
+      SELECTED_HOST_TRANSPORT_CONTRACT_IDS.forEach(
+        enqueueCompilerFunctionContract,
+      );
     };
 
     const enqueueDataDtoFunctions = (): void => {

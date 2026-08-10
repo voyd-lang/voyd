@@ -176,6 +176,7 @@ pub type DataKind = NullKind
 /// Calls must form one balanced root value. A writer becomes unusable after
 /// the first sink failure.
 pub trait DataWriter<SinkError>
+  fn reject(~self, message: String) -> Result<Unit, SinkError>
   fn write_null(~self) -> Result<Unit, SinkError>
   fn write_bool(~self, value: bool) -> Result<Unit, SinkError>
   fn write_i32(~self, value: i32) -> Result<Unit, SinkError>
@@ -188,13 +189,13 @@ pub trait DataWriter<SinkError>
   fn end_array(~self) -> Result<Unit, SinkError>
   fn begin_record(
     ~self,
-    { shape: RecordShape, field_count: i32 }
+    { name: String, field_count: i32 }
   ) -> Result<Unit, SinkError>
-  fn write_field(~self, { field: ShapeField }) -> Result<Unit, SinkError>
+  fn write_field(~self, name: String) -> Result<Unit, SinkError>
   fn end_record(~self) -> Result<Unit, SinkError>
   fn begin_variant(
     ~self,
-    { shape: UnionShape, variant: ShapeVariant }
+    { union: String, variant: String, field_count: i32 }
   ) -> Result<Unit, SinkError>
   fn end_variant(~self) -> Result<Unit, SinkError>
 
@@ -314,6 +315,9 @@ impl DataValueWriter
     data_writer_failure<Unit>(message)
 
 impl DataWriter<DataValueWriteError> for DataValueWriter
+  fn reject(~self, message: String) -> Result<Unit, DataValueWriteError>
+    self.fail(message)
+
   fn write_null(~self) -> Result<Unit, DataValueWriteError>
     self.write_literal(DataNull {})
 
@@ -361,7 +365,7 @@ impl DataWriter<DataValueWriteError> for DataValueWriter
 
   fn begin_record(
     ~self,
-    { shape: RecordShape, field_count: i32 }
+    { name: String, field_count: i32 }
   ) -> Result<Unit, DataValueWriteError>
     if field_count < 0:
       return self.fail("data writer record field count cannot be negative")
@@ -373,13 +377,10 @@ impl DataWriter<DataValueWriteError> for DataValueWriter
         self.depth = self.depth + 1
         data_writer_success()
 
-  fn write_field(
-    ~self,
-    { field: ShapeField }
-  ) -> Result<Unit, DataValueWriteError>
+  fn write_field(~self, name: String) -> Result<Unit, DataValueWriteError>
     if self.depth <= 0:
       return self.fail("data writer field is outside a record or variant")
-    self.events.push(DataValueFieldEvent { name: field.name })
+    self.events.push(DataValueFieldEvent { name })
     data_writer_success()
 
   fn end_record(~self) -> Result<Unit, DataValueWriteError>
@@ -391,15 +392,15 @@ impl DataWriter<DataValueWriteError> for DataValueWriter
 
   fn begin_variant(
     ~self,
-    { shape: UnionShape, variant: ShapeVariant }
+    { union: String, variant: String, field_count: i32 }
   ) -> Result<Unit, DataValueWriteError>
     match(self.start_value())
       Err<DataValueWriteError> { error }:
         Err<DataValueWriteError> { error }
       Ok<Unit>:
         self.events.push(DataValueBeginVariantEvent {
-          name: variant.name,
-          field_count: variant.fields.len()
+          name: variant,
+          field_count
         })
         self.depth = self.depth + 1
         data_writer_success()
@@ -944,6 +945,17 @@ pub fn default_decode_options() -> DecodeOptions
 /// Encodes a DTO-compatible value into the neutral dynamic tree.
 pub fn encode<T>(value: T): () -> DataValue
   dto_value_to_data(value)
+
+/// Writes a closed DTO directly into a stateful provider sink.
+///
+/// The compiler generates the schema traversal. The sink receives compact
+/// record and variant descriptors without an intermediate `DataValue` tree.
+@intrinsic(name: "__dto_write")
+pub fn write<T, SinkError, Writer>(
+  writer: Writer,
+  value: T
+): () -> Result<Unit, SinkError>
+  __dto_write(writer, value)
 
 /// Fallibly decodes a neutral value into a boundary-compatible Voyd type.
 pub fn decode<T>(value: DataValue): () -> Result<T, DecodeError>

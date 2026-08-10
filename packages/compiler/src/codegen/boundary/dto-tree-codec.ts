@@ -352,7 +352,7 @@ const readDtoValueFromTreeInternal = ({
 
 type CustomDtoSchema = Extract<BoundarySchema, { kind: "custom" }>;
 
-const callCustomDtoWrite = ({
+export const callCustomDtoWrite = ({
   value,
   schema,
   ctx,
@@ -455,12 +455,9 @@ const customDtoMethod = ({
   markCustomDtoFunctionReachable({
     mod: ctx.mod,
     program: ctx.program,
-    functionId:
-      name === "write" ? schema.writeFunction : schema.readFunction,
+    functionId: name === "write" ? schema.writeFunction : schema.readFunction,
   });
-  const methods = ctx.functions
-    .get(methodRef.moduleId)
-    ?.get(methodRef.symbol);
+  const methods = ctx.functions.get(methodRef.moduleId)?.get(methodRef.symbol);
   const nominalDesc = (() => {
     const desc = ctx.program.types.getTypeDesc(schema.typeId);
     return desc.kind === "intersection" && desc.nominal !== undefined
@@ -468,8 +465,7 @@ const customDtoMethod = ({
       : desc;
   })();
   const typeArgs =
-    nominalDesc.kind === "nominal-object" ||
-    nominalDesc.kind === "value-object"
+    nominalDesc.kind === "nominal-object" || nominalDesc.kind === "value-object"
       ? nominalDesc.typeArgs
       : [];
   const method =
@@ -1651,7 +1647,7 @@ const unpackOptionalRecordField = ({
   );
 };
 
-const unpackOptionalSomePayload = ({
+export const unpackOptionalSomePayload = ({
   value,
   optionalTypeId,
   ctx,
@@ -1737,7 +1733,7 @@ const unpackOptionalSomePayload = ({
   ];
 };
 
-const variantMatches = ({
+export const variantMatches = ({
   unionValue,
   unionTypeId,
   variant,
@@ -1759,9 +1755,13 @@ const variantMatches = ({
     const abiTypes = binaryen.expandType(
       binaryen.getExpressionType(unionValue),
     );
-    const tagValue =
-      abiTypes.length <= 1 ? unionValue : ctx.mod.tuple.extract(unionValue, 0);
-    return ctx.mod.i32.eq(tagValue, ctx.mod.i32.const(member.tag));
+    if (abiTypes.length > 1 || abiTypes[0] === binaryen.i32) {
+      const tagValue =
+        abiTypes.length <= 1
+          ? unionValue
+          : ctx.mod.tuple.extract(unionValue, 0);
+      return ctx.mod.i32.eq(tagValue, ctx.mod.i32.const(member.tag));
+    }
   }
 
   const info = requiredStructuralInfo(variant.typeId, ctx);
@@ -1804,7 +1804,7 @@ const fixedArrayNew = ({
   );
 };
 
-const fixedArrayGet = ({
+export const fixedArrayGet = ({
   array,
   elementTypeId,
   index,
@@ -1886,7 +1886,7 @@ const lowerFieldValueForInit = ({
         fnCtx,
       });
 
-const requiredStructuralInfo = (typeId: TypeId, ctx: CodegenContext) => {
+export const requiredStructuralInfo = (typeId: TypeId, ctx: CodegenContext) => {
   const info = getStructuralTypeInfo(typeId, ctx);
   if (!info) {
     throw new Error(`missing DTO structural info for type ${typeId}`);
@@ -1894,7 +1894,7 @@ const requiredStructuralInfo = (typeId: TypeId, ctx: CodegenContext) => {
   return info;
 };
 
-const requiredField = (
+export const requiredField = (
   fields: ReadonlyMap<string, StructuralFieldInfo>,
   name: string,
   typeId: TypeId,
