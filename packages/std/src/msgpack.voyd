@@ -23,6 +23,10 @@ use std::data::{
   DataString,
   DataValue,
   DataVariant,
+  DecodeLimits,
+  EncodeLimits,
+  default_decode_limits,
+  default_encode_limits,
   read as read_dto,
   write as write_dto,
 }
@@ -92,7 +96,11 @@ pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
 
 /// Encodes a DTO-compatible value into immutable MessagePack bytes.
 pub fn encode<T>(value: T): () -> Result<Bytes, MsgPackError>
-  let ~writer = MsgPackWriter::init()
+  encode_with_limits(value, limits: default_encode_limits())
+
+/// Encodes with explicit depth, byte, and collection limits.
+pub fn encode_with_limits<T>(value: T, { limits: EncodeLimits }): () -> Result<Bytes, MsgPackError>
+  let ~writer = MsgPackWriter::init(limits: limits)
   match(write_dto<T, MsgPackError, MsgPackWriter>(writer, value))
     Err<MsgPackError> { error }:
       Err<MsgPackError> { error }
@@ -105,7 +113,11 @@ pub fn encode_value_bytes(value: MsgPack): () -> Result<Bytes, MsgPackError>
 
 /// Decodes immutable MessagePack bytes into a DTO-compatible value.
 pub fn decode<T>(bytes: Bytes): () -> Result<T, MsgPackError>
-  let ~reader = MsgPackReader::init(bytes)
+  decode_with_limits<T>(bytes, limits: default_decode_limits())
+
+/// Decodes with explicit depth, byte, and collection limits.
+pub fn decode_with_limits<T>(bytes: Bytes, { limits: DecodeLimits }): () -> Result<T, MsgPackError>
+  let ~reader = MsgPackReader::init(bytes, limits: limits)
   match(read_dto<T, MsgPackError, MsgPackReader>(reader, true))
     Err<MsgPackError> { error }:
       Err<MsgPackError> { error }

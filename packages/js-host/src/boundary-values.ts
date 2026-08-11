@@ -8,8 +8,25 @@ const I32_MIN = -2147483648;
 const I32_MAX = 2147483647;
 const I64_MIN = -(1n << 63n);
 const I64_MAX = (1n << 63n) - 1n;
+const DEFAULT_MAX_DTO_DEPTH = 128;
+const DEFAULT_MAX_DTO_BYTES = 16_777_216;
+const DEFAULT_MAX_DTO_COLLECTION_LENGTH = 1_048_576;
 const BOUNDARY_PACK_CYCLE_ERROR =
   "__voyd_dto_error: cannot encode cyclic object graph or DTO object graph exceeds maximum depth";
+
+type BoundaryTraversalState = {
+  depth: number;
+  maxDepth: number;
+  maxBytes: number;
+  maxCollectionLength: number;
+};
+
+const createBoundaryTraversalState = (): BoundaryTraversalState => ({
+  depth: 0,
+  maxDepth: DEFAULT_MAX_DTO_DEPTH,
+  maxBytes: DEFAULT_MAX_DTO_BYTES,
+  maxCollectionLength: DEFAULT_MAX_DTO_COLLECTION_LENGTH,
+});
 
 export const encodeBoundaryArgs = ({
   exportName,
@@ -27,6 +44,7 @@ export const encodeBoundaryArgs = ({
   }
   const registry = buildSchemaRegistry(schemas);
   const ancestors = new WeakSet<object>();
+  const state = createBoundaryTraversalState();
   return schemas.map((schema, index) =>
     encodeBoundaryValue({
       exportName,
@@ -35,6 +53,7 @@ export const encodeBoundaryArgs = ({
       path: `arg${index}`,
       registry,
       ancestors,
+      state,
     }),
   );
 };
@@ -54,6 +73,7 @@ export const decodeBoundaryResult = ({
     value,
     path: "result",
     registry: buildSchemaRegistry([schema]),
+    state: createBoundaryTraversalState(),
   });
 
 export const decodeBoundaryArgs = ({
@@ -71,6 +91,7 @@ export const decodeBoundaryArgs = ({
     );
   }
   const registry = buildSchemaRegistry(schemas);
+  const state = createBoundaryTraversalState();
   return schemas.map((schema, index) =>
     decodeBoundaryValue({
       exportName,
@@ -78,6 +99,7 @@ export const decodeBoundaryArgs = ({
       value: args[index],
       path: `arg${index}`,
       registry,
+      state,
     }),
   );
 };
@@ -145,6 +167,7 @@ const encodeBoundaryValue = ({
   path,
   registry,
   ancestors,
+  state,
 }: {
   exportName: string;
   schema: BoundarySchema;
@@ -152,6 +175,7 @@ const encodeBoundaryValue = ({
   path: string;
   registry: ReadonlyMap<number, BoundarySchema>;
   ancestors: WeakSet<object>;
+  state: BoundaryTraversalState;
 }): unknown => {
   if (schema.kind === "ref") {
     return encodeBoundaryValue({
@@ -161,6 +185,7 @@ const encodeBoundaryValue = ({
       path,
       registry,
       ancestors,
+      state,
     });
   }
   if (schema.kind === "custom") {
@@ -171,6 +196,7 @@ const encodeBoundaryValue = ({
       path,
       registry,
       ancestors,
+      state,
     });
   }
   switch (schema.kind) {
@@ -192,36 +218,53 @@ const encodeBoundaryValue = ({
     case "void":
       return null;
     case "string":
-      return expectType({
+      return checkScalarBytes({
         exportName,
         path,
-        expected: "String",
-        value,
-        guard: isString,
+        state,
+        value: expectType({
+          exportName,
+          path,
+          expected: "String",
+          value,
+          guard: isString,
+        }),
+        bytes: new TextEncoder().encode(value as string).byteLength,
       });
     case "bytes":
-      return expectType({
+      return checkScalarBytes({
         exportName,
         path,
-        expected: "Uint8Array",
-        value,
-        guard: isBytes,
+        state,
+        value: expectType({
+          exportName,
+          path,
+          expected: "Uint8Array",
+          value,
+          guard: isBytes,
+        }),
+        bytes: value instanceof Uint8Array ? value.byteLength : 0,
       });
     case "array":
       if (!Array.isArray(value)) {
         throw typeError({ exportName, path, expected: "array", value });
       }
-      return withCycleCheck({ exportName, path, value, ancestors }, () =>
-        value.map((item, index) =>
-          encodeBoundaryValue({
-            exportName,
-            schema: schema.element,
-            value: item,
-            path: `${path}[${index}]`,
-            registry,
-            ancestors,
-          }),
-        ),
+      return withContainerLimits(
+        { exportName, path, length: value.length, state },
+        () =>
+          withCycleCheck({ exportName, path, value, ancestors }, () =>
+            value.map((item, index) =>
+              encodeBoundaryValue({
+                exportName,
+                schema: schema.element,
+                value: item,
+                path: `${path}[${index}]`,
+                registry,
+                ancestors,
+                state,
+              }),
+            ),
+          ),
       );
     case "record":
       return encodeRecord({
@@ -232,6 +275,7 @@ const encodeBoundaryValue = ({
         path,
         registry,
         ancestors,
+        state,
       });
     case "union":
       return encodeUnion({
@@ -241,6 +285,7 @@ const encodeBoundaryValue = ({
         path,
         registry,
         ancestors,
+        state,
       });
   }
 };
@@ -251,12 +296,14 @@ const decodeBoundaryValue = ({
   value,
   path,
   registry,
+  state,
 }: {
   exportName: string;
   schema: BoundarySchema;
   value: unknown;
   path: string;
   registry: ReadonlyMap<number, BoundarySchema>;
+  state: BoundaryTraversalState;
 }): unknown => {
   if (schema.kind === "ref") {
     if (value === BOUNDARY_PACK_CYCLE_ERROR) {
@@ -268,6 +315,7 @@ const decodeBoundaryValue = ({
       value,
       path,
       registry,
+      state,
     });
   }
   if (schema.kind === "custom") {
@@ -277,6 +325,7 @@ const decodeBoundaryValue = ({
       value,
       path,
       registry,
+      state,
     });
   }
   switch (schema.kind) {
@@ -286,14 +335,19 @@ const decodeBoundaryValue = ({
       if (!Array.isArray(value)) {
         throw typeError({ exportName, path, expected: "array", value });
       }
-      return value.map((item, index) =>
-        decodeBoundaryValue({
-          exportName,
-          schema: schema.element,
-          value: item,
-          path: `${path}[${index}]`,
-          registry,
-        }),
+      return withContainerLimits(
+        { exportName, path, length: value.length, state },
+        () =>
+          value.map((item, index) =>
+            decodeBoundaryValue({
+              exportName,
+              schema: schema.element,
+              value: item,
+              path: `${path}[${index}]`,
+              registry,
+              state,
+            }),
+          ),
       );
     case "record":
       return decodeRecord({
@@ -303,9 +357,10 @@ const decodeBoundaryValue = ({
         value,
         path,
         registry,
+        state,
       });
     case "union":
-      return decodeUnion({ exportName, schema, value, path, registry });
+      return decodeUnion({ exportName, schema, value, path, registry, state });
     default:
       return encodeBoundaryValue({
         exportName,
@@ -314,6 +369,7 @@ const decodeBoundaryValue = ({
         path,
         registry,
         ancestors: new WeakSet<object>(),
+        state,
       });
   }
 };
@@ -326,6 +382,7 @@ const encodeRecord = ({
   path,
   registry,
   ancestors,
+  state,
   allowVariantTag = false,
 }: {
   exportName: string;
@@ -335,11 +392,15 @@ const encodeRecord = ({
   path: string;
   registry: ReadonlyMap<number, BoundarySchema>;
   ancestors: WeakSet<object>;
+  state: BoundaryTraversalState;
   allowVariantTag?: boolean;
 }): Record<string, unknown> => {
-  return withCycleCheck(
-    { exportName, path, value: toCycleObject(value), ancestors },
-    () => {
+  return withContainerLimits(
+    { exportName, path, length: fields.length, state },
+    () =>
+      withCycleCheck(
+        { exportName, path, value: toCycleObject(value), ancestors },
+        () => {
       const record = toRecord({ exportName, path, value });
       rejectUnknownRecordFields({
         exportName,
@@ -372,12 +433,14 @@ const encodeRecord = ({
                 path: `${path}.${field.name}`,
                 registry,
                 ancestors,
+                state,
               }),
             ],
           ];
         }),
       );
-    },
+        },
+      ),
   );
 };
 
@@ -388,6 +451,7 @@ const decodeRecord = ({
   value,
   path,
   registry,
+  state,
   allowVariantTag = false,
 }: {
   exportName: string;
@@ -396,38 +460,45 @@ const decodeRecord = ({
   value: unknown;
   path: string;
   registry: ReadonlyMap<number, BoundarySchema>;
+  state: BoundaryTraversalState;
   allowVariantTag?: boolean;
 }): Record<string, unknown> => {
-  const record = toRecord({ exportName, path, value });
-  rejectUnknownRecordFields({
-    exportName,
-    path,
-    record,
-    fields,
-    allowVariantTag: tag !== undefined || allowVariantTag,
-  });
-  return {
-    ...Object.fromEntries(
-      fields.flatMap((field) => {
-        if (field.optional && !(field.name in record)) {
-          return [];
-        }
-        return [
-          [
-            field.name,
-            decodeBoundaryValue({
-              exportName,
-              schema: field.schema,
-              value: record[field.name],
-              path: `${path}.${field.name}`,
-              registry,
-            }),
-          ],
-        ];
-      }),
-    ),
-    ...(tag ? { tag } : {}),
-  };
+  return withContainerLimits(
+    { exportName, path, length: fields.length, state },
+    () => {
+      const record = toRecord({ exportName, path, value });
+      rejectUnknownRecordFields({
+        exportName,
+        path,
+        record,
+        fields,
+        allowVariantTag: tag !== undefined || allowVariantTag,
+      });
+      return {
+        ...Object.fromEntries(
+          fields.flatMap((field) => {
+            if (field.optional && !(field.name in record)) {
+              return [];
+            }
+            return [
+              [
+                field.name,
+                decodeBoundaryValue({
+                  exportName,
+                  schema: field.schema,
+                  value: record[field.name],
+                  path: `${path}.${field.name}`,
+                  registry,
+                  state,
+                }),
+              ],
+            ];
+          }),
+        ),
+        ...(tag ? { tag } : {}),
+      };
+    },
+  );
 };
 
 const encodeUnion = ({
@@ -437,6 +508,7 @@ const encodeUnion = ({
   path,
   registry,
   ancestors,
+  state,
 }: {
   exportName: string;
   schema: BoundaryUnionSchema;
@@ -444,6 +516,7 @@ const encodeUnion = ({
   path: string;
   registry: ReadonlyMap<number, BoundarySchema>;
   ancestors: WeakSet<object>;
+  state: BoundaryTraversalState;
 }): Record<string, unknown> => {
   const record = toRecord({ exportName, path, value });
   const tag = record.tag ?? record.$variant;
@@ -462,6 +535,7 @@ const encodeUnion = ({
       path,
       registry,
       ancestors,
+      state,
       allowVariantTag: true,
     }),
     $variant: tag,
@@ -474,12 +548,14 @@ const decodeUnion = ({
   value,
   path,
   registry,
+  state,
 }: {
   exportName: string;
   schema: BoundaryUnionSchema;
   value: unknown;
   path: string;
   registry: ReadonlyMap<number, BoundarySchema>;
+  state: BoundaryTraversalState;
 }): Record<string, unknown> => {
   const record = toRecord({ exportName, path, value });
   const tag = record.$variant ?? record.tag;
@@ -497,6 +573,7 @@ const decodeUnion = ({
       value: record,
       path,
       registry,
+      state,
       allowVariantTag: true,
     }),
     tag,
@@ -582,6 +659,59 @@ const withCycleCheck = <T>(
   } finally {
     ancestors.delete(value);
   }
+};
+
+const withContainerLimits = <T>(
+  {
+    exportName,
+    path,
+    length,
+    state,
+  }: {
+    exportName: string;
+    path: string;
+    length: number;
+    state: BoundaryTraversalState;
+  },
+  run: () => T,
+): T => {
+  if (length > state.maxCollectionLength) {
+    throw new Error(
+      `typed export ${exportName} ${formatErrorPath(path)} exceeds maximum collection length ${state.maxCollectionLength}`,
+    );
+  }
+  if (state.depth >= state.maxDepth) {
+    throw new Error(
+      `typed export ${exportName} ${formatErrorPath(path)} exceeds maximum DTO depth ${state.maxDepth}`,
+    );
+  }
+  state.depth += 1;
+  try {
+    return run();
+  } finally {
+    state.depth -= 1;
+  }
+};
+
+const checkScalarBytes = <T>({
+  exportName,
+  path,
+  state,
+  value,
+  bytes,
+}: {
+  exportName: string;
+  path: string;
+  state: BoundaryTraversalState;
+  value: T;
+  bytes: number;
+}): T => {
+  if (bytes > state.maxBytes) {
+    throw new Error(
+      `typed export ${exportName} ${formatErrorPath(path)} exceeds maximum byte length ${state.maxBytes}`,
+    );
+  }
+  return value;
 };
 
 const cycleError = ({

@@ -1,7 +1,7 @@
 use std::memory::self as memory
 use std::array::Array
 use std::bytes::ByteBuffer
-use std::data::{ DataReader, DataWriter }
+use std::data::{ DataReader, DataWriter, DecodeLimits, EncodeLimits }
 use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
@@ -101,6 +101,33 @@ test "typed msgpack encode and decode use immutable bytes":
               assert(event.reason, eq: "complete")
             else:
               assert(false, eq: true)
+
+test "typed msgpack codecs enforce explicit resource limits":
+  let encode_limits = EncodeLimits {
+    max_depth: 8,
+    max_bytes: 1024,
+    max_collection_length: 1
+  }
+  match(encode_with_limits([1, 2], limits: encode_limits))
+    Ok:
+      Test::fail()
+    Err<MsgPackError>:
+      void
+
+  let ~encoded = ByteBuffer::with_capacity(3)
+  encoded.push(146)
+  encoded.push(1)
+  encoded.push(2)
+  let decode_limits = DecodeLimits {
+    max_depth: 8,
+    max_bytes: 1024,
+    max_collection_length: 1
+  }
+  match(decode_with_limits<Array<i32>>(encoded.as_bytes(), limits: decode_limits))
+    Ok:
+      Test::fail()
+    Err<MsgPackError>:
+      void
 
 test "typed msgpack codecs stream recursive DTO values":
   let source = RecursiveCodecNode {

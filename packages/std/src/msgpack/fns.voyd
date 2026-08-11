@@ -25,13 +25,17 @@ use std::data::{
   DataValue,
   DataVariant,
   DataWriter,
+  DecodeLimits,
+  EncodeLimits,
   F32Kind,
   F64Kind,
   I32Kind,
   I64Kind,
   NullKind,
   RecordKind,
-  StringKind
+  StringKind,
+  default_decode_limits,
+  default_encode_limits
 }
 use std::error::panic
 use std::meta::{ RecordShape, ShapeField, ShapeVariant, UnionShape }
@@ -74,7 +78,8 @@ pub obj MsgPackWriter {
   remaining_values: Array<i32>,
   pending_fields: Array<i32>,
   root_count: i32,
-  failed: bool
+  failed: bool,
+  limits: EncodeLimits
 }
 
 /// Direct MessagePack source used by compiler-generated DTO traversal.
@@ -83,18 +88,24 @@ pub obj MsgPackReader {
   container_kinds: Array<i32>,
   remaining_values: Array<i32>,
   root_consumed: bool,
-  failed: bool
+  failed: bool,
+  limits: DecodeLimits
 }
 
 impl MsgPackReader
   /// Creates a reader over one immutable MessagePack byte buffer.
   pub fn init(bytes: Bytes) -> MsgPackReader
+    MsgPackReader::init(bytes, limits: default_decode_limits())
+
+  /// Creates a reader with explicit resource limits.
+  pub fn init(bytes: Bytes, { limits: DecodeLimits }) -> MsgPackReader
     MsgPackReader {
       decoder: bytes_decoder(bytes),
       container_kinds: Array<i32>::init(),
       remaining_values: Array<i32>::init(),
       root_consumed: false,
-      failed: false
+      failed: invalid_decode_limits(limits, bytes.len()),
+      limits: limits
     }
 
   /// Returns true after one balanced root and every source byte are consumed.
@@ -134,6 +145,10 @@ impl MsgPackReader
           else: self.decoder.read_map_length()
         if length < 0 or self.decoder.ok == false:
           return self.fail<i32>("msgpack reader expected a container")
+        if length > self.limits.max_collection_length:
+          return self.fail<i32>("msgpack reader collection exceeds configured limit")
+        if self.container_kinds.len() >= self.limits.max_depth:
+          return self.fail<i32>("msgpack reader nesting exceeds configured limit")
         self.container_kinds.push(kind)
         self.remaining_values.push(length)
         Ok<i32> { value: length }
@@ -153,13 +168,18 @@ impl MsgPackReader
 impl MsgPackWriter
   /// Creates an empty immutable-byte writer.
   pub fn init() -> MsgPackWriter
+    MsgPackWriter::init(limits: default_encode_limits())
+
+  /// Creates a writer with explicit resource limits.
+  pub fn init({ limits: EncodeLimits }) -> MsgPackWriter
     MsgPackWriter {
       encoder: byte_encoder(),
       container_kinds: Array<i32>::init(),
       remaining_values: Array<i32>::init(),
       pending_fields: Array<i32>::init(),
       root_count: 0,
-      failed: false
+      failed: invalid_encode_limits(limits),
+      limits: limits
     }
 
   /// Finishes exactly one balanced DTO value.
@@ -170,7 +190,10 @@ impl MsgPackWriter
       return msgpack_writer_failure<Bytes>("msgpack writer has unclosed containers")
     if self.root_count != 1:
       return msgpack_writer_failure<Bytes>("msgpack writer expected one root value")
-    Ok<Bytes> { value: self.encoder.encoded_bytes() }
+    let bytes = self.encoder.encoded_bytes()
+    if bytes.len() > self.limits.max_bytes:
+      return msgpack_writer_failure<Bytes>("msgpack writer output exceeds configured byte limit")
+    Ok<Bytes> { value: bytes }
 
   fn fail(~self, message: String) -> Result<Unit, MsgPackError>
     self.failed = true
@@ -201,6 +224,10 @@ impl MsgPackWriter
   ) -> Result<Unit, MsgPackError>
     if length < 0:
       return self.fail("msgpack writer container length cannot be negative")
+    if length > self.limits.max_collection_length:
+      return self.fail("msgpack writer collection exceeds configured limit")
+    if self.container_kinds.len() >= self.limits.max_depth:
+      return self.fail("msgpack writer nesting exceeds configured limit")
     match(self.consume_value())
       Err<MsgPackError> { error }:
         Err<MsgPackError> { error }
@@ -351,6 +378,16 @@ impl DataWriter<MsgPackError> for MsgPackWriter
 
   fn end_variant(~self) -> Result<Unit, MsgPackError>
     self.end_container(kind: 2)
+
+fn invalid_encode_limits(limits: EncodeLimits) -> bool
+  limits.max_depth < 0
+    or limits.max_bytes < 0
+    or limits.max_collection_length < 0
+
+fn invalid_decode_limits(limits: DecodeLimits, bytes: i32) -> bool
+  bytes > limits.max_bytes
+    or limits.max_depth < 0
+    or limits.max_collection_length < 0
 
 impl DataReader<MsgPackError> for MsgPackReader
   fn reject(~self, message: String) -> Result<Unit, MsgPackError>

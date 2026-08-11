@@ -95,6 +95,32 @@ describe("boundary DTO decoding", () => {
       }),
     ).toThrow("result has unknown field extra");
   });
+
+  it("rejects DTO values beyond the host depth limit", () => {
+    const schema = {
+      kind: "record" as const,
+      typeId: 1,
+      fields: [
+        {
+          name: "next",
+          optional: true,
+          schema: { kind: "ref" as const, typeId: 1 },
+        },
+      ],
+    };
+    let value: Record<string, unknown> = {};
+    for (let depth = 0; depth <= 128; depth += 1) {
+      value = { next: value };
+    }
+
+    expect(() =>
+      encodeBoundaryArgs({
+        exportName: "deep",
+        schemas: [schema],
+        args: [value],
+      }),
+    ).toThrow("exceeds maximum DTO depth 128");
+  });
 });
 
 describe("host transport negotiation", () => {

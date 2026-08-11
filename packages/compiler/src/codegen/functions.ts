@@ -1565,20 +1565,21 @@ export const emitModuleExports = (
             exportName,
           });
         } catch (error) {
-          exportCtx.diagnostics.report(
-            diagnosticFromCode({
-              code: "CG0002",
-              params: {
-                kind: "unsupported-effectful-export-return",
-                exportName,
-                returnType: (error as Error).message,
-              },
-              span: entry.span,
-            }),
-          );
+          if (
+            boundaryExportOptions.mode === "only" ||
+            boundaryExportOptions.onUnsupported === "diagnostic"
+          ) {
+            reportBoundaryExportUnsupported({
+              ctx: exportCtx,
+              entry,
+              exportName,
+              error,
+            });
+          }
           return;
         }
         effectfulExports.push({ meta, exportName, emitEntry: true });
+        emittedBoundaryExports.add(exportName);
         exportAbiEntries.push({
           id: hostExportId(exportName),
           name: exportName,

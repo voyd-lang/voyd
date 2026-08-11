@@ -4,6 +4,7 @@ use std::optional::types::all
 use std::number::cast::to_i64
 use std::string::{ String, new_string }
 use std::test::assertions::all
+use std::data::{ DecodeLimits, EncodeLimits, RejectUnknownFields }
 
 obj DecodeProfile {
   age: i32,
@@ -68,6 +69,32 @@ test "typed JSON encode enforces the exact i64 range":
       assert(false, eq: true)
     Err<JsonError> { error }:
       assert(error.code, eq: 2)
+
+test "typed JSON codecs enforce explicit resource limits":
+  let encode_limits = EncodeLimits {
+    max_depth: 8,
+    max_bytes: 1024,
+    max_collection_length: 1
+  }
+  match(encode_with_limits([1, 2], limits: encode_limits))
+    Ok<String>:
+      assert(false, eq: true)
+    Err<JsonError>:
+      void
+
+  let options = JsonDecodeOptions {
+    unknown_fields: RejectUnknownFields {},
+    limits: DecodeLimits {
+      max_depth: 8,
+      max_bytes: 1024,
+      max_collection_length: 1
+    }
+  }
+  match(decode<Array<i32>>("[1,2]", options: options))
+    Ok<Array<i32>>:
+      assert(false, eq: true)
+    Err<JsonDecodeError>:
+      void
 
 test "typed JSON decode composes nested arrays optional fields and enum payloads":
   let source = "{\"version\":1,\"profiles\":[{\"age\":7},{\"age\":9,\"nickname\":\"nine\"}],\"event\":{\"$variant\":\"DecodeStarted\",\"id\":42}}"

@@ -13,6 +13,10 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   and schema fingerprints. Plain JavaScript values remain the SDK surface.
 - `Bytes` is a first-class DTO primitive and crosses JavaScript boundaries as
   `Uint8Array`.
+- `ByteBuffer::push` rejects values outside `0...255`; byte encoding no longer
+  truncates out-of-range integers modulo 256.
+- DTO encoding rejects cyclic object graphs and values that exceed the maximum
+  traversal depth instead of manufacturing a string-shaped sentinel value.
 - Typed JSON and MessagePack APIs share the provider-neutral data reader and
   writer contract. Typed encoding and decoding traverse those streams directly
   without allocating a `DataValue` tree. Explicit `JsonValue`, `MsgPack`, and
@@ -25,6 +29,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   input, output, time, task failures, filesystems, and HTTP now use typed request
   and result values. Adapter authors receive and return those values instead of
   MessagePack envelope objects.
+- Typed `Unit` values use their structural JavaScript representation `{}` in
+  host adapter payloads.
 - HTTP and filesystem byte bodies are `Uint8Array` values in JavaScript host
   adapters.
 - VX component state is generic and typed. The serialized `MsgPack` state

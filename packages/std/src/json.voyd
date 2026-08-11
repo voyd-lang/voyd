@@ -24,6 +24,8 @@ use std::data::{
   DataVariant,
   DataReader,
   DataWriter,
+  DecodeLimits,
+  EncodeLimits,
   DecodeError,
   DecodeOptions,
   IgnoreUnknownFields,
@@ -36,6 +38,8 @@ use std::data::{
   StringKind,
   VariantKind,
   UnknownFieldPolicy,
+  default_decode_limits,
+  default_encode_limits,
   decode as decode_data,
   read as read_dto,
   write as write_dto
@@ -75,6 +79,16 @@ pub obj JsonError {
   api message: String
 }
 
+fn invalid_encode_limits(limits: EncodeLimits) -> bool
+  limits.max_depth < 0
+    or limits.max_bytes < 0
+    or limits.max_collection_length < 0
+
+fn invalid_decode_limits(limits: DecodeLimits) -> bool
+  limits.max_depth < 0
+    or limits.max_bytes < 0
+    or limits.max_collection_length < 0
+
 /// Direct compact-JSON sink used by compiler-generated DTO traversal.
 pub obj JsonWriter {
   out: Array<i32>,
@@ -83,12 +97,17 @@ pub obj JsonWriter {
   written_values: Array<i32>,
   pending_fields: Array<i32>,
   root_count: i32,
-  failed: bool
+  failed: bool,
+  limits: EncodeLimits
 }
 
 impl JsonWriter
   /// Creates an empty compact JSON writer.
   pub fn init() -> JsonWriter
+    JsonWriter::init(limits: default_encode_limits())
+
+  /// Creates a compact JSON writer with explicit resource limits.
+  pub fn init({ limits: EncodeLimits }) -> JsonWriter
     JsonWriter {
       out: Array<i32>::with_capacity(64),
       container_kinds: Array<i32>::init(),
@@ -96,7 +115,8 @@ impl JsonWriter
       written_values: Array<i32>::init(),
       pending_fields: Array<i32>::init(),
       root_count: 0,
-      failed: false
+      failed: invalid_encode_limits(limits),
+      limits: limits
     }
 
   /// Finishes exactly one balanced JSON value.
@@ -107,6 +127,8 @@ impl JsonWriter
       return json_writer_failure<String>("json writer has unclosed containers")
     if self.root_count != 1:
       return json_writer_failure<String>("json writer expected one root value")
+    if self.out.len() > self.limits.max_bytes:
+      return json_writer_failure<String>("json writer output exceeds configured byte limit")
     Ok<String> { value: new_string(self.out.to_fixed_array()) }
 
   fn fail(~self, message: String) -> Result<Unit, JsonError>
@@ -141,6 +163,10 @@ impl JsonWriter
   ) -> Result<Unit, JsonError>
     if length < 0:
       return self.fail("json writer container length cannot be negative")
+    if length > self.limits.max_collection_length:
+      return self.fail("json writer collection exceeds configured limit")
+    if self.container_kinds.len() >= self.limits.max_depth:
+      return self.fail("json writer nesting exceeds configured limit")
     match(self.before_value())
       Err<JsonError> { error }:
         Err<JsonError> { error }
@@ -289,15 +315,20 @@ impl DataWriter<JsonError> for JsonWriter
 obj JsonDtoReader {
   reader: JsonReader,
   path: String,
-  parents: Array<String>
+  parents: Array<String>,
+  limits: DecodeLimits
 }
 
 impl JsonDtoReader
   fn init(source: StringSlice) -> JsonDtoReader
+    JsonDtoReader::init(source, limits: default_decode_limits())
+
+  fn init(source: StringSlice, { limits: DecodeLimits }) -> JsonDtoReader
     JsonDtoReader {
       reader: JsonReader::init(source),
       path: "$".to_string(),
-      parents: Array<String>::init()
+      parents: Array<String>::init(),
+      limits: limits
     }
 
   fn is_complete(self) -> bool
@@ -363,7 +394,15 @@ impl DataReader<JsonDecodeError> for JsonDtoReader
     self.mapped(self.reader.read_bytes(), JsonSchemaFailure {})
 
   fn begin_array(~self) -> Result<i32, JsonDecodeError>
-    self.mapped(self.reader.begin_array(), JsonSchemaFailure {})
+    match(self.mapped(self.reader.begin_array(), JsonSchemaFailure {}))
+      Err<JsonDecodeError> { error }:
+        Err<JsonDecodeError> { error }
+      Ok<i32> { value: length }:
+        if length > self.limits.max_collection_length:
+          return decode_failure<i32>(JsonSchemaFailure {}, self.path, "json array exceeds configured collection limit")
+        if self.reader.container_kinds.len() > self.limits.max_depth:
+          return decode_failure<i32>(JsonSchemaFailure {}, self.path, "json nesting exceeds configured depth limit")
+        Ok<i32> { value: length }
 
   fn has_next_element(self) -> Result<bool, JsonDecodeError>
     self.mapped(self.reader.has_next_element(), JsonParseFailure {})
@@ -372,9 +411,19 @@ impl DataReader<JsonDecodeError> for JsonDtoReader
     self.mapped(self.reader.end_array(), JsonParseFailure {})
 
   fn begin_record(~self) -> Result<Unit, JsonDecodeError>
-    self.mapped(self.reader.begin_record(), JsonSchemaFailure {})
+    match(self.mapped(self.reader.begin_record(), JsonSchemaFailure {}))
+      Err<JsonDecodeError> { error }:
+        Err<JsonDecodeError> { error }
+      Ok<Unit>:
+        if self.reader.container_kinds.len() > self.limits.max_depth:
+          return decode_failure<Unit>(JsonSchemaFailure {}, self.path, "json nesting exceeds configured depth limit")
+        Ok<Unit> { value: Unit {} }
 
   fn next_field(~self) -> Result<Option<String>, JsonDecodeError>
+    if self.reader.container_kinds.is_empty() == false:
+      let index = self.reader.container_kinds.len() - 1
+      if self.reader.consumed_values.at(index) >= self.limits.max_collection_length:
+        return decode_failure<Option<String>>(JsonSchemaFailure {}, self.path, "json object exceeds configured collection limit")
     self.mapped(self.reader.next_field(), JsonParseFailure {})
 
   fn skip_value(~self) -> Result<Unit, JsonDecodeError>
@@ -384,7 +433,13 @@ impl DataReader<JsonDecodeError> for JsonDtoReader
     self.mapped(self.reader.end_record(), JsonParseFailure {})
 
   fn begin_variant(~self) -> Result<String, JsonDecodeError>
-    self.mapped(self.reader.begin_variant(), JsonSchemaFailure {})
+    match(self.mapped(self.reader.begin_variant(), JsonSchemaFailure {}))
+      Err<JsonDecodeError> { error }:
+        Err<JsonDecodeError> { error }
+      Ok<String> { value }:
+        if self.reader.container_kinds.len() > self.limits.max_depth:
+          return decode_failure<String>(JsonSchemaFailure {}, self.path, "json nesting exceeds configured depth limit")
+        Ok<String> { value }
 
   fn end_variant(~self) -> Result<Unit, JsonDecodeError>
     self.mapped(self.reader.end_variant(), JsonParseFailure {})
@@ -422,7 +477,8 @@ pub obj JsonDecodeError {
 
 /// Unknown-field behavior used by typed JSON decoding.
 pub obj JsonDecodeOptions {
-  api unknown_fields: UnknownFieldPolicy
+  api unknown_fields: UnknownFieldPolicy,
+  api limits: DecodeLimits
 }
 
 /// Migration callback for a parsed versioned document.
@@ -933,18 +989,28 @@ pub fn stringify_pretty(value: JsonValue) -> Result<String, JsonError>
 
 /// Returns strict typed-decoder options that reject unknown record fields.
 pub fn strict_decode_options() -> JsonDecodeOptions
-  JsonDecodeOptions { unknown_fields: RejectUnknownFields {} }
+  JsonDecodeOptions {
+    unknown_fields: RejectUnknownFields {},
+    limits: default_decode_limits()
+  }
 
 /// Returns forward-compatible typed-decoder options that ignore unknown fields.
 pub fn permissive_decode_options() -> JsonDecodeOptions
-  JsonDecodeOptions { unknown_fields: IgnoreUnknownFields {} }
+  JsonDecodeOptions {
+    unknown_fields: IgnoreUnknownFields {},
+    limits: default_decode_limits()
+  }
 
 /// Encodes a DTO-compatible value as compact JSON text.
 ///
 /// Signed 64-bit integers outside JavaScript's exact integer range are
 /// rejected. `Bytes` requires an explicit application representation.
 pub fn encode<T>(value: T): () -> Result<String, JsonError>
-  let ~writer = JsonWriter::init()
+  encode_with_limits(value, limits: default_encode_limits())
+
+/// Encodes compact JSON with explicit depth, byte, and collection limits.
+pub fn encode_with_limits<T>(value: T, { limits: EncodeLimits }): () -> Result<String, JsonError>
+  let ~writer = JsonWriter::init(limits: limits)
   match(write_dto<T, JsonError, JsonWriter>(writer, value))
     Err<JsonError> { error }:
       Err<JsonError> { error }
@@ -977,7 +1043,13 @@ pub fn decode<T>(
   source: StringSlice,
   { options: JsonDecodeOptions }
 ): () -> Result<T, JsonDecodeError>
-  let ~reader = JsonDtoReader::init(source)
+  if invalid_decode_limits(options.limits) or source.byte_len() > options.limits.max_bytes:
+    return decode_failure<T>(
+      JsonParseFailure {},
+      "$",
+      "json source exceeds configured limits"
+    )
+  let ~reader = JsonDtoReader::init(source, limits: options.limits)
   match(read_dto<T, JsonDecodeError, JsonDtoReader>(
     reader,
     rejects_unknown_fields(options.unknown_fields)
