@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
-import { createVoydHost, parseExportAbi } from "@voyd-lang/js-host";
+import {
+  createVoydHost,
+  HostFrameFailureError,
+  parseExportAbi,
+} from "@voyd-lang/js-host";
 import { compileProgram, type CompileProgramResult } from "../../pipeline.js";
 import { createFsModuleHost } from "../../modules/fs-host.js";
 import { wasmBufferSource } from "./support/wasm-utils.js";
@@ -350,7 +354,20 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     await expect(host.runPure("echo_user_id", [{ id: 7 }])).resolves.toEqual({
       id: 7,
     });
-    await expect(host.runPure("echo_user_id", [{ id: 0 }])).rejects.toThrow();
+    await expect(
+      host.runPure("echo_user_profile", [{ user: { id: 0 } }]),
+    ).rejects.toMatchObject<Partial<HostFrameFailureError>>({
+      failure: {
+        direction: "host->vm",
+        frameCategory: "export-invocation",
+        phase: "decode",
+        category: "custom",
+        code: "user_id.non_positive",
+        providerCode: "voyd.std.msgpack",
+        message: "user id must be positive",
+        path: ["$.user"],
+      },
+    });
   });
 
   it("rejects integers outside the byte domain before transport encoding", async () => {

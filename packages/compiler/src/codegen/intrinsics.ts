@@ -63,10 +63,7 @@ import {
   type BoundarySchema,
   withDtoFingerprint,
 } from "./boundary/schema.js";
-import {
-  writeDtoValueToTree,
-  readDtoValueFromTree,
-} from "./boundary/dto-tree-codec.js";
+import { writeDtoValueToTree } from "./boundary/dto-tree-codec.js";
 import {
   hostStreamWriterResultTypeId,
   writeDtoValueToHostStream,
@@ -1661,26 +1658,6 @@ export const compileIntrinsicCall = ({
           resultTypeId,
           ctx,
           fnCtx,
-        });
-      } catch (error) {
-        rethrowBoundarySchemaDiagnostic({ error, call });
-      }
-    }
-    case "__data_to_dto_value": {
-      assertArgCount(name, args, 1);
-      const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
-      try {
-        return readDtoValueFromTree({
-          value: args[0]!,
-          schema: deriveBoundarySchema({
-            typeId: returnTypeId,
-            ctx,
-            label: "data::decode target",
-            options: { tagStandaloneVariants: true },
-          }),
-          ctx,
-          fnCtx,
-          provider: ensureDataValueFunctions(ctx),
         });
       } catch (error) {
         rethrowBoundarySchemaDiagnostic({ error, call });

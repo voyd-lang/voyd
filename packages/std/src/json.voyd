@@ -349,6 +349,20 @@ impl DataReader<JsonDecodeError> for JsonDtoReader
   fn reject(~self, message: String) -> Result<Unit, JsonDecodeError>
     decode_failure<Unit>(JsonSchemaFailure {}, self.path, message)
 
+  fn reject_custom(
+    ~self,
+    code: String,
+    message: String
+  ) -> Result<Unit, JsonDecodeError>
+    decode_failure<Unit>(
+      JsonCustomDtoFailure { code },
+      self.path,
+      message
+    )
+
+  fn current_path(self) -> String
+    self.path
+
   fn matches_name(self, actual: String, expected: String) -> bool
     actual == expected
 
@@ -462,11 +476,15 @@ pub obj JsonVersionFailure {}
 /// A decoded number violated an explicit application constraint.
 pub obj JsonConstraintFailure {}
 
+/// A custom DTO rejected a valid JSON representation.
+pub obj JsonCustomDtoFailure { api code: String }
+
 /// Stable categories for typed JSON decoding failures.
 pub type JsonDecodeErrorKind = JsonParseFailure
   | JsonSchemaFailure
   | JsonVersionFailure
   | JsonConstraintFailure
+  | JsonCustomDtoFailure
 
 /// Typed JSON failure with a rooted JSON path and retained cause text.
 pub obj JsonDecodeError {
@@ -655,6 +673,16 @@ impl JsonReader
 impl DataReader<JsonError> for JsonReader
   fn reject(~self, message: String) -> Result<Unit, JsonError>
     self.fail<Unit>(message)
+
+  fn reject_custom(
+    ~self,
+    code: String,
+    message: String
+  ) -> Result<Unit, JsonError>
+    self.fail<Unit>(code.concat(": ").concat(message))
+
+  fn current_path(self) -> String
+    "$".to_string()
 
   fn matches_name(self, actual: String, expected: String) -> bool
     actual == expected

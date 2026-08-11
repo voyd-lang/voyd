@@ -1,7 +1,7 @@
 use std::memory::self as memory
 use std::array::Array
 use std::bytes::ByteBuffer
-use std::data::{ DataReader, DataWriter, DecodeLimits, EncodeLimits }
+use std::data::{ CustomDto, CustomDtoError, DataReader, DataWriter, DecodeLimits, EncodeLimits }
 use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
@@ -43,6 +43,25 @@ obj RecursiveCodecEnvelope {
   id: i32,
   root: RecursiveCodecNode
 }
+
+obj MsgPackPositiveId { value: i32 }
+obj MsgPackPositiveIdDto { value: i32 }
+obj MsgPackPositiveEnvelope { id: MsgPackPositiveId }
+
+impl CustomDto<MsgPackPositiveId, MsgPackPositiveIdDto> for MsgPackPositiveId
+  fn write(value: MsgPackPositiveId) -> MsgPackPositiveIdDto
+    MsgPackPositiveIdDto { value: value.value }
+
+  fn read(value: MsgPackPositiveIdDto) -> Result<MsgPackPositiveId, CustomDtoError>
+    if value.value > 0:
+      Ok<MsgPackPositiveId> { value: MsgPackPositiveId { value: value.value } }
+    else:
+      Err<CustomDtoError> {
+        error: CustomDtoError {
+          code: "msgpack_positive_id.non_positive",
+          message: "positive id required"
+        }
+      }
 
 test "derived msgpack codecs preserve nested records arrays optionals and enum payloads":
   let source = BoundaryCodecEnvelope {
@@ -222,6 +241,20 @@ test "typed msgpack codecs stream recursive DTO values":
               assert(false, eq: true)
             Some<RecursiveCodecNode> { value: next }:
               assert(next.value, eq: 2)
+
+test "typed msgpack decoding preserves nested CustomDto errors":
+  match(encode(MsgPackPositiveEnvelope {
+    id: MsgPackPositiveId { value: 0 }
+  }))
+    Err<MsgPackError>:
+      Test::fail()
+    Ok { value: bytes }:
+      match(decode<MsgPackPositiveEnvelope>(bytes))
+        Ok<MsgPackPositiveEnvelope>:
+          Test::fail()
+        Err<MsgPackError> { error }:
+          assert(error.custom_code, eq: "msgpack_positive_id.non_positive")
+          assert(error.path, eq: "$.id")
 
 test "typed msgpack decode supports nested recursive DTO definitions":
   let source = RecursiveCodecEnvelope {

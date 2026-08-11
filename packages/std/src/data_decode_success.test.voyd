@@ -45,6 +45,7 @@ type DataSuccessId = i64
 
 obj PositiveId { value: i32 }
 obj PositiveIdDto { value: i32 }
+obj PositiveEnvelope { id: PositiveId }
 
 impl CustomDto<PositiveId, PositiveIdDto> for PositiveId
   fn write(value: PositiveId) -> PositiveIdDto
@@ -124,6 +125,26 @@ test "CustomDto uses one DTO-eligible representation and validates reads":
       assert(root.fields.at(0).name, eq: "value")
     else:
       Test::fail()
+
+test "DataValue decoding preserves nested CustomDto errors":
+  let ~id_fields = Array<DataField>::init()
+  id_fields.push(DataField { name: "value", value: DataI32 { value: 0 } })
+  let ~fields = Array<DataField>::init()
+  fields.push(DataField {
+    name: "id",
+    value: DataObject { fields: id_fields }
+  })
+
+  match(decode<PositiveEnvelope>(DataObject { fields }))
+    Ok<PositiveEnvelope>:
+      Test::fail()
+    Err<DecodeError> { error }:
+      assert(error.path, eq: "$.id")
+      error.kind.match(kind)
+        CustomDtoFailure:
+          assert(kind.cause.code, eq: "positive_id.non_positive")
+        else:
+          Test::fail()
 
   let ~fields = Array<DataField>::init()
   fields.push(DataField { name: "value", value: DataString { value: "ready" } })

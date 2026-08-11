@@ -8577,18 +8577,6 @@ const typeIntrinsicCall = (
         detail: "reader and unknown-field policy",
       });
       return expectedReturnType ?? ctx.primitives.unknown;
-    case "__data_to_dto_value":
-      assertIntrinsicArgCount({
-        name: "__data_to_dto_value",
-        args,
-        expected: 1,
-        detail: "DataValue",
-      });
-      return requireSingleTypeArgument({
-        name: "__data_to_dto_value",
-        typeArguments,
-        detail: "target DTO type",
-      });
     case "__dto_shape_of":
       assertIntrinsicArgCount({
         name: "__dto_shape_of",

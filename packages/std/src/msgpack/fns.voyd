@@ -40,7 +40,7 @@ use std::data::{
 use std::error::panic
 use std::meta::{ RecordShape, ShapeField, ShapeVariant, UnionShape }
 use std::memory::self as memory
-use std::msgpack::errors::{ MsgPackError, error_code_buffer_too_small, error_code_decode_failed, error_code_trailing_bytes, error_code_type_mismatch, make_error }
+use std::msgpack::errors::{ MsgPackError, error_code_buffer_too_small, error_code_decode_failed, error_code_trailing_bytes, error_code_type_mismatch, make_custom_error, make_error }
 use std::msgpack::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 use std::number::cast::self as cast
 use std::optional::types::all
@@ -89,7 +89,9 @@ pub obj MsgPackReader {
   remaining_values: Array<i32>,
   root_consumed: bool,
   failed: bool,
-  limits: DecodeLimits
+  limits: DecodeLimits,
+  path: String,
+  parents: Array<String>
 }
 
 impl MsgPackReader
@@ -105,7 +107,9 @@ impl MsgPackReader
       remaining_values: Array<i32>::init(),
       root_consumed: false,
       failed: invalid_decode_limits(limits, bytes.len()),
-      limits: limits
+      limits: limits,
+      path: "$".to_string(),
+      parents: Array<String>::init()
     }
 
   /// Returns true after one balanced root and every source byte are consumed.
@@ -393,17 +397,35 @@ impl DataReader<MsgPackError> for MsgPackReader
   fn reject(~self, message: String) -> Result<Unit, MsgPackError>
     self.fail<Unit>(message)
 
+  fn reject_custom(
+    ~self,
+    code: String,
+    message: String
+  ) -> Result<Unit, MsgPackError>
+    self.failed = true
+    Err<MsgPackError> {
+      error: make_custom_error(code, self.path, message)
+    }
+
+  fn current_path(self) -> String
+    self.path
+
   fn matches_name(self, actual: String, expected: String) -> bool
     actual == expected
 
   fn enter_field(~self, name: String) -> void
-    void
+    self.parents.push(self.path)
+    self.path = self.path.concat(".").concat(name)
 
   fn enter_index(~self, index: i32) -> void
-    void
+    self.parents.push(self.path)
+    self.path = self.path.concat("[").concat(cast::to_string(index)).concat("]")
 
   fn leave(~self) -> void
-    void
+    if self.parents.is_empty() == false:
+      let index = self.parents.len() - 1
+      self.path = self.parents.at(index)
+      self.parents.pop()
 
   fn kind(self) -> Result<DataKind, MsgPackError>
     let prefix = self.decoder.peek_u8()
@@ -998,7 +1020,9 @@ fn host_transport_create_reader(ptr: i32, len: i32) -> MsgPackReader
     remaining_values: Array<i32>::init(),
     root_consumed: false,
     failed: (len > limits.max_bytes or ptr < 0 or len < 0),
-    limits: limits
+    limits: limits,
+    path: "$".to_string(),
+    parents: Array<String>::init()
   }
 
 @compiler_contract(id: "voyd.std.host-transport.msgpack.reader-complete")

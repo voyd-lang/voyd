@@ -16,6 +16,7 @@ enum LookupResult
 
 obj UserId { value: i32 }
 obj UserIdDto { id: i32 }
+obj UserProfile { user: UserId }
 
 impl CustomDto<UserId, UserIdDto> for UserId
   fn write(value: UserId) -> UserIdDto
@@ -48,6 +49,9 @@ pub fn echo_bytes(value: Bytes) -> Bytes
   value
 
 pub fn echo_user_id(value: UserId) -> UserId
+  value
+
+pub fn echo_user_profile(value: UserProfile) -> UserProfile
   value
 
 pub fn translate(point: Point, dx: i32, dy: i32) -> Point

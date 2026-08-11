@@ -94,6 +94,79 @@ export const emitSerializedExportWrapper = ({
 
   const readerRef = () => ctx.mod.local.get(readerLocal, readerType);
   const writerRef = () => ctx.mod.local.get(writerLocal, writerType);
+  const returnCustomDecodeFailure = ({
+    code,
+    message,
+    path,
+  }: {
+    code: binaryen.ExpressionRef;
+    message: binaryen.ExpressionRef;
+    path: binaryen.ExpressionRef;
+  }): binaryen.ExpressionRef => {
+    const createFailureWriter = lowerSerializedExportCall({
+      meta: provider.createWriter,
+      args: [
+        ctx.mod.local.get(outPtrLocal, binaryen.i32),
+        ctx.mod.local.get(outLenLocal, binaryen.i32),
+      ],
+      ctx,
+      fnCtx,
+    });
+    const writeFailure = (
+      name: string,
+      args: readonly binaryen.ExpressionRef[] = [],
+    ) =>
+      writeHostStreamEvent({
+        writer: writerRef(),
+        writerTypeId: provider.writerTypeId,
+        name,
+        args,
+        ctx,
+        fnCtx,
+      });
+    const finishFailureWriter = lowerSerializedExportCall({
+      meta: provider.finishWriter,
+      args: [writerRef()],
+      ctx,
+      fnCtx,
+    });
+    return ctx.mod.block(null, [
+      ...createFailureWriter.setup,
+      ctx.mod.local.set(writerLocal, createFailureWriter.value),
+      writeFailure("begin_array", [ctx.mod.i32.const(4)]),
+      writeFailure("write_i32", [
+        ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+      ]),
+      writeFailure("write_i32", [
+        ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportCompletion),
+      ]),
+      writeFailure("write_i32", [
+        ctx.mod.i32.const(hostExportId(exportName)),
+      ]),
+      writeFailure("begin_array", [ctx.mod.i32.const(2)]),
+      writeFailure("write_i32", [ctx.mod.i32.const(1)]),
+      writeFailure("begin_array", [ctx.mod.i32.const(8)]),
+      writeFailure("write_string", [emitStringLiteral("host->vm", ctx)]),
+      writeFailure("write_string", [
+        emitStringLiteral("export-invocation", ctx),
+      ]),
+      writeFailure("write_string", [emitStringLiteral("decode", ctx)]),
+      writeFailure("write_string", [emitStringLiteral("custom", ctx)]),
+      writeFailure("write_string", [code]),
+      writeFailure("write_string", [
+        emitStringLiteral(provider.identity.id, ctx),
+      ]),
+      writeFailure("write_string", [message]),
+      writeFailure("begin_array", [ctx.mod.i32.const(1)]),
+      writeFailure("write_string", [path]),
+      writeFailure("end_array"),
+      writeFailure("end_array"),
+      writeFailure("end_array"),
+      writeFailure("end_array"),
+      ...finishFailureWriter.setup,
+      ctx.mod.return(finishFailureWriter.value),
+    ]);
+  };
   const createReader = lowerSerializedExportCall({
     meta: provider.createReader,
     args: [
@@ -170,6 +243,7 @@ export const emitSerializedExportWrapper = ({
             reader: readerRef(),
             readerTypeId: provider.readerTypeId,
             schema,
+            onCustomError: returnCustomDecodeFailure,
             ctx,
             fnCtx,
           }),

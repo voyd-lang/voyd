@@ -4,7 +4,7 @@ use std::optional::types::all
 use std::number::cast::to_i64
 use std::string::{ String, new_string }
 use std::test::assertions::all
-use std::data::{ DecodeLimits, EncodeLimits, IgnoreUnknownFields, RejectUnknownFields }
+use std::data::{ CustomDto, CustomDtoError, DecodeLimits, EncodeLimits, IgnoreUnknownFields, RejectUnknownFields }
 
 obj DecodeProfile {
   age: i32,
@@ -29,6 +29,24 @@ obj VersionedName {
 
 obj DecodeFloat { value: f32 }
 obj EncodeWideInteger { value: i64 }
+obj JsonPositiveId { value: i32 }
+obj JsonPositiveIdDto { value: i32 }
+obj JsonPositiveEnvelope { id: JsonPositiveId }
+
+impl CustomDto<JsonPositiveId, JsonPositiveIdDto> for JsonPositiveId
+  fn write(value: JsonPositiveId) -> JsonPositiveIdDto
+    JsonPositiveIdDto { value: value.value }
+
+  fn read(value: JsonPositiveIdDto) -> Result<JsonPositiveId, CustomDtoError>
+    if value.value > 0:
+      Ok<JsonPositiveId> { value: JsonPositiveId { value: value.value } }
+    else:
+      Err<CustomDtoError> {
+        error: CustomDtoError {
+          code: "json_positive_id.non_positive",
+          message: "positive id required"
+        }
+      }
 
 test "typed JSON encode preserves DTO field and variant structure":
   let source = DecodeRequest {
@@ -153,6 +171,18 @@ test "typed JSON decode reports precise nested paths and strict unknown fields":
       assert(false, eq: true)
     Ok<VersionedName> { value }:
       assert(value.name, eq: "orbit")
+
+test "typed JSON decoding preserves nested CustomDto errors":
+  match(decode<JsonPositiveEnvelope>("{\"id\":{\"value\":0}}"))
+    Ok<JsonPositiveEnvelope>:
+      Test::fail()
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.id")
+      error.kind.match(kind)
+        JsonCustomDtoFailure:
+          assert(kind.code, eq: "json_positive_id.non_positive")
+        else:
+          Test::fail()
 
 test "typed JSON decode accepts scalar variants through the direct reader":
   let source = "{\"version\":1,\"profiles\":[],\"event\":\"DecodeReady\"}"

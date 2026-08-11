@@ -59,6 +59,11 @@ type StreamReaderState = {
   registry: Map<TypeId, BoundarySchema>;
   helpers: Map<TypeId, RecursiveReadHelper>;
   trapOnError: boolean;
+  onCustomError?: (error: {
+    code: binaryen.ExpressionRef;
+    message: binaryen.ExpressionRef;
+    path: binaryen.ExpressionRef;
+  }) => binaryen.ExpressionRef;
 };
 
 type RecursiveReadHelper = {
@@ -133,12 +138,14 @@ export const readDtoValueFromHostStream = ({
   reader,
   readerTypeId,
   schema,
+  onCustomError,
   ctx,
   fnCtx,
 }: {
   reader: binaryen.ExpressionRef;
   readerTypeId: TypeId;
   schema: BoundarySchema;
+  onCustomError?: StreamReaderState["onCustomError"];
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
@@ -153,6 +160,7 @@ export const readDtoValueFromHostStream = ({
     registry: new Map(),
     helpers: new Map(),
     trapOnError: true,
+    onCustomError,
   };
   registerSchema({ schema, registry: state.registry });
   const readerLocal = allocateTempLocal(
@@ -1056,6 +1064,11 @@ const readCustom = ({
     "message",
     customErrorTypeId,
   );
+  const codeField = requiredField(
+    customErrorInfo.fieldMap,
+    "code",
+    customErrorTypeId,
+  );
   const customErrorValue = resultPayload({
     value: resultRef(),
     resultTypeId: method.resultTypeId,
@@ -1071,6 +1084,13 @@ const readCustom = ({
     ctx,
     fnCtx,
   });
+  const code = loadStructuralField({
+    structInfo: customErrorInfo,
+    field: codeField,
+    pointer: () => customErrorValue,
+    ctx,
+    fnCtx,
+  });
   return ctx.mod.block(
     null,
     [
@@ -1082,19 +1102,32 @@ const readCustom = ({
           variant: { name: "Err", typeId: error, fields: [] },
           ctx,
         }),
-        checkedUnitCall({
-          call: callReader({
-            name: "reject",
-            reader,
-            args: [message],
-            state,
-            ctx,
-            fnCtx,
-          }),
-          state,
-          ctx,
-          fnCtx,
-        }),
+        state.onCustomError
+          ? state.onCustomError({
+              code,
+              message,
+              path: callReader({
+                name: "current_path",
+                reader,
+                args: [],
+                state,
+                ctx,
+                fnCtx,
+              }).expr,
+            })
+          : checkedUnitCall({
+              call: callReader({
+                name: "reject_custom",
+                reader,
+                args: [code, message],
+                state,
+                ctx,
+                fnCtx,
+              }),
+              state,
+              ctx,
+              fnCtx,
+            }),
       ),
       resultPayload({
         value: resultRef(),

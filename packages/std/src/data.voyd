@@ -205,6 +205,12 @@ pub trait DataWriter<SinkError>
 /// Stateful pull source used by generated DTO traversal.
 pub trait DataReader<SourceError>
   fn reject(~self, message: String) -> Result<Unit, SourceError>
+  fn reject_custom(
+    ~self,
+    code: String,
+    message: String
+  ) -> Result<Unit, SourceError>
+  fn current_path(self) -> String
   fn matches_name(self, actual: String, expected: String) -> bool
   fn enter_field(~self, name: String) -> void
   fn enter_index(~self, index: i32) -> void
@@ -514,8 +520,14 @@ fn data_writer_success() -> Result<Unit, DataValueWriteError>
 fn data_writer_failure<T>(message: String) -> Result<T, DataValueWriteError>
   Err<DataValueWriteError> { error: DataValueWriteError { message } }
 
+pub obj DataValueSourceFailure {}
+pub obj DataValueCustomFailure { api cause: CustomDtoError }
+pub type DataValueReadErrorKind = DataValueSourceFailure | DataValueCustomFailure
+
 /// Pull-stream error reported by `DataValueReader`.
 pub obj DataValueReadError {
+  api kind: DataValueReadErrorKind,
+  api path: String,
   api message: String
 }
 
@@ -523,7 +535,9 @@ pub obj DataValueReadError {
 pub obj DataValueReader {
   events: Array<DataValueWriteEvent>,
   index: i32,
-  failed: bool
+  failed: bool,
+  path: String,
+  parents: Array<String>
 }
 
 impl DataValueReader
@@ -531,7 +545,13 @@ impl DataValueReader
   pub fn init(value: DataValue) -> DataValueReader
     let ~events = Array<DataValueWriteEvent>::init()
     append_data_value_events(events, value)
-    DataValueReader { events, index: 0, failed: false }
+    DataValueReader {
+      events,
+      index: 0,
+      failed: false,
+      path: "$".to_string(),
+      parents: Array<String>::init()
+    }
 
   /// Returns true after the root value and all containers have been consumed.
   api fn is_complete(self) -> bool
@@ -539,23 +559,53 @@ impl DataValueReader
 
   fn fail<T>(~self, message: String) -> Result<T, DataValueReadError>
     self.failed = true
-    data_reader_failure<T>(message)
+    Err<DataValueReadError> {
+      error: DataValueReadError {
+        kind: DataValueSourceFailure {},
+        path: self.path,
+        message
+      }
+    }
 
 impl DataReader<DataValueReadError> for DataValueReader
   fn reject(~self, message: String) -> Result<Unit, DataValueReadError>
     self.fail<Unit>(message)
 
+  fn reject_custom(
+    ~self,
+    code: String,
+    message: String
+  ) -> Result<Unit, DataValueReadError>
+    self.failed = true
+    Err<DataValueReadError> {
+      error: DataValueReadError {
+        kind: DataValueCustomFailure {
+          cause: CustomDtoError { code, message }
+        },
+        path: self.path,
+        message
+      }
+    }
+
+  fn current_path(self) -> String
+    self.path
+
   fn matches_name(self, actual: String, expected: String) -> bool
     actual == expected
 
   fn enter_field(~self, name: String) -> void
-    void
+    self.parents.push(self.path)
+    self.path = self.path.concat(".").concat(name)
 
   fn enter_index(~self, index: i32) -> void
-    void
+    self.parents.push(self.path)
+    self.path = self.path.concat("[").concat(cast::to_string(index)).concat("]")
 
   fn leave(~self) -> void
-    void
+    if self.parents.is_empty() == false:
+      let index = self.parents.len() - 1
+      self.path = self.parents.at(index)
+      self.parents.pop()
 
   fn kind(self) -> Result<DataKind, DataValueReadError>
     data_event_kind(self.events, self.index)
@@ -921,7 +971,13 @@ fn skip_data_container(
       data_reader_failure<i32>("data reader container is not closed")
 
 fn data_reader_failure<T>(message: String) -> Result<T, DataValueReadError>
-  Err<DataValueReadError> { error: DataValueReadError { message } }
+  Err<DataValueReadError> {
+    error: DataValueReadError {
+      kind: DataValueSourceFailure {},
+      path: "$".to_string(),
+      message
+    }
+  }
 
 /// A required field was absent.
 pub obj MissingField {}
@@ -941,6 +997,9 @@ pub obj InvalidVariant {}
 /// A shape reference could not be resolved.
 pub obj InvalidShapeReference {}
 
+/// A custom DTO rejected its otherwise valid representation.
+pub obj CustomDtoFailure { api cause: CustomDtoError }
+
 /// Stable categories of structural decode failures.
 pub type DecodeErrorKind = MissingField
   | UnknownField
@@ -948,6 +1007,7 @@ pub type DecodeErrorKind = MissingField
   | DuplicateField
   | InvalidVariant
   | InvalidShapeReference
+  | CustomDtoFailure
 
 /// Precise, recoverable structural decode failure.
 pub obj DecodeError {
@@ -997,7 +1057,26 @@ pub fn decode<T>(value: DataValue, { options: DecodeOptions }): () -> Result<T, 
   let shape = shape_of<T>()
   match(validate(value, shape.root, shape, options, "$".to_string()))
     Ok<Unit>:
-      Ok<T> { value: data_to_dto_value<T>(value) }
+      let ~reader = DataValueReader::init(value)
+      match(read<T, DataValueReadError, DataValueReader>(
+        reader,
+        rejects_unknown_fields(options)
+      ))
+        Ok<T> { value }:
+          Ok<T> { value }
+        Err<DataValueReadError> { error }:
+          error.kind.match(kind)
+            DataValueCustomFailure:
+              Err<DecodeError> {
+                error: DecodeError {
+                  kind: CustomDtoFailure { cause: kind.cause },
+                  path: error.path,
+                  expected: "valid custom DTO".to_string(),
+                  actual: error.message
+                }
+              }
+            DataValueSourceFailure:
+              mismatch<T>(error.path, "valid DTO".to_string(), error.message)
     Err<DecodeError> { error }:
       Err<DecodeError> { error }
 
@@ -1275,10 +1354,6 @@ fn data_kind_name(value: DataValue) -> String
 @intrinsic(name: "__dto_value_to_data")
 fn dto_value_to_data<T>(value: T): () -> DataValue
   __dto_value_to_data(value)
-
-@intrinsic(name: "__data_to_dto_value")
-fn data_to_dto_value<T>(value: DataValue): () -> T
-  __data_to_dto_value<T>(value)
 
 @compiler_contract(id: "voyd.std.data.cycle-error")
 fn data_cycle_error() -> DataValue
