@@ -580,7 +580,10 @@ impl DataReader<MsgPackError> for MsgPackReader
       Err<MsgPackError> { error }:
         Err<MsgPackError> { error }
       Ok<Unit>:
-        self.decoder.skip_any()
+        self.decoder.skip_any(
+          depth: self.container_kinds.len(),
+          limits: self.limits
+        )
         if self.decoder.ok:
           return msgpack_reader_success()
         self.fail<Unit>("msgpack reader could not skip the value")
@@ -589,11 +592,10 @@ impl DataReader<MsgPackError> for MsgPackReader
     self.end_container(kind: 1)
 
   fn begin_variant(~self) -> Result<String, MsgPackError>
-    match(self.consume_value())
+    match(self.begin_container(kind: 2))
       Err<MsgPackError> { error }:
         Err<MsgPackError> { error }
-      Ok<Unit>:
-        let length = self.decoder.read_map_length()
+      Ok<i32> { value: length }:
         if length <= 0:
           return self.fail<String>("msgpack reader expected a variant map")
         match(self.decoder.read_string_value())
@@ -606,8 +608,8 @@ impl DataReader<MsgPackError> for MsgPackReader
               None:
                 self.fail<String>("msgpack reader expected a variant name")
               Some<String> { value: name }:
-                self.container_kinds.push(2)
-                self.remaining_values.push(length - 1)
+                let index = self.remaining_values.len() - 1
+                self.remaining_values.replace(index, with: length - 1)
                 Ok<String> { value: name }
 
   fn end_variant(~self) -> Result<Unit, MsgPackError>
@@ -1621,7 +1623,10 @@ impl Decoder
     if self.can_read(count):
       self.pos = self.pos + count
 
-  fn skip_any(~self) -> void
+  fn skip_any(
+    ~self,
+    { depth: i32, limits: DecodeLimits }
+  ) -> void
     let prefix = self.read_u8()
     if self.ok == false:
       return void
@@ -1667,9 +1672,13 @@ impl Decoder
     if values < 0:
       self.ok = false
       return void
+    let collection_length = if self.is_map_prefix(prefix) then: values / 2 else: values
+    if collection_length > limits.max_collection_length or depth >= limits.max_depth:
+      self.ok = false
+      return void
     var index = 0
     while index < values:
-      self.skip_any()
+      self.skip_any(depth: depth + 1, limits: limits)
       index = index + 1
 
   fn can_read(~self, count: i32) -> bool

@@ -4,7 +4,7 @@ use std::optional::types::all
 use std::number::cast::to_i64
 use std::string::{ String, new_string }
 use std::test::assertions::all
-use std::data::{ DecodeLimits, EncodeLimits, RejectUnknownFields }
+use std::data::{ DecodeLimits, EncodeLimits, IgnoreUnknownFields, RejectUnknownFields }
 
 obj DecodeProfile {
   age: i32,
@@ -93,6 +93,23 @@ test "typed JSON codecs enforce explicit resource limits":
   match(decode<Array<i32>>("[1,2]", options: options))
     Ok<Array<i32>>:
       assert(false, eq: true)
+    Err<JsonDecodeError>:
+      void
+
+  let skip_options = JsonDecodeOptions {
+    unknown_fields: IgnoreUnknownFields {},
+    limits: DecodeLimits {
+      max_depth: 1,
+      max_bytes: 1024,
+      max_collection_length: 8
+    }
+  }
+  match(decode<VersionedName>(
+    "{\"version\":1,\"name\":\"orbit\",\"extra\":[[0]]}",
+    options: skip_options
+  ))
+    Ok<VersionedName>:
+      Test::fail()
     Err<JsonDecodeError>:
       void
 

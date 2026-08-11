@@ -114,6 +114,43 @@ test "typed msgpack codecs enforce explicit resource limits":
     Err<MsgPackError>:
       void
 
+  let ~unknown = ByteBuffer::with_capacity(10)
+  unknown.push(129)
+  unknown.push(165)
+  unknown.push(101)
+  unknown.push(120)
+  unknown.push(116)
+  unknown.push(114)
+  unknown.push(97)
+  unknown.push(145)
+  unknown.push(145)
+  unknown.push(0)
+  let ~reader = MsgPackReader::init(
+    unknown.as_bytes(),
+    limits: DecodeLimits {
+      max_depth: 1,
+      max_bytes: 1024,
+      max_collection_length: 8
+    }
+  )
+  match(reader.begin_record())
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<Unit>:
+      match(reader.next_field())
+        Err<MsgPackError>:
+          Test::fail()
+        Ok<Option<String>> { value }:
+          value.match(field)
+            None:
+              Test::fail()
+            Some<String>:
+              match(reader.skip_value())
+                Ok<Unit>:
+                  Test::fail()
+                Err<MsgPackError>:
+                  void
+
   let ~encoded = ByteBuffer::with_capacity(3)
   encoded.push(146)
   encoded.push(1)
