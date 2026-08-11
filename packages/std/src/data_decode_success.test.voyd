@@ -55,7 +55,10 @@ impl CustomDto<PositiveId, PositiveIdDto> for PositiveId
       Ok<PositiveId> { value: PositiveId { value: value.value } }
     else:
       Err<CustomDtoError> {
-        error: CustomDtoError { message: "positive id must be greater than zero" }
+        error: CustomDtoError {
+          code: "positive_id.non_positive",
+          message: "positive id must be greater than zero"
+        }
       }
 
 test "decode converts valid nested values and permits missing optional fields":

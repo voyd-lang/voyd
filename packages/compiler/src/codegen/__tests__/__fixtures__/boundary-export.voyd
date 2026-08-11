@@ -26,7 +26,10 @@ impl CustomDto<UserId, UserIdDto> for UserId
       Ok<UserId> { value: UserId { value: value.id } }
     else:
       Err<CustomDtoError> {
-        error: CustomDtoError { message: "user id must be positive" }
+        error: CustomDtoError {
+          code: "user_id.non_positive",
+          message: "user id must be positive"
+        }
       }
 
 pub fn primitive() -> i32

@@ -91,6 +91,9 @@ pub type DataValue = DataNull
 
 /// Validation failure reported by a custom DTO representation.
 pub obj CustomDtoError {
+  /// Stable application/provider-independent failure code.
+  api code: String,
+  /// Human-readable detail for diagnostics.
   api message: String
 }
 

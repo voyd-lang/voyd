@@ -24,6 +24,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   values.
 - `CustomDto<T>` can define a type's boundary representation and conversion
   functions. The representation participates in the canonical DTO plan.
+  `CustomDtoError` now requires a stable `code` in addition to its diagnostic
+  message.
 - The `@boundary` and `@serializer` annotations have been removed.
 - Standard host effects for logging, randomness, environment variables,
   input, output, time, task failures, filesystems, and HTTP now use typed request
