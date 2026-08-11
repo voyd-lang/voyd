@@ -1087,6 +1087,9 @@ pub fn map_html<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler: fn(ChildMs
     handler_id: retain_typed_html_message_mapper_id(handler)
   )
 
+pub fn map_html<ChildMsg, ParentMsg>({ html: Html<void>, handler: fn(ChildMsg) -> ParentMsg }) -> Html<ParentMsg>
+  Html<ParentMsg> { plan: html.plan }
+
 fn map_html_with_handler_id<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler_id: i32 }) -> Html<ParentMsg>
   html_plan<ParentMsg>(() -> HtmlWire =>
     html_wire(HtmlWireNode::HtmlMapped { child: lower_html_node(html), handler_ref: handler_id })
