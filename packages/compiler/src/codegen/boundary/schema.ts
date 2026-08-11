@@ -64,4 +64,9 @@ export const formatBoundaryType = ({
   typeId: TypeId;
   ctx: CodegenContext;
   active?: Set<TypeId>;
-}): string => formatAutoDtoType(typeId, ctx.program, active);
+}): string => {
+  const formatted = formatAutoDtoType(typeId, ctx.program, active);
+  return formatted.length <= 512
+    ? formatted
+    : `${formatted.slice(0, 480)}…<type#${typeId}>`;
+};

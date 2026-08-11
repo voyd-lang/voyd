@@ -12,7 +12,7 @@ use std::task::self as tasks
 pub self::canvas
 use self::wire::{ WireMap }
 use self::wire::self as wire
-use self::command::{ command_plan, lower_command, retain_typed_message_mapper }
+use self::command::{ CommandWire, command_plan, lower_command, retain_typed_message_mapper }
 pub use self::command::{ Cmd, Ref }
 
 /// Opaque virtual DOM node plan. The message parameter records the event
@@ -92,13 +92,13 @@ impl<Msg> CustomDto<Sub<Msg>, DataValue> for Sub<Msg>
       }
     }
 
-impl<Msg> CustomDto<Cmd<Msg>, DataValue> for Cmd<Msg>
-  fn write(value: Cmd<Msg>) -> DataValue
-    wire::to_data_value(lower_command(value))
+impl<Msg> CustomDto<Cmd<Msg>, CommandWire> for Cmd<Msg>
+  fn write(value: Cmd<Msg>) -> CommandWire
+    lower_command(value)
 
-  fn read(value: DataValue) -> Result<Cmd<Msg>, CustomDtoError>
+  fn read(value: CommandWire) -> Result<Cmd<Msg>, CustomDtoError>
     Ok<Cmd<Msg>> {
-      value: command_plan<Msg>(() -> DataValue => wire::from_data_value(value))
+      value: command_plan<Msg>(() -> CommandWire => value)
     }
 
 impl<Msg> CustomDto<Html<Msg>, DataValue> for Html<Msg>
@@ -1310,7 +1310,10 @@ pub fn program<Model, Msg>({
     if frame is Some:
       out.set("frame", lower_html_node(frame.value))
     if commands is Some:
-      out.set("commands", lower_command(commands.value))
+      out.set(
+        "commands",
+        wire::from_data_value(data::encode(lower_command(commands.value)))
+      )
     if subscriptions is Some:
       out.set("subscriptions", lower_sub(subscriptions.value))
     wire::make_map(out)

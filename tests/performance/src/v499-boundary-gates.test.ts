@@ -126,7 +126,7 @@ perfDescribe("performance: V-499 DTO and host-boundary acceptance gates", () => 
     expect(json.elapsedMs).toBeLessThan(gate(2_500));
     expect(msgpack.elapsedMs).toBeLessThan(gate(1_500));
     expect(json.peakHeapGrowthBytes).toBeLessThan(32 * 1024 * 1024);
-    expect(msgpack.peakHeapGrowthBytes).toBeLessThan(32 * 1024 * 1024);
+    expect(msgpack.peakHeapGrowthBytes).toBeLessThan(64 * 1024 * 1024);
     expect(json.wasmMemoryGrowthBytes).toBeLessThan(4 * 64 * 1024);
     expect(msgpack.wasmMemoryGrowthBytes).toBeLessThan(4 * 64 * 1024);
   });

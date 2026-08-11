@@ -1,0 +1,30 @@
+//! Private immutable DTO payloads used at erased VX leaves.
+
+use std::bytes::{ ByteBuffer, Bytes }
+use std::error::panic
+use std::msgpack::self as msgpack
+use std::result::types::all
+use std::string::type::String
+
+pub obj EncodedPayload {
+  bytes: Bytes,
+  fingerprint: String
+}
+
+@intrinsic(name: "__dto_fingerprint")
+fn dto_fingerprint<T>(value: T): () -> String
+  __dto_fingerprint(value)
+
+pub fn encode_payload<T>(value: T): () -> EncodedPayload
+  match(msgpack::encode(value))
+    Ok<Bytes> { value: bytes }:
+      EncodedPayload {
+        bytes,
+        fingerprint: dto_fingerprint(value)
+      }
+    Err { error }:
+      panic(error.message.as_slice())
+      EncodedPayload {
+        bytes: ByteBuffer::init().as_bytes(),
+        fingerprint: "".to_string()
+      }

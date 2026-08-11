@@ -9,7 +9,7 @@ use std::result::types::all
 use std::string::type::String
 use super::wire::{ WireMap }
 use super::wire::self as wire
-use super::command::{ Cmd, command_plan, lower_command, retain_typed_message_mapper }
+use super::command::{ Cmd, legacy_command_plan, mark_owned_handler, retain_typed_message_mapper }
 
 /// A logical point in CSS-pixel canvas coordinates.
 pub obj Point {
@@ -226,7 +226,7 @@ pub type TextMetrics = {
 /// Paints a typed canvas frame through the browser VX runtime host.
 pub fn render<Msg>(value: Frame) -> Cmd<Msg>
   let dto = value.boundary_dto()
-  command_plan<Msg>(() -> DataValue =>
+  legacy_command_plan<Msg>(() -> DataValue =>
     let ~out = command_map("canvas_render")
     out.set("value", wire::from_data_value(data::encode<FrameDto>(dto)))
     wire::make_map(out)
@@ -238,7 +238,7 @@ fn measure_text_with_handler_id<Msg>({
   font: String = "12px sans-serif",
   handler_id: i32
 }) -> Cmd<Msg>
-  command_plan<Msg>(() -> DataValue =>
+  legacy_command_plan<Msg>(() -> DataValue =>
     let ~out = command_map("canvas_measure_text")
     out.set("selector", wire::make_string(selector))
     out.set("value", wire::make_string(value))
@@ -670,16 +670,3 @@ fn command_map(kind: String): () -> WireMap
   out.set("type", "cmd")
   out.set("kind", kind)
   out
-
-fn mark_owned_handler<Msg>(cmd: Cmd<Msg>, handler_id: i32) -> Cmd<Msg>
-  command_plan<Msg>(() -> DataValue =>
-    match(wire::unpack_map(lower_command(cmd)))
-      Ok<WireMap> { value }:
-        let ~owned = Array<DataValue>::with_capacity(1)
-        owned.push(wire::make_i32(handler_id))
-        wire::make_map(
-          value.setting("__vxOwnedMapHandlerIds", wire::make_array(owned))
-        )
-      Err:
-        lower_command(cmd)
-  )

@@ -8569,6 +8569,15 @@ const typeIntrinsicCall = (
         detail: "writer and DTO value",
       });
       return expectedReturnType ?? ctx.primitives.unknown;
+    case "__dto_fingerprint":
+      assertIntrinsicArgCount({
+        name: "__dto_fingerprint",
+        args,
+        expected: 1,
+        detail: "DTO value",
+      });
+      assertNoIntrinsicTypeArgs("__dto_fingerprint", typeArguments);
+      return expectedReturnType ?? ctx.primitives.unknown;
     case "__dto_read":
       assertIntrinsicArgCount({
         name: "__dto_read",

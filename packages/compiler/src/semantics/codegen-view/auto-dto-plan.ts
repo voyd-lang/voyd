@@ -613,7 +613,8 @@ const portableIdentity = (
       : undefined;
   if (typeof owner === "number") {
     return {
-      name: program.symbols.getName(owner) ?? formatType(typeId, program),
+      name:
+        program.symbols.getName(owner) ?? compactPortableName(typeId, program),
       documentation: program.symbols.getDocumentation(owner),
     };
   }
@@ -628,7 +629,15 @@ const portableIdentity = (
         typeof entry.name === "string",
     )
     .sort((left, right) => left.name.localeCompare(right.name));
-  return aliases[0] ?? { name: formatType(typeId, program) };
+  return aliases[0] ?? { name: compactPortableName(typeId, program) };
+};
+
+const compactPortableName = (
+  typeId: TypeId,
+  program: ProgramCodegenView,
+): string => {
+  const formatted = formatType(typeId, program);
+  return formatted.length <= 512 ? formatted : `anonymous-dto#${typeId}`;
 };
 
 const portableName = (typeId: TypeId, program: ProgramCodegenView): string =>

@@ -43,6 +43,7 @@ const DATA_DTO_INTRINSICS = new Set([
   "__dto_value_to_data",
   "__dto_write",
   "__dto_read",
+  "__dto_fingerprint",
   "__data_to_dto_value",
 ]);
 

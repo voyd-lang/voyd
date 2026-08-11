@@ -1591,6 +1591,28 @@ export const compileIntrinsicCall = ({
         rethrowBoundarySchemaDiagnostic({ error, call });
       }
     }
+    case "__dto_fingerprint": {
+      assertArgCount(name, args, 1);
+      const valueTypeId = getRequiredExprType(
+        call.args[0]!.expr,
+        ctx,
+        instanceId,
+      );
+      try {
+        const fingerprint = withDtoFingerprint(
+          deriveBoundarySchema({
+            typeId: valueTypeId,
+            ctx,
+            label: "DTO fingerprint",
+            options: { tagStandaloneVariants: true },
+          }),
+        ).fingerprint;
+        if (!fingerprint) throw new Error("DTO fingerprint is missing");
+        return emitStringLiteral(fingerprint, ctx);
+      } catch (error) {
+        rethrowBoundarySchemaDiagnostic({ error, call });
+      }
+    }
     case "__dto_write": {
       assertArgCount(name, args, 2);
       const [intrinsicValueTypeId, , intrinsicWriterTypeId] =

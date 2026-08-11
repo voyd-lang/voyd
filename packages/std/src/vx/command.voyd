@@ -2,8 +2,7 @@
 
 use std::array::Array
 use std::data::{ DataValue }
-use std::data::self as data
-use std::fixed_array::fns::all
+use std::enums::{ enum }
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
@@ -11,22 +10,35 @@ use std::task::Task
 use std::task::self as tasks
 use super::wire::{ WireMap }
 use super::wire::self as wire
+use super::payload::{ EncodedPayload, encode_payload }
 
-type CommandLower = fn() : () -> DataValue
+pub enum CommandWire
+  CommandNone
+  CommandMessage { payload: EncodedPayload }
+  CommandBatch { children: Array<CommandWire> }
+  CommandMap { child: CommandWire, handler_id: i32 }
+  CommandRuntime { kind: String, value?: DataValue }
+  CommandTask { task_ref: i32, handler_ref: i32 }
+  CommandDelay { millis: i64, payload: EncodedPayload }
+  CommandOwned { child: CommandWire, handler_ref: i32 }
+  CommandLegacy { value: DataValue }
 
-pub obj Cmd<Msg> { thunk: FixedArray<CommandLower> }
+type CommandLower = fn() : () -> CommandWire
+type RuntimeValueLower = fn() : () -> DataValue
+
+pub obj Cmd<Msg> { thunk: Array<CommandLower> }
 
 pub fn command_plan<Msg>(run: CommandLower) -> Cmd<Msg>
-  let thunk = new_fixed_array<CommandLower>(1)
-  thunk.set<CommandLower>(0, run)
+  let ~thunk = Array<CommandLower>::with_capacity(1)
+  thunk.push(run)
   Cmd<Msg> { thunk: thunk }
 
-pub fn lower_command<Msg>(value: Cmd<Msg>) -> DataValue
-  match(value.thunk.get<CommandLower>(0))
-    Some<CommandLower> { value: run }:
-      run()
-    None:
-      wire::make_null()
+pub fn legacy_command_plan<Msg>(run: fn() : () -> DataValue) -> Cmd<Msg>
+  command_plan<Msg>(() -> CommandWire => CommandWire::CommandLegacy { value: run() })
+
+pub fn lower_command<Msg>(value: Cmd<Msg>) -> CommandWire
+  let run = value.thunk.at(0)
+  run()
 
 pub obj Ref<T> {
   api id: String
@@ -43,36 +55,29 @@ pub fn retain_typed_message_mapper<From, To>(handler: fn(From) -> To): () -> i32
 impl<Msg> Cmd<Msg>
   /// Creates an empty command.
   api fn none() -> Cmd<Msg>
-    command_plan<Msg>(() -> DataValue => command_payload("none"))
+    command_plan<Msg>(() -> CommandWire => CommandWire::CommandNone {})
 
   /// Creates a command that dispatches a typed application message.
   api fn message(value: Msg) -> Cmd<Msg>
-    command_plan<Msg>(() -> DataValue =>
-      let ~out = command_map("message")
-      out.set("value", wire::from_data_value(data::encode(value)))
-      wire::make_map(out)
+    command_plan<Msg>(() -> CommandWire =>
+      CommandWire::CommandMessage { payload: encode_payload(value) }
     )
 
   /// Creates a command batch from existing command values.
   api fn batch(values: Array<Cmd<Msg>>) -> Cmd<Msg>
-    command_plan<Msg>(() -> DataValue =>
-      let ~children = Array<DataValue>::with_capacity(values.len())
+    command_plan<Msg>(() -> CommandWire =>
+      let ~children = Array<CommandWire>::with_capacity(values.len())
       var index = 0
       while index < values.len():
         children.push(lower_command(values.at(index)))
         index = index + 1
-      let ~out = command_map("batch")
-      out.set("children", wire::make_array(children))
-      wire::make_map(out)
+      CommandWire::CommandBatch { children }
     )
 
   /// Lifts a child command through a retained message mapper.
   fn map_with_handler_id<NextMsg>(self, handler_id: i32) -> Cmd<NextMsg>
-    command_plan<NextMsg>(() -> DataValue =>
-      let ~out = command_map("map")
-      out.set("child", lower_command(self))
-      out.set("handlerId", wire::make_i32(handler_id))
-      wire::make_map(out)
+    command_plan<NextMsg>(() -> CommandWire =>
+      CommandWire::CommandMap { child: lower_command(self), handler_id }
     )
 
   /// Lifts a child command through a retained typed message mapper.
@@ -81,19 +86,16 @@ impl<Msg> Cmd<Msg>
     mark_owned_handler(self.map_with_handler_id<NextMsg>(handler_id), handler_id)
 
   /// Creates a host/runtime command envelope for a registered VX command executor.
-  fn runtime({ kind: String, value?: CommandLower }) -> Cmd<Msg>
-    command_plan<Msg>(() -> DataValue =>
-      let out = command_map(kind)
-      let complete =
-        match(value)
-          Some<CommandLower> { value: lower_value }:
-            out.setting("value", lower_value())
-          None:
-            out
-      wire::make_map(complete)
+  fn runtime({ kind: String, value?: RuntimeValueLower }) -> Cmd<Msg>
+    command_plan<Msg>(() -> CommandWire =>
+      match(value)
+        Some<RuntimeValueLower> { value: lower_value }:
+          CommandWire::CommandRuntime { kind, value: lower_value() }
+        None:
+          CommandWire::CommandRuntime { kind }
     )
 
-  fn runtime({ kind: StringSlice, value?: CommandLower }) -> Cmd<Msg>
+  fn runtime({ kind: StringSlice, value?: RuntimeValueLower }) -> Cmd<Msg>
     Cmd<Msg>::runtime(kind: kind.to_string(), value: value)
 
   /// Copies text to the browser clipboard through the VX runtime host.
@@ -210,11 +212,8 @@ impl<Msg> Cmd<Msg>
 
   /// Creates a task command envelope for a retained result mapper.
   fn perform_with_ids({ task_id: i32, handler_id: i32 }) -> Cmd<Msg>
-    command_plan<Msg>(() -> DataValue =>
-      let ~out = command_map("task")
-      out.set("taskId", wire::make_i32(task_id))
-      out.set("handlerId", wire::make_i32(handler_id))
-      wire::make_map(out)
+    command_plan<Msg>(() -> CommandWire =>
+      CommandWire::CommandTask { task_ref: task_id, handler_ref: handler_id }
     )
 
   /// Creates a task command envelope from a Voyd task and retained result mapper.
@@ -233,11 +232,8 @@ impl<Msg> Cmd<Msg>
 
   /// Creates a timer command that dispatches a typed message after the delay.
   api fn delay({ millis: i64, value: Msg }) -> Cmd<Msg>
-    command_plan<Msg>(() -> DataValue =>
-      let ~out = command_map("delay")
-      out.set("ms", wire::make_i64(millis))
-      out.set("value", wire::from_data_value(data::encode(value)))
-      wire::make_map(out)
+    command_plan<Msg>(() -> CommandWire =>
+      CommandWire::CommandDelay { millis, payload: encode_payload(value) }
     )
 
   /// Creates a DOM focus command for a constrained VX ref.
@@ -271,25 +267,10 @@ fn open_url_value({ url: String, target: String }) -> DataValue
   out.set("target", target)
   wire::make_map(out)
 
-fn command_payload(kind: String) -> DataValue
-  wire::make_map(command_map(kind))
-
-fn command_map(kind: String) -> WireMap
-  let ~out = WireMap::init()
-  out.set("type", "cmd")
-  out.set("kind", kind)
-  out
-
-fn mark_owned_handler<Msg>(cmd: Cmd<Msg>, handler_id: i32) -> Cmd<Msg>
-  command_plan<Msg>(() -> DataValue =>
-    match(wire::unpack_map(lower_command(cmd)))
-      Ok<WireMap> { value }:
-        wire::make_map(with_owned_handler(value, handler_id))
-      Err:
-        lower_command(cmd)
+pub fn mark_owned_handler<Msg>(cmd: Cmd<Msg>, handler_id: i32) -> Cmd<Msg>
+  command_plan<Msg>(() -> CommandWire =>
+    CommandWire::CommandOwned {
+      child: lower_command(cmd),
+      handler_ref: handler_id
+    }
   )
-
-fn with_owned_handler(out: WireMap, handler_id: i32) -> WireMap
-  let ~owned = Array<DataValue>::with_capacity(1)
-  owned.push(wire::make_i32(handler_id))
-  out.setting("__vxOwnedMapHandlerIds", wire::make_array(owned))

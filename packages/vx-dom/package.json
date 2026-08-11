@@ -55,5 +55,8 @@
   },
   "devDependencies": {
     "happy-dom": "^20.10.1"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^3.1.2"
   }
 }

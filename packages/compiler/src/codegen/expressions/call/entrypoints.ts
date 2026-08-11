@@ -491,7 +491,9 @@ export const compileMethodCallExpr = (
     typeInstanceId,
   });
   if (typeof targetFunctionId !== "number") {
-    throw new Error("codegen missing method call target");
+    throw new Error(
+      `codegen missing method call target at ${expr.span.file}:${expr.span.start}`,
+    );
   }
 
   const targetRef = ctx.program.symbols.refOf(

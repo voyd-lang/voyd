@@ -1,3 +1,5 @@
+import { decode as decodeMsgPack } from "@msgpack/msgpack";
+
 const taskObserverProperty = Symbol.for("voyd.taskObserver");
 
 export function decodeVxPayload(value: unknown): unknown {
@@ -50,13 +52,82 @@ const decodeDataValue = (value: unknown): unknown => {
     case "DataObject":
       return decodeDataFields(value.fields);
     case "DataVariant":
-      return {
+      return decodeDataValue({
         tag: value.name,
         ...decodeDataFields(value.fields),
+      });
+    case "CommandNone":
+      return { type: "cmd", kind: "none" };
+    case "CommandMessage":
+      return {
+        type: "cmd",
+        kind: "message",
+        value: decodeEncodedPayload(value.payload),
       };
+    case "CommandBatch":
+      return {
+        type: "cmd",
+        kind: "batch",
+        children: Array.isArray(value.children)
+          ? value.children.map(decodeDataValue)
+          : [],
+      };
+    case "CommandMap":
+      return {
+        type: "cmd",
+        kind: "map",
+        child: decodeDataValue(value.child),
+        handlerId: value.handler_id,
+      };
+    case "CommandRuntime":
+      return {
+        type: "cmd",
+        kind: value.kind,
+        ...(Object.hasOwn(value, "value")
+          ? { value: decodeDataValue(value.value) }
+          : {}),
+      };
+    case "CommandTask":
+      return {
+        type: "cmd",
+        kind: "task",
+        taskId: value.task_ref,
+        handlerId: value.handler_ref,
+      };
+    case "CommandDelay":
+      return {
+        type: "cmd",
+        kind: "delay",
+        ms:
+          typeof value.millis === "bigint"
+            ? Number(value.millis)
+            : value.millis,
+        value: decodeEncodedPayload(value.payload),
+      };
+    case "CommandOwned": {
+      const child = decodeDataValue(value.child);
+      return isRecord(child)
+        ? {
+            ...child,
+            __vxOwnedMapHandlerIds: [value.handler_ref],
+          }
+        : child;
+    }
+    case "CommandLegacy":
+      return decodeDataValue(value.value);
     default:
       return value;
   }
+};
+
+const decodeEncodedPayload = (value: unknown): unknown => {
+  if (!isRecord(value) || !(value.bytes instanceof Uint8Array)) {
+    throw new Error("vx-dom: encoded payload is missing immutable bytes");
+  }
+  if (typeof value.fingerprint !== "string" || value.fingerprint.length !== 64) {
+    throw new Error("vx-dom: encoded payload is missing its DTO fingerprint");
+  }
+  return decodeMsgPack(value.bytes, { useBigInt64: true });
 };
 
 const decodeDataFields = (value: unknown): Record<string, unknown> => {
