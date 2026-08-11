@@ -104,7 +104,7 @@ import {
   isCustomDtoFunctionReachable,
   markCustomDtoFunctionReachable as markCustomDtoBoundaryFunctionReachable,
 } from "./boundary/custom-dto-reachability.js";
-import { enqueueMsgPackProviderReachability } from "./host-transport/providers/msgpack.js";
+import { enqueueSelectedHostTransportProviderReachability } from "./host-transport/selected-provider.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -700,7 +700,10 @@ const collectReachableFunctionSymbols = ({
     });
   });
   if (resolveBoundaryExportOptions(entryCtx).mode !== "off") {
-    enqueueMsgPackProviderReachability({ ctx: entryCtx, enqueue });
+    enqueueSelectedHostTransportProviderReachability({
+      ctx: entryCtx,
+      enqueue,
+    });
   }
   if (queue.length === 0) {
     entryCtx.module.hir.items.forEach((item) => {

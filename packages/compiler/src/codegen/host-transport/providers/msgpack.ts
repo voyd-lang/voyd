@@ -127,10 +127,10 @@ const requireTraitImplementation = ({
 
 const markReachable = ({
   ctx,
-  meta,
+  symbol,
 }: {
   ctx: CodegenContext;
-  meta: FunctionMetadata;
+  symbol: ProgramSymbolId;
 }): void => {
   const state = ctx.programHelpers.getHelperState<ReachabilityState>(
     REACHABILITY_STATE,
@@ -138,12 +138,7 @@ const markReachable = ({
   );
   const symbols = state.symbols ?? new Set<ProgramSymbolId>();
   state.symbols = symbols;
-  symbols.add(
-    ctx.program.symbols.canonicalIdOf(
-      meta.moduleId,
-      meta.symbol,
-    ) as ProgramSymbolId,
-  );
+  symbols.add(symbol);
 };
 
 const requireContract = (
@@ -166,10 +161,10 @@ const markTraitImplementationReachable = ({
       const ref = ctx.program.symbols.refOf(implMethod);
       markReachable({
         ctx,
-        meta: {
-          moduleId: ref.moduleId,
-          symbol: ref.symbol,
-        } as FunctionMetadata,
+        symbol: ctx.program.symbols.canonicalIdOf(
+          ref.moduleId,
+          ref.symbol,
+        ) as ProgramSymbolId,
       });
     },
   );
@@ -199,7 +194,15 @@ export const ensureMsgPackProviderFunctions = (
         MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.finishWriter,
       ),
     };
-    Object.values(functions).forEach((meta) => markReachable({ ctx, meta }));
+    Object.values(functions).forEach((meta) =>
+      markReachable({
+        ctx,
+        symbol: ctx.program.symbols.canonicalIdOf(
+          meta.moduleId,
+          meta.symbol,
+        ) as ProgramSymbolId,
+      }),
+    );
     markTraitImplementationReachable({
       ctx,
       typeId: readerTypeId,

@@ -1,5 +1,7 @@
 import type { CodegenContext } from "../context.js";
+import type { ProgramSymbolId } from "../../semantics/ids.js";
 import {
+  enqueueMsgPackProviderReachability,
   ensureMsgPackProviderFunctions,
   type MsgPackProviderFunctions,
 } from "../host-transport/providers/msgpack.js";
@@ -24,3 +26,13 @@ export const ensureSelectedHostTransportProvider = (
   identity: SELECTED_HOST_TRANSPORT_IDENTITY,
   ...ensureMsgPackProviderFunctions(ctx),
 });
+
+export const enqueueSelectedHostTransportProviderReachability = ({
+  ctx,
+  enqueue,
+}: {
+  ctx: CodegenContext;
+  enqueue: (symbol: ProgramSymbolId) => void;
+}): void => {
+  enqueueMsgPackProviderReachability({ ctx, enqueue });
+};

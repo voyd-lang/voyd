@@ -100,8 +100,9 @@ describe("generic host transport architecture", () => {
       resolve(CODEGEN_ROOT, "exports"),
       resolve(CODEGEN_ROOT, "external"),
     ];
+    const genericFiles = [resolve(CODEGEN_ROOT, "functions.ts")];
 
-    genericRoots.flatMap(sourceFilesUnder).forEach((path) => {
+    [...genericRoots.flatMap(sourceFilesUnder), ...genericFiles].forEach((path) => {
       expect(readFileSync(path, "utf8"), path).not.toMatch(/msgpack/iu);
     });
   });
