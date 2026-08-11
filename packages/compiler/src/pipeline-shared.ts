@@ -36,7 +36,7 @@ import {
   type CompilerDependencySnapshotCache,
 } from "./modules/dependency-snapshot-cache.js";
 import { formatTestExportName } from "./tests/exports.js";
-import type { SourceSpan, SymbolId, TypeId } from "./semantics/ids.js";
+import type { SourceSpan, SymbolId } from "./semantics/ids.js";
 import { getSymbolTable } from "./semantics/_internal/symbol-table.js";
 import { formatEffectRow } from "./semantics/effects/format.js";
 import {
@@ -486,41 +486,24 @@ const prepareProgramForCodegen = ({
   }
 
   const linkStartedAt = startCompilerPerfPhase();
-  let monomorphized: ReturnType<typeof monomorphizeProgram> = {
-    instances: [],
-    moduleTyping: new Map(),
-  };
-  if (linkSemantics !== false) {
-    const seedProgram = buildProgramCodegenView(modules, {
-      instances: [],
-      moduleTyping: new Map(),
-    });
-    const seedBoundaryInstances = collectBoundaryDtoInstances(
-      seedProgram,
-      targetModuleId,
-    );
-    monomorphized = monomorphizeProgram({
-      modules,
-      semantics,
-      rootInstances: seedBoundaryInstances,
-    });
-
-    const linkedProgram = buildProgramCodegenView(modules, {
-      instances: monomorphized.instances,
-      moduleTyping: monomorphized.moduleTyping,
-    });
-    const boundaryInstances = mergeMonomorphizedInstanceRequests([
-      ...seedBoundaryInstances,
-      ...collectBoundaryDtoInstances(linkedProgram, targetModuleId),
-    ]);
-    if (boundaryInstances.length > seedBoundaryInstances.length) {
-      monomorphized = monomorphizeProgram({
-        modules,
-        semantics,
-        rootInstances: boundaryInstances,
-      });
-    }
-  }
+  const boundaryInstances =
+    linkSemantics !== false
+      ? collectBoundaryDtoInstances(
+          buildProgramCodegenView(modules, {
+            instances: [],
+            moduleTyping: new Map(),
+          }),
+          targetModuleId,
+        )
+      : [];
+  const monomorphized =
+    linkSemantics !== false
+      ? monomorphizeProgram({
+          modules,
+          semantics,
+          rootInstances: boundaryInstances,
+        })
+      : { instances: [], moduleTyping: new Map() };
   markCompilerPerfPhaseDuration("monomorphizeProgram", linkStartedAt);
   recordCompilerPerfDuration({
     name: `${metricPrefix}.link_semantics.ms`,
@@ -608,50 +591,20 @@ const collectBoundaryDtoInstances = (
       if (!signature) {
         return;
       }
-      const scheme = program.types.getScheme(signature.scheme);
-      const instantiations = program.functions.getInstantiationInfo(
-        moduleId,
-        symbol,
-      );
-      const typeArgLists =
-        instantiations && instantiations.size > 0
-          ? [...instantiations.values()]
-          : scheme.params.length === 0
-            ? [[] as readonly TypeId[]]
-            : [];
-      typeArgLists.forEach((typeArgs) => {
-        const functionType = program.types.getTypeDesc(
-          program.types.instantiate(signature.scheme, typeArgs),
-        );
-        if (functionType.kind !== "function") {
-          return;
+      [
+        ...signature.parameters.map((parameter) => parameter.typeId),
+        signature.returnType,
+      ].forEach((typeId) => {
+        try {
+          visit(program.dtoPlans.get({ typeId, moduleId }));
+        } catch {
+          // Normal boundary validation reports unsupported exported types.
         }
-        [
-          ...functionType.parameters.map((parameter) => parameter.type),
-          functionType.returnType,
-        ].forEach((typeId) => {
-          try {
-            visit(program.dtoPlans.get({ typeId, moduleId }));
-          } catch {
-            // Normal boundary validation reports unsupported exported types.
-          }
-        });
       });
     });
   });
 
   return [...requests.values()];
-};
-
-const mergeMonomorphizedInstanceRequests = (
-  requests: readonly MonomorphizedInstanceRequest[],
-): readonly MonomorphizedInstanceRequest[] => {
-  const unique = new Map<string, MonomorphizedInstanceRequest>();
-  requests.forEach((request) => {
-    const key = `${request.callee.moduleId}:${request.callee.symbol}<${request.typeArgs.join(",")}>`;
-    unique.set(key, request);
-  });
-  return [...unique.values()];
 };
 
 export const emitProgram = async ({

@@ -26,6 +26,9 @@ import {
   resolveImportedSymbol,
   moduleLetBySymbol,
   canonicalProgramSymbolIdOf,
+  exprTypeFor,
+  functionTypeSubstitution,
+  resolveCallTypeArgs,
   resolveTargetsForCaller,
 } from "./shared.js";
 
@@ -643,6 +646,122 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       }
     };
 
+    const callerTypeSubstitution = (
+      callerInstanceId?: ProgramFunctionInstanceId,
+    ) => {
+      if (typeof callerInstanceId !== "number") {
+        return undefined;
+      }
+      const instance = ctx.ir.baseProgram.functions.getInstance(
+        callerInstanceId,
+      );
+      const signature = ctx.ir.baseProgram.functions.getSignature(
+        instance.symbolRef.moduleId,
+        instance.symbolRef.symbol,
+      );
+      return signature
+        ? functionTypeSubstitution({
+            signature,
+            typeArgs: instance.typeArgs,
+            program: ctx.ir.baseProgram,
+          })
+        : undefined;
+    };
+
+    const enqueueDtoPlanForType = ({
+      typeId,
+      moduleId,
+    }: {
+      typeId: TypeId;
+      moduleId: string;
+    }): void => {
+      try {
+        enqueueCustomDtoPlan(
+          ctx.ir.baseProgram.dtoPlans.get({ typeId, moduleId }),
+        );
+      } catch {
+        // Codegen reports unsupported DTO boundary types.
+      }
+    };
+
+    const enqueueDtoPlansForIntrinsicCall = ({
+      moduleId,
+      expr,
+      callerInstanceId,
+    }: {
+      moduleId: string;
+      expr: Extract<HirExpression, { exprKind: "call" }>;
+      callerInstanceId?: ProgramFunctionInstanceId;
+    }): void => {
+      const moduleView = ctx.ir.modules.get(moduleId);
+      const callInfo = ctx.ir.calls.get(moduleId)?.get(expr.id);
+      if (!moduleView || !callInfo) {
+        return;
+      }
+      const substitution = callerTypeSubstitution(callerInstanceId);
+      const concreteType = (typeId: TypeId): TypeId =>
+        substitution
+          ? ctx.ir.baseProgram.types.substitute(typeId, substitution)
+          : typeId;
+      const typeIds = new Set<TypeId>(
+        resolveCallTypeArgs({ callInfo, callerInstanceId }).map(concreteType),
+      );
+      [expr.id, ...expr.args.map((arg) => arg.expr)].forEach((exprId) => {
+        const typeId =
+          typeof callerInstanceId === "number"
+            ? (ctx.ir.baseProgram.functions.getInstanceExprType(
+                callerInstanceId,
+                exprId,
+              ) ?? exprTypeFor({ moduleView, exprId }))
+            : exprTypeFor({ moduleView, exprId });
+        if (typeof typeId === "number") {
+          typeIds.add(concreteType(typeId));
+        }
+      });
+      typeIds.forEach((typeId) =>
+        enqueueDtoPlanForType({ typeId, moduleId }),
+      );
+    };
+
+    const enqueueRetainedCallbackDtoPlans = ({
+      moduleId,
+      handlerExprId,
+      callerInstanceId,
+    }: {
+      moduleId: string;
+      handlerExprId: HirExprId;
+      callerInstanceId?: ProgramFunctionInstanceId;
+    }): void => {
+      const moduleView = ctx.ir.modules.get(moduleId);
+      if (!moduleView) {
+        return;
+      }
+      const rawType =
+        typeof callerInstanceId === "number"
+          ? (ctx.ir.baseProgram.functions.getInstanceExprType(
+              callerInstanceId,
+              handlerExprId,
+            ) ?? exprTypeFor({ moduleView, exprId: handlerExprId }))
+          : exprTypeFor({ moduleView, exprId: handlerExprId });
+      if (typeof rawType !== "number") {
+        return;
+      }
+      const substitution = callerTypeSubstitution(callerInstanceId);
+      const handlerType = substitution
+        ? ctx.ir.baseProgram.types.substitute(rawType, substitution)
+        : rawType;
+      const descriptor = ctx.ir.baseProgram.types.getTypeDesc(handlerType);
+      if (descriptor.kind !== "function") {
+        return;
+      }
+      [
+        ...descriptor.parameters.map((parameter) => parameter.type),
+        descriptor.returnType,
+      ].forEach((typeId) =>
+        enqueueDtoPlanForType({ typeId, moduleId }),
+      );
+    };
+
     const exportedFunctionUsesEffectsHostBoundary = ({
       moduleId,
       symbol,
@@ -789,9 +908,22 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
                   HOST_TRANSPORT_DEPENDENT_INTRINSICS.has(intrinsicName)
                 ) {
                   enqueueSelectedProviderFunctions();
+                  const handler = expr.args[0];
+                  if (handler) {
+                    enqueueRetainedCallbackDtoPlans({
+                      moduleId,
+                      handlerExprId: handler.expr,
+                      callerInstanceId,
+                    });
+                  }
                 }
                 if (intrinsicName && DATA_DTO_INTRINSICS.has(intrinsicName)) {
                   enqueueDataDtoFunctions();
+                  enqueueDtoPlansForIntrinsicCall({
+                    moduleId,
+                    expr,
+                    callerInstanceId,
+                  });
                 }
                 if (
                   intrinsicName &&
