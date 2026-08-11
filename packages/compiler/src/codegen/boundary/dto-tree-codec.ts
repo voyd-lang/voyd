@@ -406,6 +406,13 @@ export const callCustomDtoRead = ({
     ],
     method.resultType,
   );
+  const resultLocal = allocateTempLocal(
+    method.resultType,
+    fnCtx,
+    method.resultTypeId,
+    ctx,
+  );
+  const resultRef = () => loadLocalValue(resultLocal, ctx);
   const resultDesc = ctx.program.types.getTypeDesc(method.resultTypeId);
   if (resultDesc.kind !== "union") {
     throw new Error("CustomDto.read must return Result<T, CustomDtoError>");
@@ -425,11 +432,23 @@ export const callCustomDtoRead = ({
   if (okType === undefined || !okInfo || !valueField) {
     throw new Error("CustomDto.read Result is missing Ok.value");
   }
-  return coerceValueToType({
+  const errType = resultDesc.members.find((member) => {
+    const desc = ctx.program.types.getTypeDesc(member);
+    const owner = ctx.program.types.getNominalOwner(
+      desc.kind === "intersection" && desc.nominal !== undefined
+        ? desc.nominal
+        : member,
+    );
+    return owner !== undefined && ctx.program.symbols.getName(owner) === "Err";
+  });
+  if (errType === undefined) {
+    throw new Error("CustomDto.read Result is missing Err.error");
+  }
+  const decodedValue = coerceValueToType({
     value: loadStructuralField({
       structInfo: okInfo,
       field: valueField,
-      pointer: () => refCast(ctx.mod, result, okInfo.runtimeType),
+      pointer: () => refCast(ctx.mod, resultRef(), okInfo.runtimeType),
       ctx,
       fnCtx,
     }),
@@ -438,6 +457,23 @@ export const callCustomDtoRead = ({
     ctx,
     fnCtx,
   });
+  return ctx.mod.block(
+    null,
+    [
+      storeLocalValue({ binding: resultLocal, value: result, ctx, fnCtx }),
+      ctx.mod.if(
+        variantMatches({
+          unionValue: resultRef(),
+          unionTypeId: method.resultTypeId,
+          variant: { name: "Err", typeId: errType, fields: [] },
+          ctx,
+        }),
+        ctx.mod.unreachable(),
+      ),
+      decodedValue,
+    ],
+    wasmTypeFor(schema.typeId, ctx),
+  );
 };
 
 export const customDtoMethod = ({
