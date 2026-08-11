@@ -10,7 +10,7 @@ import {
 describe("compiler function contract catalog", () => {
   it("defines one host-transport-msgpack spec for every stable role", () => {
     const ids = Object.values(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS);
-    expect(ids).toHaveLength(31);
+    expect(ids).toHaveLength(4);
     expect(new Set(ids).size).toBe(ids.length);
     expect(COMPILER_FUNCTION_CONTRACTS.size).toBe(
       ids.length +
