@@ -7,15 +7,15 @@ import {
 } from "../../../compiler-contracts/index.js";
 import { requireFunctionMetaByCompilerContract } from "../../function-lookup.js";
 import { stateFor } from "../../effects/host-boundary/state.js";
+import type {
+  HostTransportProviderDescriptor,
+  HostTransportProviderFunctions,
+} from "../provider.js";
 
-export type MsgPackProviderFunctions = {
-  readerTypeId: TypeId;
-  writerTypeId: TypeId;
-  createReader: FunctionMetadata;
-  readerComplete: FunctionMetadata;
-  createWriter: FunctionMetadata;
-  finishWriter: FunctionMetadata;
-};
+export const MSGPACK_HOST_TRANSPORT_IDENTITY = {
+  id: "voyd.std.msgpack",
+  version: 1,
+} as const;
 
 const MSGPACK_PROVIDER_FUNCS_KEY = Symbol(
   "voyd.hostTransport.msgpackProviderFunctions",
@@ -172,7 +172,7 @@ const markTraitImplementationReachable = ({
 
 export const ensureMsgPackProviderFunctions = (
   ctx: CodegenContext,
-): MsgPackProviderFunctions =>
+): HostTransportProviderFunctions =>
   stateFor(ctx, MSGPACK_PROVIDER_FUNCS_KEY, () => {
     const { reader: readerTypeId, writer: writerTypeId } =
       validateMsgpackHostTransportFunctionContracts(ctx.program);
@@ -215,3 +215,9 @@ export const ensureMsgPackProviderFunctions = (
     });
     return { readerTypeId, writerTypeId, ...functions };
   });
+
+export const MSGPACK_HOST_TRANSPORT_PROVIDER: HostTransportProviderDescriptor = {
+  identity: MSGPACK_HOST_TRANSPORT_IDENTITY,
+  ensureFunctions: ensureMsgPackProviderFunctions,
+  enqueueReachability: enqueueMsgPackProviderReachability,
+};

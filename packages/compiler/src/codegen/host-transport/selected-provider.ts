@@ -1,18 +1,18 @@
 import type { CodegenContext } from "../context.js";
 import type { ProgramSymbolId } from "../../semantics/ids.js";
-import {
-  enqueueMsgPackProviderReachability,
-  ensureMsgPackProviderFunctions,
-  type MsgPackProviderFunctions,
-} from "../host-transport/providers/msgpack.js";
+import { MSGPACK_HOST_TRANSPORT_PROVIDER } from "../host-transport/providers/msgpack.js";
+import type {
+  HostTransportIdentity,
+  HostTransportProviderFunctions,
+} from "./provider.js";
 
-export const SELECTED_HOST_TRANSPORT_IDENTITY = {
-  id: "voyd.std.msgpack",
-  version: 1,
-} as const;
+const BUILD_SELECTED_HOST_TRANSPORT_PROVIDER = MSGPACK_HOST_TRANSPORT_PROVIDER;
 
-export type SelectedHostTransportProvider = MsgPackProviderFunctions & {
-  identity: typeof SELECTED_HOST_TRANSPORT_IDENTITY;
+export const SELECTED_HOST_TRANSPORT_IDENTITY =
+  BUILD_SELECTED_HOST_TRANSPORT_PROVIDER.identity;
+
+export type SelectedHostTransportProvider = HostTransportProviderFunctions & {
+  identity: HostTransportIdentity;
 };
 
 /**
@@ -24,7 +24,7 @@ export const ensureSelectedHostTransportProvider = (
   ctx: CodegenContext,
 ): SelectedHostTransportProvider => ({
   identity: SELECTED_HOST_TRANSPORT_IDENTITY,
-  ...ensureMsgPackProviderFunctions(ctx),
+  ...BUILD_SELECTED_HOST_TRANSPORT_PROVIDER.ensureFunctions(ctx),
 });
 
 export const enqueueSelectedHostTransportProviderReachability = ({
@@ -34,5 +34,5 @@ export const enqueueSelectedHostTransportProviderReachability = ({
   ctx: CodegenContext;
   enqueue: (symbol: ProgramSymbolId) => void;
 }): void => {
-  enqueueMsgPackProviderReachability({ ctx, enqueue });
+  BUILD_SELECTED_HOST_TRANSPORT_PROVIDER.enqueueReachability({ ctx, enqueue });
 };
