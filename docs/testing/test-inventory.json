@@ -945,6 +945,13 @@
     ]
   },
   {
+    "file": "packages/compiler/src/parser/__tests__/host-transport-attribute.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-08-11",
+    "disposition": "compiler-local",
+    "rationale": "Trusted host transport provider metadata and its AST attachment are compiler/std bootstrapping contracts rather than portable user-program behavior."
+  },
+  {
     "file": "packages/compiler/src/parser/__tests__/html-errors.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",
