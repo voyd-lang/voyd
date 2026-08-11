@@ -123,7 +123,10 @@ fn lower_sub<Msg>(value: Sub<Msg>) -> SubscriptionWire
   run()
 
 pub fn lower_html_node<Msg>(value: Html<Msg>) -> HtmlWire
-  let run = value.plan.thunk.at(0)
+  lower_html_plan(value.plan)
+
+fn lower_html_plan(plan: HtmlPlan) -> HtmlWire
+  let run: HtmlLower = plan.thunk.at(0)
   run()
 
 fn lower_html_attr<Msg>(value: Attr<Msg>) -> AttrWire
@@ -218,8 +221,7 @@ fn typed_html_attr_payloads<Msg>(values: Array<Attr<Msg>>) -> AttrWireList
   out
 
 fn lower_html_input(value: HtmlThunkPlan) -> HtmlWire
-  let run = value.plan.thunk.at(0)
-  run()
+  lower_html_plan(value.plan)
 
 fn lower_attr_input(value: AttrThunkPlan) -> AttrWire
   let run = value.plan.thunk.at(0)
@@ -768,34 +770,49 @@ pub fn task<Key, T>({ key: Key, task: Task<T> }): Component -> Unit
   Component::task_started(encode_vx_value(key), task.id)
   Unit {}
 
-/// Associates closure-backed handlers in a prebuilt view with the active server render.
-pub fn claim_server_render_callbacks<Msg>(value: Html<Msg>): () -> void
-  claim_server_render_callbacks_in(lower_html_node(value))
+/// Lowers a view for server rendering, claims its callbacks, and removes
+/// client-only message mapping nodes.
+pub fn lower_server_html_node<Msg>(value: Html<Msg>): () -> HtmlWire
+  lower_server_html_wire(lower_html_node(value))
 
-fn claim_server_render_callbacks_in(value: HtmlWire): () -> void
+fn lower_server_html_wire(value: HtmlWire): () -> HtmlWire
   value.node.match(node)
     HtmlText:
-      void
+      value
     HtmlFragment:
-      claim_server_render_callback_array(node.children)
+      html_wire(HtmlWireNode::HtmlFragment {
+        children: lower_server_html_children(node.children)
+      })
     HtmlElement:
       claim_server_render_attr_array(node.attrs)
-      claim_server_render_callback_array(node.children)
+      html_wire(HtmlWireNode::HtmlElement {
+        element_name: node.element_name,
+        attrs: node.attrs,
+        children: lower_server_html_children(node.children)
+      })
     HtmlKeyed:
-      claim_server_render_callbacks_in(node.child)
+      html_wire(HtmlWireNode::HtmlKeyed {
+        key: node.key,
+        child: lower_server_html_wire(node.child)
+      })
     HtmlMapped:
       claim_render_callback_id(node.handler_ref)
-      claim_server_render_callbacks_in(node.child)
+      lower_server_html_wire(node.child)
     HtmlFrame:
-      claim_server_render_callbacks_in(node.root)
+      html_wire(HtmlWireNode::HtmlFrame {
+        version: node.version,
+        root: lower_server_html_wire(node.root)
+      })
 
-fn claim_server_render_callback_array(values: HtmlWireList): () -> void
+fn lower_server_html_children(values: HtmlWireList): () -> HtmlWireList
   values.match(node)
     HtmlWireEnd:
-      void
+      HtmlWireList::HtmlWireEnd {}
     HtmlWireNext:
-      claim_server_render_callbacks_in(node.value)
-      claim_server_render_callback_array(node.rest)
+      HtmlWireList::HtmlWireNext {
+        value: lower_server_html_wire(node.value),
+        rest: lower_server_html_children(node.rest)
+      }
 
 fn claim_server_render_attr_array(values: AttrWireList): () -> void
   values.match(node)
@@ -1091,8 +1108,12 @@ pub fn map_html<ChildMsg, ParentMsg>({ html: Html<void>, handler: fn(ChildMsg) -
   Html<ParentMsg> { plan: html.plan }
 
 fn map_html_with_handler_id<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler_id: i32 }) -> Html<ParentMsg>
+  let child_run: HtmlLower = html.plan.thunk.at(0)
   html_plan<ParentMsg>(() -> HtmlWire =>
-    html_wire(HtmlWireNode::HtmlMapped { child: lower_html_node(html), handler_ref: handler_id })
+    html_wire(HtmlWireNode::HtmlMapped {
+      child: child_run(),
+      handler_ref: handler_id
+    })
   )
 
 fn event_with_handler_id<Msg>({ name: String, handler_id: i32, options?: EventOptions }): () -> Attr<Msg>

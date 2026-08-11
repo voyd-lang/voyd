@@ -87,8 +87,7 @@ pub fn html<Model, Msg>(response: Response, { view: vx::Html<Msg>, hydrate: Hydr
   hydrated_html_response_impl<Model, Msg>(response, view: view, hydrate: hydrate)
 
 fn render_impl<Msg>(value: vx::Html<Msg>) -> String
-  vx::claim_server_render_callbacks<Msg>(value)
-  render_node(vx::lower_html_node<Msg>(value))
+  render_node(vx::lower_server_html_node<Msg>(value))
 
 fn document_impl<Msg>(value: vx::Html<Msg>) -> String
   "<!doctype html>".as_slice().to_string().concat(render_impl<Msg>(value))
@@ -155,7 +154,8 @@ fn render_node_in_namespace(value: HtmlWire, svg_parent: bool): () -> String
     HtmlWireNode::HtmlKeyed:
       render_node_in_namespace(node.child, svg_parent)
     HtmlWireNode::HtmlMapped:
-      render_node_in_namespace(node.child, svg_parent)
+      panic("client-only VX message map reached the server renderer")
+      String::init()
     HtmlWireNode::HtmlFrame:
       render_node_in_namespace(node.root, svg_parent)
 
@@ -221,8 +221,6 @@ fn render_raw_text_node(value: HtmlWire, tag: StringSlice): () -> String
     HtmlWireNode::HtmlFragment:
       render_raw_text_children(node.children, tag)
     HtmlWireNode::HtmlKeyed:
-      render_raw_text_node(node.child, tag)
-    HtmlWireNode::HtmlMapped:
       render_raw_text_node(node.child, tag)
     HtmlWireNode::HtmlFrame:
       render_raw_text_node(node.root, tag)
