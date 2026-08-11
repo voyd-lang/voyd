@@ -7,7 +7,7 @@ import type {
   TypingState,
 } from "../types.js";
 import { bindTypeParams as bindTypeParamsFromType } from "../type-relations.js";
-import { getStructuralFields } from "../type-system.js";
+import { getNominalComponent, getStructuralFields } from "../type-system.js";
 import { typeExpression } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
 
@@ -180,6 +180,7 @@ export const bindCallArgumentTypeParams = ({
   ctx: TypingContext;
   state: TypingState;
 }): void => {
+  const fixedSubstitution = new Map(substitution);
   forEachCallArgumentMatch({
     args,
     params: signature.parameters,
@@ -188,7 +189,7 @@ export const bindCallArgumentTypeParams = ({
     onMatch: ({ param, actualType }) => {
       const expectedType = providedArgumentTypeForParam({
         param,
-        hintSubstitution: substitution,
+        hintSubstitution: fixedSubstitution,
         ctx,
       });
       bindTypeParamsFromType(
@@ -200,8 +201,70 @@ export const bindCallArgumentTypeParams = ({
       );
     },
   });
+  bindVxPlanMessageType({ signature, args, substitution, ctx });
 };
 
+const bindVxPlanMessageType = ({
+  signature,
+  args,
+  substitution,
+  ctx,
+}: {
+  signature: FunctionSignature;
+  args: readonly Arg[];
+  substitution: Map<TypeParamId, TypeId>;
+  ctx: TypingContext;
+}): void => {
+  const returnNominal = getNominalComponent(signature.returnType, ctx);
+  if (typeof returnNominal !== "number") return;
+  const returnDesc = ctx.arena.get(returnNominal);
+  if (
+    (returnDesc.kind !== "nominal-object" &&
+      returnDesc.kind !== "value-object") ||
+    returnDesc.owner.moduleId !== "std::vx" ||
+    returnDesc.name !== "Html"
+  ) {
+    return;
+  }
+  const messageParam = ctx.arena.get(returnDesc.typeArgs[0]!);
+  if (messageParam.kind !== "type-param-ref") return;
+  const messageTypes = args.flatMap((arg) => vxMessageTypesIn(arg.type, ctx));
+  const nonVoid = messageTypes.filter((type) => type !== ctx.primitives.void);
+  if (nonVoid.length > 0) {
+    substitution.set(messageParam.param, ctx.arena.internUnion(nonVoid));
+  }
+};
+
+const vxMessageTypesIn = (type: TypeId, ctx: TypingContext): TypeId[] => {
+  const desc = ctx.arena.get(type);
+  if (desc.kind === "union") {
+    return desc.members.flatMap((member) => vxMessageTypesIn(member, ctx));
+  }
+  const nominal = getNominalComponent(type, ctx);
+  if (typeof nominal !== "number") return [];
+  const nominalDesc = ctx.arena.get(nominal);
+  if (
+    nominalDesc.kind !== "nominal-object" &&
+    nominalDesc.kind !== "value-object"
+  ) {
+    return [];
+  }
+  if (nominalDesc.name === "Array" && nominalDesc.typeArgs.length === 1) {
+    return vxMessageTypesIn(nominalDesc.typeArgs[0]!, ctx);
+  }
+  if (
+    nominalDesc.owner.moduleId !== "std::vx" ||
+    (nominalDesc.name !== "Html" && nominalDesc.name !== "Attr")
+  ) {
+    return [];
+  }
+  if (nominalDesc.typeArgs.length !== 1) return [];
+  const messageType = nominalDesc.typeArgs[0]!;
+  const messageDesc = ctx.arena.get(messageType);
+  return messageDesc.kind === "union"
+    ? [...messageDesc.members]
+    : [messageType];
+};
 
 const forEachCallArgumentMatch = ({
   args,

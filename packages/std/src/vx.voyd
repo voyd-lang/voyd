@@ -139,11 +139,6 @@ fn decode_vx_wire(value: Bytes) -> MsgPack
     Err:
       msgpack::make_null()
 
-/// Lifts a static node into a typed message tree. The node cannot emit a
-/// message, so changing its phantom message type is safe.
-pub fn static_html<Msg>(value: Html<void>) -> Html<Msg>
-  Html<Msg> { plan: value.plan }
-
 fn typed_html_node_payloads<Msg>(values: Array<Html<Msg>>) -> Array<MsgPack>
   let ~out = Array<MsgPack>::with_capacity(values.len())
   var index = 0
@@ -888,62 +883,7 @@ pub fn element({
 
 pub fn element<Msg>({
   tag: String,
-  attrs: Array<AttrInput<Msg>> = Array<AttrInput<Msg>>::init(),
-  children: Array<HtmlInput<Msg>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: html_attr_payloads<Msg>(attrs),
-    children: html_node_payloads<Msg>(children)
-  )
-
-pub fn element<Msg>({
-  tag: String,
-  attrs: Array<AttrInput<Msg>>,
-  children: Array<Html<void>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: html_attr_payloads<Msg>(attrs),
-    children: typed_html_node_payloads<void>(children)
-  )
-
-pub fn element<Msg>({
-  tag: String,
-  attrs: Array<Attr<void>>,
-  children: Array<HtmlInput<Msg>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: typed_html_attr_payloads<void>(attrs),
-    children: html_node_payloads<Msg>(children)
-  )
-
-pub fn element<Msg>({
-  tag: String,
-  attrs: Array<Attr<Msg>>,
-  children: Array<Html<void>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: typed_html_attr_payloads<Msg>(attrs),
-    children: typed_html_node_payloads<void>(children)
-  )
-
-pub fn element<Msg>({
-  tag: String,
-  attrs: Array<Attr<void>>,
-  children: Array<Html<Msg>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: typed_html_attr_payloads<void>(attrs),
-    children: typed_html_node_payloads<Msg>(children)
-  )
-
-pub fn element<Msg>({
-  tag: String,
-  attrs: Array<Attr<Msg>>,
+  attrs: Array<Attr<Msg>> = Array<Attr<Msg>>::init(),
   children: Array<Html<Msg>>
 }) -> Html<Msg>
   element_plan<Msg>(
@@ -955,22 +895,11 @@ pub fn element<Msg>({
 pub fn element<Msg>({
   tag: String,
   attrs: Array<AttrInput<Msg>>,
-  children: Array<Html<Msg>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: html_attr_payloads<Msg>(attrs),
-    children: typed_html_node_payloads<Msg>(children)
-  )
-
-pub fn element<Msg>({
-  tag: String,
-  attrs: Array<Attr<Msg>>,
   children: Array<HtmlInput<Msg>>
 }) -> Html<Msg>
   element_plan<Msg>(
     tag: tag,
-    attrs: typed_html_attr_payloads<Msg>(attrs),
+    attrs: html_attr_payloads<Msg>(attrs),
     children: html_node_payloads<Msg>(children)
   )
 
@@ -987,62 +916,7 @@ pub fn html_element({
 
 pub fn html_element<Msg>({
   tag: String,
-  attrs: Array<AttrInput<Msg>> = Array<AttrInput<Msg>>::init(),
-  children: Array<HtmlInput<Msg>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: html_attr_payloads<Msg>(attrs),
-    children: html_node_payloads<Msg>(children)
-  )
-
-pub fn html_element<Msg>({
-  tag: String,
-  attrs: Array<AttrInput<Msg>>,
-  children: Array<Html<void>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: html_attr_payloads<Msg>(attrs),
-    children: typed_html_node_payloads<void>(children)
-  )
-
-pub fn html_element<Msg>({
-  tag: String,
-  attrs: Array<Attr<void>>,
-  children: Array<HtmlInput<Msg>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: typed_html_attr_payloads<void>(attrs),
-    children: html_node_payloads<Msg>(children)
-  )
-
-pub fn html_element<Msg>({
-  tag: String,
-  attrs: Array<Attr<Msg>>,
-  children: Array<Html<void>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: typed_html_attr_payloads<Msg>(attrs),
-    children: typed_html_node_payloads<void>(children)
-  )
-
-pub fn html_element<Msg>({
-  tag: String,
-  attrs: Array<Attr<void>>,
-  children: Array<Html<Msg>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: typed_html_attr_payloads<void>(attrs),
-    children: typed_html_node_payloads<Msg>(children)
-  )
-
-pub fn html_element<Msg>({
-  tag: String,
-  attrs: Array<Attr<Msg>>,
+  attrs: Array<Attr<Msg>> = Array<Attr<Msg>>::init(),
   children: Array<Html<Msg>>
 }) -> Html<Msg>
   element_plan<Msg>(
@@ -1054,22 +928,11 @@ pub fn html_element<Msg>({
 pub fn html_element<Msg>({
   tag: String,
   attrs: Array<AttrInput<Msg>>,
-  children: Array<Html<Msg>>
-}) -> Html<Msg>
-  element_plan<Msg>(
-    tag: tag,
-    attrs: html_attr_payloads<Msg>(attrs),
-    children: typed_html_node_payloads<Msg>(children)
-  )
-
-pub fn html_element<Msg>({
-  tag: String,
-  attrs: Array<Attr<Msg>>,
   children: Array<HtmlInput<Msg>>
 }) -> Html<Msg>
   element_plan<Msg>(
     tag: tag,
-    attrs: typed_html_attr_payloads<Msg>(attrs),
+    attrs: html_attr_payloads<Msg>(attrs),
     children: html_node_payloads<Msg>(children)
   )
 

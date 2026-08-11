@@ -1,16 +1,9 @@
-export {
-  createVoydVxAppRuntime,
-} from "./app-runtime.js";
+export { createVoydVxAppRuntime } from "./app-runtime.js";
 export type {
   CreateVoydVxAppRuntimeOptions,
   VoydVxAppHost,
   VoydVxAppRuntimeExports,
 } from "./app-runtime.js";
-export {
-  callComponentFn,
-  decodeVxWire,
-  resolveMemory,
-} from "./memory.js";
 export {
   createBrowserVxRuntimeHost,
   createVxDomRenderer,
@@ -18,33 +11,21 @@ export {
   mountVxApp,
   readVoydHydrationRoot,
   readVoydHydrationRoots,
-  render,
-  renderMsgPackNode,
+  renderVxNode,
 } from "./browser.js";
 export type {
   HydrationMismatch,
   HydrationMismatchHandler,
   MountedVxApp,
   MountVxAppOptions,
-  RenderOptions,
   VoydHydrationRoot,
   VxDomRenderer,
   VxRuntimeHostMode,
 } from "./browser.js";
-export {
-  renderNodeToString,
-  renderVxToString,
-} from "./server.js";
+export { renderNodeToString, renderVxToString } from "./server.js";
+export type { RenderVxToStringOptions, ServerRenderResult } from "./server.js";
+export { normalizeRenderFrame, normalizeVNode } from "./normalize.js";
 export type {
-  RenderVxToStringOptions,
-  ServerRenderResult,
-} from "./server.js";
-export {
-  normalizeRenderFrame,
-  normalizeVNode,
-} from "./normalize.js";
-export type {
-  CallOptions,
   EventDescriptor,
   EventOptions,
   NormalizedEventPayload,
@@ -74,5 +55,4 @@ export type {
   VxSubscriptionRunner,
   VxSubscriptionSyncContext,
   VxTextNode,
-  VoydComponentFn,
 } from "./types.js";

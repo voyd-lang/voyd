@@ -2308,12 +2308,6 @@
     "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
   },
   {
-    "file": "packages/vx-dom/src/__tests__/memory.test.ts",
-    "owner": "package-unit",
-    "disposition": "package-local",
-    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
-  },
-  {
     "file": "packages/vx-dom/src/__tests__/normalize.test.ts",
     "owner": "package-unit",
     "disposition": "package-local",

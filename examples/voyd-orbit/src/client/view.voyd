@@ -533,7 +533,7 @@ fn SavedList({ model: Model }) -> Html<Msg>
       <strong>Your observatory is empty</strong>
       Save the current system, then return here to load, duplicate, or remove it.
     </div>
-    static_html<Msg>(static)
+    html_child<Msg>(static)
   else:
     <div class="saved-list">
       {model.ui.saved_simulations.map((summary: SimulationSummary) =>
@@ -730,4 +730,4 @@ fn library_status(model: Model) -> String
   to_string(count).concat(" saved systems")
 
 fn empty() -> Html<Msg>
-  static_html<Msg>(fragment(Array<Html<void>>::init()))
+  html_child<Msg>(fragment(Array<Html<void>>::init()))

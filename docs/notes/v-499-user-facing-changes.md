@@ -96,6 +96,12 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - `std::web` HTML rendering accepts `Html<Msg>` for any message type, so
   server-rendered event handlers keep their real message type. The public raw
   `std::vx::lower_html` byte escape hatch has been removed.
+- `@voyd-lang/vx-dom` no longer exports `decodeVxWire`, `callComponentFn`,
+  `resolveMemory`, the direct Wasm `render` helper, or `renderMsgPackNode`.
+  Mount, hydration, and server rendering accept a negotiated app runtime or a
+  decoded VX frame. Use `renderVxNode` when rendering an already decoded tree.
+- Static `Html<void>` and `Attr<void>` values compose into message-bearing VX
+  elements without erasing the element's inferred message union.
 - `Cmd::task(work:, handler:)` has been removed. Use
   `Cmd::perform(work:, handler:)` or pass an existing `Task<T>` with
   `Cmd::perform(task:, handler:)`.

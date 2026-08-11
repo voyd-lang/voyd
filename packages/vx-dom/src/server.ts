@@ -1,4 +1,3 @@
-import { callComponentFn } from "./memory.js";
 import {
   childNamespace,
   elementNamespace,
@@ -14,7 +13,7 @@ import {
   validateSvgAttributeName,
   validateSvgTagName,
 } from "./normalize.js";
-import type { CallOptions, VNode, VxRenderFrame, VoydComponentFn } from "./types.js";
+import type { VNode, VxRenderFrame } from "./types.js";
 
 export type ServerRenderResult = {
   html: string;
@@ -28,12 +27,6 @@ export type ServerRenderResult = {
 export type RenderVxToStringOptions = {
   frame?: unknown;
   tree?: unknown;
-  componentFn?: VoydComponentFn;
-  callOptions?: CallOptions;
-  wasm?: Uint8Array | WebAssembly.Module;
-  imports?: WebAssembly.Imports;
-  instance?: WebAssembly.Instance;
-  exportName?: string;
   head?: ServerRenderResult["head"];
 };
 
@@ -59,20 +52,9 @@ const rawTextTags = new Set(["script", "style"]);
 export async function renderVxToString(
   options: RenderVxToStringOptions,
 ): Promise<ServerRenderResult> {
-  const instance = await resolveInstanceForRender(options);
-  const source =
-    options.frame ??
-    options.tree ??
-    (options.componentFn && options.callOptions
-      ? callComponentFn(options.componentFn, options.callOptions)
-      : instance
-        ? callComponentFn(
-          exportedComponent(instance, options.exportName ?? "main"),
-          { instance },
-        )
-      : undefined);
+  const source = options.frame ?? options.tree;
   if (source === undefined) {
-    throw new Error("vx-dom/server: renderVxToString requires frame, tree, componentFn, instance, or wasm");
+    throw new Error("vx-dom/server: renderVxToString requires frame or tree");
   }
 
   const frame = normalizeRenderFrame(source);
@@ -93,7 +75,9 @@ function renderNode(
   parentNamespace: MarkupNamespace = "html",
 ): string {
   if (vnode.kind === "text") {
-    return rawTextTag ? renderRawText(vnode.value, rawTextTag) : escapeText(vnode.value);
+    return rawTextTag
+      ? renderRawText(vnode.value, rawTextTag)
+      : escapeText(vnode.value);
   }
   if (vnode.kind === "fragment") {
     return vnode.children
@@ -101,7 +85,9 @@ function renderNode(
       .join("");
   }
   if (rawTextTag) {
-    throw new Error(`vx-dom/server: ${rawTextTag} elements may only contain text`);
+    throw new Error(
+      `vx-dom/server: ${rawTextTag} elements may only contain text`,
+    );
   }
 
   const namespace = elementNamespace(vnode.tag, parentNamespace);
@@ -112,27 +98,33 @@ function renderNode(
     validateTextareaValue(vnode);
   }
   const attrs = renderAttrs(vnode, namespace);
-  if (namespace === "html" && voidTags.has(vnode.tag)) return `<${vnode.tag}${attrs}>`;
-  const childRawTextTag = namespace === "html" && rawTextTags.has(vnode.tag)
-    ? vnode.tag
-    : undefined;
+  if (namespace === "html" && voidTags.has(vnode.tag))
+    return `<${vnode.tag}${attrs}>`;
+  const childRawTextTag =
+    namespace === "html" && rawTextTags.has(vnode.tag) ? vnode.tag : undefined;
   const childrenNamespace = childNamespace(vnode.tag, namespace);
   const children = (vnode.children ?? [])
     .map((child) => renderNode(child, childRawTextTag, childrenNamespace))
     .join("");
-  const leadingNewline = namespace === "html" &&
-      newlineStrippingTags.has(vnode.tag) && children.startsWith("\n")
-    ? "\n"
-    : "";
+  const leadingNewline =
+    namespace === "html" &&
+    newlineStrippingTags.has(vnode.tag) &&
+    children.startsWith("\n")
+      ? "\n"
+      : "";
   return `<${vnode.tag}${attrs}>${leadingNewline}${children}</${vnode.tag}>`;
 }
 
 function renderRawText(value: string, tag: string): string {
   if (value.includes("\0") || value.includes("\r")) {
-    throw new Error(`vx-dom/server: ${tag} text contains a character HTML cannot preserve`);
+    throw new Error(
+      `vx-dom/server: ${tag} text contains a character HTML cannot preserve`,
+    );
   }
   if (value.toLowerCase().includes(`</${tag}`)) {
-    throw new Error(`vx-dom/server: ${tag} text contains its closing delimiter`);
+    throw new Error(
+      `vx-dom/server: ${tag} text contains its closing delimiter`,
+    );
   }
   return value;
 }
@@ -172,27 +164,43 @@ function renderAttrs(
     .join("");
 }
 
-function validateSsrProperty(tag: string, property: string, value: unknown): void {
+function validateSsrProperty(
+  tag: string,
+  property: string,
+  value: unknown,
+): void {
   const representation = ssrDomPropertyRepresentation(tag, property);
   if (representation === "attribute") return;
   if (representation === "text" && typeof value === "string") return;
-  throw new Error(`vx-dom/server: property ${property} has no stable SSR representation on <${tag}>`);
+  throw new Error(
+    `vx-dom/server: property ${property} has no stable SSR representation on <${tag}>`,
+  );
 }
 
-function validateTextareaValue(vnode: Extract<VNode, { kind: "element" }>): void {
-  if (vnode.tag !== "textarea" || !Object.hasOwn(vnode.props ?? {}, "value")) return;
+function validateTextareaValue(
+  vnode: Extract<VNode, { kind: "element" }>,
+): void {
+  if (vnode.tag !== "textarea" || !Object.hasOwn(vnode.props ?? {}, "value"))
+    return;
   const value = vnode.props?.value;
-  if (typeof value !== "string" || textareaText(vnode.children ?? []) !== value) {
-    throw new Error("vx-dom/server: textarea value must match its text children for hydration");
+  if (
+    typeof value !== "string" ||
+    textareaText(vnode.children ?? []) !== value
+  ) {
+    throw new Error(
+      "vx-dom/server: textarea value must match its text children for hydration",
+    );
   }
 }
 
 function textareaText(children: VNode[]): string {
-  return children.map((child) => {
-    if (child.kind === "text") return child.value;
-    if (child.kind === "fragment") return textareaText(child.children);
-    throw new Error("vx-dom/server: textarea elements may only contain text");
-  }).join("");
+  return children
+    .map((child) => {
+      if (child.kind === "text") return child.value;
+      if (child.kind === "fragment") return textareaText(child.children);
+      throw new Error("vx-dom/server: textarea elements may only contain text");
+    })
+    .join("");
 }
 
 function escapeText(value: string): string {
@@ -205,33 +213,6 @@ function escapeText(value: string): string {
 
 function escapeAttribute(value: string): string {
   return escapeText(value).replace(/"/g, "&quot;");
-}
-
-async function resolveInstanceForRender(
-  options: Pick<RenderVxToStringOptions, "frame" | "tree" | "componentFn" | "instance" | "wasm" | "imports">,
-): Promise<WebAssembly.Instance | undefined> {
-  if (options.frame !== undefined || options.tree !== undefined || options.componentFn) return undefined;
-  if (options.instance) return options.instance;
-  if (!options.wasm) return undefined;
-  if (options.wasm instanceof WebAssembly.Module) {
-    return WebAssembly.instantiate(options.wasm, options.imports ?? {});
-  }
-  const result = (await WebAssembly.instantiate(
-    options.wasm as BufferSource,
-    options.imports ?? {},
-  )) as WebAssembly.WebAssemblyInstantiatedSource;
-  return result.instance;
-}
-
-function exportedComponent(
-  instance: WebAssembly.Instance,
-  exportName: string,
-): VoydComponentFn {
-  const entry = instance.exports[exportName];
-  if (typeof entry !== "function") {
-    throw new Error(`vx-dom/server: WebAssembly export ${exportName} is not a function`);
-  }
-  return entry as VoydComponentFn;
 }
 
 export type { VxRenderFrame };

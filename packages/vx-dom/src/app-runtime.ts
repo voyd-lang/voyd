@@ -7,7 +7,7 @@ import type {
   VxRuntimeStep,
   VxRuntimeSubscriptionMessage,
 } from "./types.js";
-import { decodeVxWire } from "./memory.js";
+import { decodeVxPayload } from "./memory.js";
 
 export type VoydVxAppHost = {
   run<T = unknown>(entryName: string, args?: unknown[]): Promise<T>;
@@ -47,26 +47,32 @@ type RuntimeResult = Record<string, unknown> & {
   subscriptions?: unknown;
 };
 
-type ProgramDescriptor = {
-  kind: "program";
-  initHandlerId: number;
-  hydrateHandlerId?: number;
-  stepHandlerId: number;
-  viewHandlerId: number;
-  subscriptionsHandlerId?: number;
-} | {
-  kind: "program_map_model";
-  handlerId: number;
-  hydrateHandlerId?: number;
-  child: ProgramDescriptor;
-} | {
-  kind: "program_map_message";
-  handlerId: number;
-  child: ProgramDescriptor;
-};
+type ProgramDescriptor =
+  | {
+      kind: "program";
+      initHandlerId: number;
+      hydrateHandlerId?: number;
+      stepHandlerId: number;
+      viewHandlerId: number;
+      subscriptionsHandlerId?: number;
+    }
+  | {
+      kind: "program_map_model";
+      handlerId: number;
+      hydrateHandlerId?: number;
+      child: ProgramDescriptor;
+    }
+  | {
+      kind: "program_map_message";
+      handlerId: number;
+      child: ProgramDescriptor;
+    };
 
 type TaskObserver = (taskId: number) => Promise<unknown>;
-type RetainedDispatch = (handlerId: number, payload: unknown) => Promise<unknown>;
+type RetainedDispatch = (
+  handlerId: number,
+  payload: unknown,
+) => Promise<unknown>;
 
 type ProgramDescriptorRunner = {
   hydrate(model: unknown): Promise<RuntimeResult>;
@@ -95,7 +101,8 @@ export function createVoydVxAppRuntime(
   options: CreateVoydVxAppRuntimeOptions,
 ): VxAppRuntime {
   const entryNames = { ...defaultExports, ...options.exports };
-  const appEntryName = options.app === false ? undefined : options.app ?? "app";
+  const appEntryName =
+    options.app === false ? undefined : (options.app ?? "app");
   const shouldUseProgramDescriptor =
     !options.exports &&
     appEntryName !== undefined &&
@@ -114,17 +121,21 @@ export function createVoydVxAppRuntime(
 
   const requireRetainedCallbacks = () => {
     if (!options.host.retainedCallbacks) {
-      throw new Error("vx-dom: Program descriptors require retained callback support");
+      throw new Error(
+        "vx-dom: Program descriptors require retained callback support",
+      );
     }
     return options.host.retainedCallbacks;
   };
 
-  const readProgramRunner = async (): Promise<ProgramDescriptorRunner | undefined> => {
+  const readProgramRunner = async (): Promise<
+    ProgramDescriptorRunner | undefined
+  > => {
     if (!shouldUseProgramDescriptor || !appEntryName) return undefined;
     if (programRunner) return programRunner;
     programRunner = createProgramDescriptorRunner({
       descriptor: parseProgramDescriptor(
-        decodeVxWire(await options.host.run(appEntryName)),
+        decodeVxPayload(await options.host.run(appEntryName)),
       ),
       host: options.host,
       dispatch: runProgramHandler,
@@ -136,7 +147,7 @@ export function createVoydVxAppRuntime(
     handlerId: number,
     payload: unknown,
   ): Promise<T> =>
-    decodeVxWire(
+    decodeVxPayload(
       await Promise.resolve(
         requireRetainedCallbacks().dispatch(handlerId, payload) as T,
       ),
@@ -154,7 +165,7 @@ export function createVoydVxAppRuntime(
             entryNames.view,
             options.viewReceivesModel === false ? [] : [requireModel()],
           );
-      frame = decodeVxWire(frame);
+      frame = decodeVxPayload(frame);
       componentState.finishRender(frame);
       if (!componentState.isDirty()) return frame;
     }
@@ -162,13 +173,13 @@ export function createVoydVxAppRuntime(
   };
 
   const readSubscriptions = async (): Promise<unknown> =>
-    decodeVxWire(
+    decodeVxPayload(
       await readProgramRunner().then((descriptor) =>
         descriptor
-        ? descriptor.subscriptions()
-        : entryNames.subscriptions
-          ? options.host.run(entryNames.subscriptions, [requireModel()])
-          : undefined,
+          ? descriptor.subscriptions()
+          : entryNames.subscriptions
+            ? options.host.run(entryNames.subscriptions, [requireModel()])
+            : undefined,
       ),
     );
 
@@ -176,7 +187,7 @@ export function createVoydVxAppRuntime(
     result: unknown,
     adoptPlainModel: boolean,
   ): Promise<VxRuntimeStep> => {
-    result = decodeVxWire(result);
+    result = decodeVxPayload(result);
     const resolvedResult = await resolveProgramResultMaps(
       result,
       runProgramHandler,
@@ -346,7 +357,10 @@ function createProgramDescriptorRunner({
         ? result.model
         : undefined;
       const mappedModel = await dispatch(descriptor.handlerId, modelInput);
-      return copyTaskObserver(result, { ...result, model: mappedModel }) as RuntimeResult;
+      return copyTaskObserver(result, {
+        ...result,
+        model: mappedModel,
+      }) as RuntimeResult;
     };
     return {
       hydrate: async (model) => {
@@ -378,7 +392,13 @@ function createProgramDescriptorRunner({
           ? { frame: mapProgramFrame(result.frame, descriptor.handlerId) }
           : {}),
         ...(Object.hasOwn(result, "commands")
-          ? { commands: mapProgramEnvelope(result.commands, "cmd", descriptor.handlerId) }
+          ? {
+              commands: mapProgramEnvelope(
+                result.commands,
+                "cmd",
+                descriptor.handlerId,
+              ),
+            }
           : {}),
         ...(Object.hasOwn(result, "subscriptions")
           ? {
@@ -402,7 +422,8 @@ function createProgramDescriptorRunner({
             : message;
         return mapMessages(await child.step(childMessage));
       },
-      view: async () => mapProgramFrame(await child.view(), descriptor.handlerId),
+      view: async () =>
+        mapProgramFrame(await child.view(), descriptor.handlerId),
       subscriptions: async () =>
         mapProgramEnvelope(
           await child.subscriptions(),
@@ -442,7 +463,10 @@ function createProgramDescriptorRunner({
     result: unknown,
     adoptPlainModel: boolean,
   ): Promise<RuntimeResult> =>
-    adoptResult(await resolveProgramResultMaps(result, dispatch), adoptPlainModel);
+    adoptResult(
+      await resolveProgramResultMaps(result, dispatch),
+      adoptPlainModel,
+    );
 
   return {
     hydrate: async (nextModel) => {
@@ -457,14 +481,20 @@ function createProgramDescriptorRunner({
       );
     },
     init: async () =>
-      adoptLifecycleResult(await dispatch(descriptor.initHandlerId, undefined), true),
+      adoptLifecycleResult(
+        await dispatch(descriptor.initHandlerId, undefined),
+        true,
+      ),
     step: async (message) => {
       const resolved = await resolveRuntimeMessage(host, message);
       if (resolved === noRuntimeMessage) {
         return runtimeResult({ model: requireLocalModel() });
       }
       return adoptLifecycleResult(
-        await dispatch(descriptor.stepHandlerId, [requireLocalModel(), resolved]),
+        await dispatch(descriptor.stepHandlerId, [
+          requireLocalModel(),
+          resolved,
+        ]),
         true,
       );
     },
@@ -493,7 +523,8 @@ async function resolveRuntimeMessage(
 ): Promise<unknown> {
   if (message.kind === "msgpack") return message.value;
   if (message.kind === "event") return resolveEventMessage(host, message);
-  if (message.kind === "subscription") return resolveSubscriptionMessage(message);
+  if (message.kind === "subscription")
+    return resolveSubscriptionMessage(message);
   if (message.kind === "map") return resolveMapMessage(host, message);
   return message;
 }
@@ -523,7 +554,9 @@ async function resolveMapMessage(
   return host.retainedCallbacks?.dispatch(message.handlerId, child) ?? child;
 }
 
-function resolveSubscriptionMessage(message: VxRuntimeSubscriptionMessage): unknown {
+function resolveSubscriptionMessage(
+  message: VxRuntimeSubscriptionMessage,
+): unknown {
   return Object.hasOwn(message, "value") ? message.value : message.payload;
 }
 
@@ -534,10 +567,15 @@ function eventPayloadFallback(payload: NormalizedEventPayload): unknown {
 function readTaskObserver(input: unknown): TaskObserver | undefined {
   if (!isRecord(input)) return undefined;
   const observer = input[taskObserverProperty];
-  return typeof observer === "function" ? observer as TaskObserver : undefined;
+  return typeof observer === "function"
+    ? (observer as TaskObserver)
+    : undefined;
 }
 
-function attachTaskObserver(input: unknown, observer: TaskObserver | undefined): unknown {
+function attachTaskObserver(
+  input: unknown,
+  observer: TaskObserver | undefined,
+): unknown {
   if (!observer || !isRecord(input)) return input;
   Object.defineProperty(input, taskObserverProperty, {
     configurable: true,
@@ -556,9 +594,10 @@ async function resolveProgramResultMaps(
   if (input.kind === "program_map_model") {
     const child = await resolveProgramResultMaps(input.child, dispatch);
     const handlerId = readProgramMapHandlerId(input, "program_map_model");
-    const modelInput = isRuntimeResult(child) && Object.hasOwn(child, "model")
-      ? child.model
-      : child;
+    const modelInput =
+      isRuntimeResult(child) && Object.hasOwn(child, "model")
+        ? child.model
+        : child;
     const mappedModel = await dispatch(handlerId, modelInput);
     if (!isRuntimeResult(child)) return mappedModel;
     return copyTaskObserver(child, { ...child, model: mappedModel });
@@ -577,7 +616,13 @@ async function resolveProgramResultMaps(
         ? { commands: mapProgramEnvelope(child.commands, "cmd", handlerId) }
         : {}),
       ...(Object.hasOwn(child, "subscriptions")
-        ? { subscriptions: mapProgramEnvelope(child.subscriptions, "sub", handlerId) }
+        ? {
+            subscriptions: mapProgramEnvelope(
+              child.subscriptions,
+              "sub",
+              handlerId,
+            ),
+          }
         : {}),
     });
   }
@@ -654,9 +699,10 @@ function isRecord(input: unknown): input is Record<PropertyKey, unknown> {
 function parseProgramDescriptor(input: unknown): ProgramDescriptor {
   const kind = readField(input, "kind");
   if (kind === "program_map_model" || kind === "program_map_message") {
-    const hydrateHandlerId = kind === "program_map_model"
-      ? readOptionalNumberField(input, "hydrateHandlerId")
-      : undefined;
+    const hydrateHandlerId =
+      kind === "program_map_model"
+        ? readOptionalNumberField(input, "hydrateHandlerId")
+        : undefined;
     return {
       kind,
       handlerId: readNumberField(input, "handlerId"),
@@ -666,7 +712,9 @@ function parseProgramDescriptor(input: unknown): ProgramDescriptor {
   }
 
   if (kind !== "program") {
-    throw new Error("vx-dom: app export did not return a VX program descriptor");
+    throw new Error(
+      "vx-dom: app export did not return a VX program descriptor",
+    );
   }
   const initHandlerId = readNumberField(input, "initHandlerId");
   const hydrateHandlerId = readOptionalNumberField(input, "hydrateHandlerId");
@@ -689,16 +737,23 @@ function parseProgramDescriptor(input: unknown): ProgramDescriptor {
 function readNumberField(input: unknown, name: string): number {
   const value = readField(input, name);
   if (typeof value !== "number") {
-    throw new Error(`vx-dom: program descriptor field ${name} must be a number`);
+    throw new Error(
+      `vx-dom: program descriptor field ${name} must be a number`,
+    );
   }
   return value;
 }
 
-function readOptionalNumberField(input: unknown, name: string): number | undefined {
+function readOptionalNumberField(
+  input: unknown,
+  name: string,
+): number | undefined {
   const value = readField(input, name);
   if (value === undefined) return undefined;
   if (typeof value !== "number") {
-    throw new Error(`vx-dom: program descriptor field ${name} must be a number`);
+    throw new Error(
+      `vx-dom: program descriptor field ${name} must be a number`,
+    );
   }
   return value;
 }

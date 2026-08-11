@@ -2852,11 +2852,65 @@ export const nominalSatisfies = (
       return false;
     }
     return expectedDesc.typeArgs.every((expectedArg, index) => {
+      const actualArg = actualDesc.typeArgs[index]!;
+      const liftsStaticVxPlan =
+        actualDesc.owner.moduleId === "std::vx" &&
+        (actualDesc.name === "Html" || actualDesc.name === "Attr");
+      if (liftsStaticVxPlan) {
+        if (actualArg === ctx.primitives.void) {
+          return true;
+        }
+        const actualArgDesc = ctx.arena.get(actualArg);
+        if (
+          actualArgDesc.kind === "union" &&
+          actualArgDesc.members.includes(ctx.primitives.void)
+        ) {
+          const messageMembers = actualArgDesc.members.filter(
+            (member) => member !== ctx.primitives.void,
+          );
+          if (messageMembers.length > 0) {
+            const lifted = unifyWithBudget({
+              actual: ctx.arena.internUnion(messageMembers),
+              expected: expectedArg,
+              options: {
+                location: ctx.hir.module.ast,
+                reason: "static VX plan lifting",
+                variance: "covariant",
+              },
+              ctx,
+            });
+            if (lifted.ok) {
+              return true;
+            }
+          }
+        }
+      }
       if (expectedArg === ctx.primitives.unknown) {
         return true;
       }
+      const actualNestedNominal = getNominalComponent(actualArg, ctx);
+      const expectedNestedNominal = getNominalComponent(expectedArg, ctx);
+      if (
+        typeof actualNestedNominal === "number" &&
+        typeof expectedNestedNominal === "number"
+      ) {
+        const nestedDesc = ctx.arena.get(actualNestedNominal);
+        if (
+          (nestedDesc.kind === "nominal-object" ||
+            nestedDesc.kind === "value-object") &&
+          nestedDesc.owner.moduleId === "std::vx" &&
+          (nestedDesc.name === "Html" || nestedDesc.name === "Attr")
+        ) {
+          return nominalSatisfies(
+            actualNestedNominal,
+            expectedNestedNominal,
+            ctx,
+            state,
+          );
+        }
+      }
       const result = unifyWithBudget({
-        actual: actualDesc.typeArgs[index]!,
+        actual: actualArg,
         expected: expectedArg,
         options: {
           location: ctx.hir.module.ast,
@@ -2868,10 +2922,7 @@ export const nominalSatisfies = (
       if (result.ok) {
         return true;
       }
-      if (
-        state.mode === "relaxed" &&
-        actualDesc.typeArgs[index] === ctx.primitives.unknown
-      ) {
+      if (state.mode === "relaxed" && actualArg === ctx.primitives.unknown) {
         return true;
       }
       if (state.mode === "relaxed") {
@@ -3525,7 +3576,10 @@ export const ensureTypeMatches = (
       ],
     });
   }
-  if (typeSatisfiesBorrowFormation(actual, expected, ctx, state)) {
+  if (
+    typeSatisfiesBorrowFormation(actual, expected, ctx, state) ||
+    liftedVxPlanTypeSatisfies(actual, expected, ctx)
+  ) {
     return;
   }
 
@@ -3539,6 +3593,56 @@ export const ensureTypeMatches = (
     },
     span: span ?? ctx.hir.module.span,
   });
+};
+
+const liftedVxPlanTypeSatisfies = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+): boolean => {
+  const actualNominal = getNominalComponent(actual, ctx);
+  const expectedNominal = getNominalComponent(expected, ctx);
+  if (
+    typeof actualNominal !== "number" ||
+    typeof expectedNominal !== "number"
+  ) {
+    return false;
+  }
+  const actualDesc = ctx.arena.get(actualNominal);
+  const expectedDesc = ctx.arena.get(expectedNominal);
+  if (
+    (actualDesc.kind !== "nominal-object" &&
+      actualDesc.kind !== "value-object") ||
+    expectedDesc.kind !== actualDesc.kind ||
+    actualDesc.owner.moduleId !== "std::vx" ||
+    (actualDesc.name !== "Html" && actualDesc.name !== "Attr") ||
+    !symbolRefEquals(actualDesc.owner, expectedDesc.owner) ||
+    actualDesc.typeArgs.length !== 1 ||
+    expectedDesc.typeArgs.length !== 1
+  ) {
+    return false;
+  }
+  const actualArgDesc = ctx.arena.get(actualDesc.typeArgs[0]!);
+  if (
+    actualArgDesc.kind !== "union" ||
+    !actualArgDesc.members.includes(ctx.primitives.void)
+  ) {
+    return false;
+  }
+  const messageMembers = actualArgDesc.members.filter(
+    (member) => member !== ctx.primitives.void,
+  );
+  if (messageMembers.length === 0) return false;
+  return unifyWithBudget({
+    actual: ctx.arena.internUnion(messageMembers),
+    expected: expectedDesc.typeArgs[0]!,
+    options: {
+      location: ctx.hir.module.ast,
+      reason: "static VX plan lifting",
+      variance: "covariant",
+    },
+    ctx,
+  }).ok;
 };
 
 const typeIdToDiagnosticString = (
@@ -3748,7 +3852,7 @@ const bindTypeParamRef = ({
   }
 
   const existing = bindings.get(expectedDesc.param);
-  if (!existing) {
+  if (typeof existing !== "number") {
     bindings.set(expectedDesc.param, actual);
     return;
   }
@@ -3757,7 +3861,9 @@ const bindTypeParamRef = ({
   }
   if (typeSatisfies(existing, actual, ctx, state)) {
     bindings.set(expectedDesc.param, actual);
+    return;
   }
+  bindings.set(expectedDesc.param, ctx.arena.internUnion([existing, actual]));
 };
 
 const bindNominalObject = ({
@@ -4004,13 +4110,12 @@ const bindTypeParamsFromUnion = ({
   state: TypingState;
 }): Map<TypeParamId, TypeId> | undefined => {
   const actualDesc = ctx.arena.get(actual);
-  if (actualDesc.kind !== "union") {
-    return undefined;
-  }
+  const actualMembers =
+    actualDesc.kind === "union" ? actualDesc.members : [actual];
 
   const repeatedNominalBindings = bindRepeatedNominalUnionMember({
     expectedMembers,
-    actualMembers: actualDesc.members,
+    actualMembers,
     bindings,
     ctx,
     state,
@@ -4042,7 +4147,7 @@ const bindTypeParamsFromUnion = ({
 
   const candidates = findUnionBindingCandidates({
     expectedMembers: subsetMembers,
-    actualMembers: actualDesc.members,
+    actualMembers,
     bindings,
     ctx,
     state,
@@ -4052,12 +4157,12 @@ const bindTypeParamsFromUnion = ({
   }
   const maxCoverage = candidates.reduce((max, candidate) => {
     const coverage =
-      actualDesc.members.length - candidate.remainingActualMembers.length;
+      actualMembers.length - candidate.remainingActualMembers.length;
     return coverage > max ? coverage : max;
   }, 0);
   const filteredCandidates = candidates.filter(
     (candidate) =>
-      actualDesc.members.length - candidate.remainingActualMembers.length ===
+      actualMembers.length - candidate.remainingActualMembers.length ===
       maxCoverage,
   );
 

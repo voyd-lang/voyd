@@ -8,10 +8,10 @@ import {
   createBrowserVxRuntimeHost,
   createVxDomRenderer,
   createVoydVxAppRuntime,
-  decodeVxWire,
   mountVxApp,
-  renderMsgPackNode,
+  renderVxNode,
   type VxAppRuntime,
+  type VoydVxAppHost,
 } from "@voyd-lang/vx-dom";
 
 const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
@@ -89,12 +89,11 @@ const expectCompileSuccess = (
 
 const WEB_PACKAGE_COMPILE_TIMEOUT_MS = 240_000;
 const vxDomSdk = createSdk();
-const fixtureCompilations = new Map<
-  string,
-  Promise<SuccessfulCompileResult>
->();
+const fixtureCompilations = new Map<string, Promise<SuccessfulCompileResult>>();
 
-const compileFixture = (entryPath: string): Promise<SuccessfulCompileResult> => {
+const compileFixture = (
+  entryPath: string,
+): Promise<SuccessfulCompileResult> => {
   const existing = fixtureCompilations.get(entryPath);
   if (existing) {
     return existing;
@@ -107,13 +106,25 @@ const compileFixture = (entryPath: string): Promise<SuccessfulCompileResult> => 
   return compilation;
 };
 
-const expectBasicSvgTree = (tree: unknown, html: string): void => {
-  expect(html).toBe(
-    '<svg viewBox="0 0 24 24"><path d="M1 1h2"></path></svg>',
+const readVxExport = (
+  host: VoydVxAppHost,
+  entryName: string,
+): Promise<unknown> =>
+  Promise.resolve(
+    createVoydVxAppRuntime({
+      host,
+      app: false,
+      initialModel: {},
+      exports: { view: entryName },
+      viewReceivesModel: false,
+    }).render(),
   );
 
+const expectBasicSvgTree = (tree: unknown, html: string): void => {
+  expect(html).toBe('<svg viewBox="0 0 24 24"><path d="M1 1h2"></path></svg>');
+
   const container = document.createElement("div");
-  const renderer = renderMsgPackNode(tree, container);
+  const renderer = renderVxNode(tree, container);
   const svg = container.querySelector("svg")!;
   const path = svg.querySelector("path")!;
   expect(svg.namespaceURI).toBe("http://www.w3.org/2000/svg");
@@ -124,9 +135,12 @@ const expectBasicSvgTree = (tree: unknown, html: string): void => {
 };
 
 describe("integration: compiled VX DOM rendering", () => {
-  it("hydrates pkg::web output and renders SVG in default builds", async () => {
-    const result = expectCompileSuccess(await vxDomSdk.compile({
-      source: `
+  it(
+    "hydrates pkg::web output and renders SVG in default builds",
+    async () => {
+      const result = expectCompileSuccess(
+        await vxDomSdk.compile({
+          source: `
 use pkg::web::{
   append_hydration,
   document,
@@ -248,107 +262,140 @@ pub fn multi_document() -> String
     )
   )
 `,
-    }));
-    const [
-      tree,
-      html,
-      svgTree,
-      svgHtml,
-      svgIntegrationPointTree,
-      svgIntegrationPointHtml,
-      multiDocument,
-    ] = await Promise.all([
-      result.run<unknown>({ entryName: "tree" }),
-      result.run<string>({ entryName: "html" }),
-      result.run<unknown>({ entryName: "svg_tree" }),
-      result.run<string>({ entryName: "svg_html" }),
-      result.run<unknown>({ entryName: "svg_integration_point_tree" }),
-      result.run<string>({ entryName: "svg_integration_point_html" }),
-      result.run<string>({ entryName: "multi_document" }),
-    ]);
-    expectBasicSvgTree(svgTree, svgHtml);
-    expect(svgIntegrationPointHtml).toBe(
-      "<svg><title><div>Title</div></title><desc><span>Description</span></desc></svg>",
-    );
-    const svgContainer = document.createElement("div");
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-    const titleDiv = document.createElement("div");
-    titleDiv.textContent = "Title";
-    title.appendChild(titleDiv);
-    const desc = document.createElementNS("http://www.w3.org/2000/svg", "desc");
-    const descSpan = document.createElement("span");
-    descSpan.textContent = "Description";
-    desc.appendChild(descSpan);
-    svg.append(title, desc);
-    svgContainer.appendChild(svg);
-    const onSvgHydrationMismatch = vi.fn();
-    createVxDomRenderer(svgContainer, {
-      onHydrationMismatch: onSvgHydrationMismatch,
-    }).hydrate(svgIntegrationPointTree);
-    expect(titleDiv?.namespaceURI).toBe("http://www.w3.org/1999/xhtml");
-    expect(descSpan?.namespaceURI).toBe("http://www.w3.org/1999/xhtml");
-    expect(svgContainer.querySelector("title > div")).toBe(titleDiv);
-    expect(svgContainer.querySelector("desc > span")).toBe(descSpan);
-    expect(onSvgHydrationMismatch).not.toHaveBeenCalled();
-    const clientSvgContainer = document.createElement("div");
-    const svgRenderer = renderMsgPackNode(
-      svgIntegrationPointTree,
-      clientSvgContainer,
-    );
-    expect(clientSvgContainer.querySelector("title > div")?.namespaceURI).toBe(
-      "http://www.w3.org/1999/xhtml",
-    );
-    expect(clientSvgContainer.querySelector("desc > span")?.namespaceURI).toBe(
-      "http://www.w3.org/1999/xhtml",
-    );
-    svgRenderer.dispose();
-    const container = document.createElement("div");
-    container.innerHTML = html;
-    const section = container.querySelector("section");
-    const input = container.querySelector("input");
-    const style = container.querySelector("style");
-    const text = section?.lastChild;
-    const onHydrationMismatch = vi.fn();
+        }),
+      );
+      const [
+        tree,
+        html,
+        svgTree,
+        svgHtml,
+        svgIntegrationPointTree,
+        svgIntegrationPointHtml,
+        multiDocument,
+      ] = await Promise.all([
+        result.run<unknown>({ entryName: "tree" }),
+        result.run<string>({ entryName: "html" }),
+        result.run<unknown>({ entryName: "svg_tree" }),
+        result.run<string>({ entryName: "svg_html" }),
+        result.run<unknown>({ entryName: "svg_integration_point_tree" }),
+        result.run<string>({ entryName: "svg_integration_point_html" }),
+        result.run<string>({ entryName: "multi_document" }),
+      ]);
+      expectBasicSvgTree(svgTree, svgHtml);
+      expect(svgIntegrationPointHtml).toBe(
+        "<svg><title><div>Title</div></title><desc><span>Description</span></desc></svg>",
+      );
+      const svgContainer = document.createElement("div");
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      const title = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "title",
+      );
+      const titleDiv = document.createElement("div");
+      titleDiv.textContent = "Title";
+      title.appendChild(titleDiv);
+      const desc = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "desc",
+      );
+      const descSpan = document.createElement("span");
+      descSpan.textContent = "Description";
+      desc.appendChild(descSpan);
+      svg.append(title, desc);
+      svgContainer.appendChild(svg);
+      const onSvgHydrationMismatch = vi.fn();
+      createVxDomRenderer(svgContainer, {
+        onHydrationMismatch: onSvgHydrationMismatch,
+      }).hydrate(svgIntegrationPointTree);
+      expect(titleDiv?.namespaceURI).toBe("http://www.w3.org/1999/xhtml");
+      expect(descSpan?.namespaceURI).toBe("http://www.w3.org/1999/xhtml");
+      expect(svgContainer.querySelector("title > div")).toBe(titleDiv);
+      expect(svgContainer.querySelector("desc > span")).toBe(descSpan);
+      expect(onSvgHydrationMismatch).not.toHaveBeenCalled();
+      const clientSvgContainer = document.createElement("div");
+      const svgRenderer = renderVxNode(
+        svgIntegrationPointTree,
+        clientSvgContainer,
+      );
+      expect(
+        clientSvgContainer.querySelector("title > div")?.namespaceURI,
+      ).toBe("http://www.w3.org/1999/xhtml");
+      expect(
+        clientSvgContainer.querySelector("desc > span")?.namespaceURI,
+      ).toBe("http://www.w3.org/1999/xhtml");
+      svgRenderer.dispose();
+      const container = document.createElement("div");
+      container.innerHTML = html;
+      const section = container.querySelector("section");
+      const input = container.querySelector("input");
+      const style = container.querySelector("style");
+      const text = section?.lastChild;
+      const onHydrationMismatch = vi.fn();
 
-    createVxDomRenderer(container, { onHydrationMismatch }).hydrate(tree);
+      createVxDomRenderer(container, { onHydrationMismatch }).hydrate(tree);
 
-    expect(container.querySelector("section")).toBe(section);
-    expect(container.querySelector("input")).toBe(input);
-    expect(container.querySelector("style")).toBe(style);
-    expect(container.querySelector("section")?.lastChild).toBe(text);
-    expect(style?.textContent).toBe("a > b { color: red }");
-    expect(onHydrationMismatch).not.toHaveBeenCalled();
-    expect(multiDocument).toContain('data-voyd-hydration-id="one"');
-    expect(multiDocument).toContain('data-voyd-hydration-id="two"');
-    await expect(result.run<string>({ entryName: "invalid_void_html" })).rejects.toThrow();
-    await expect(result.run<string>({ entryName: "uppercase_tag_html" })).rejects.toThrow();
-    await expect(result.run<string>({ entryName: "uppercase_attribute_html" })).rejects.toThrow();
-    await Promise.all(
-      [
-        "br", "div", "fedropshadow", "font", "foo:bar", "foreignobject",
-        "listing", "lineargradient", "p", "pre", "span", "table",
-        "ForeignObject", "PATH",
-      ].map((tag) =>
-        expect(result.run<string>({
-          entryName: "invalid_svg_tag_html",
-          args: [tag],
-        })).rejects.toThrow()
-      ),
-    );
-    await Promise.all(
-      ["viewbox", "attributename", "ViewBox"].map((name) =>
-        expect(result.run<string>({
-          entryName: "invalid_svg_attr_html",
-          args: [name],
-        })).rejects.toThrow()
-      ),
-    );
+      expect(container.querySelector("section")).toBe(section);
+      expect(container.querySelector("input")).toBe(input);
+      expect(container.querySelector("style")).toBe(style);
+      expect(container.querySelector("section")?.lastChild).toBe(text);
+      expect(style?.textContent).toBe("a > b { color: red }");
+      expect(onHydrationMismatch).not.toHaveBeenCalled();
+      expect(multiDocument).toContain('data-voyd-hydration-id="one"');
+      expect(multiDocument).toContain('data-voyd-hydration-id="two"');
+      await expect(
+        result.run<string>({ entryName: "invalid_void_html" }),
+      ).rejects.toThrow();
+      await expect(
+        result.run<string>({ entryName: "uppercase_tag_html" }),
+      ).rejects.toThrow();
+      await expect(
+        result.run<string>({ entryName: "uppercase_attribute_html" }),
+      ).rejects.toThrow();
+      await Promise.all(
+        [
+          "br",
+          "div",
+          "fedropshadow",
+          "font",
+          "foo:bar",
+          "foreignobject",
+          "listing",
+          "lineargradient",
+          "p",
+          "pre",
+          "span",
+          "table",
+          "ForeignObject",
+          "PATH",
+        ].map((tag) =>
+          expect(
+            result.run<string>({
+              entryName: "invalid_svg_tag_html",
+              args: [tag],
+            }),
+          ).rejects.toThrow(),
+        ),
+      );
+      await Promise.all(
+        ["viewbox", "attributename", "ViewBox"].map((name) =>
+          expect(
+            result.run<string>({
+              entryName: "invalid_svg_attr_html",
+              args: [name],
+            }),
+          ).rejects.toThrow(),
+        ),
+      );
 
-    const host = await createVoydHost({ wasm: result.wasm, bufferSize: 256 * 1024 });
-    await host.run("static_event_tree");
-    expect(host.retainedCallbacks.size()).toBe(0);
-  }, WEB_PACKAGE_COMPILE_TIMEOUT_MS);
+      const host = await createVoydHost({
+        wasm: result.wasm,
+        bufferSize: 256 * 1024,
+      });
+      await host.run("static_event_tree");
+      expect(host.retainedCallbacks.size()).toBe(0);
+    },
+    WEB_PACKAGE_COMPILE_TIMEOUT_MS,
+  );
 
   it("renders a JS-backed Markdown package as an ordinary VX component", async () => {
     const result = expectCompileSuccess(
@@ -358,10 +405,14 @@ pub fn multi_document() -> String
       entryName: "main",
     });
     const container = document.createElement("div");
-    const renderer = renderMsgPackNode(tree, container);
+    const renderer = renderVxNode(tree, container);
 
-    expect(container.querySelector("h1")?.textContent).toContain("Voyd Markdown");
-    expect(container.querySelector("article")?.className).toBe("markdown-example");
+    expect(container.querySelector("h1")?.textContent).toContain(
+      "Voyd Markdown",
+    );
+    expect(container.querySelector("article")?.className).toBe(
+      "markdown-example",
+    );
     renderer.dispose();
   });
 
@@ -399,7 +450,7 @@ pub fn multi_document() -> String
     const tree = await result.run<unknown>({ entryName: "main" });
 
     const container = document.createElement("div");
-    const renderer = renderMsgPackNode(tree, container);
+    const renderer = renderVxNode(tree, container);
 
     expect(container.querySelector("h2")?.textContent).toBe("Voyd + VX");
     expect(
@@ -419,23 +470,27 @@ pub fn multi_document() -> String
       }),
     );
 
-    expect(decodeVxWire(await result.run({ entryName: "main" }))).toMatchObject({
+    const container = document.createElement("div");
+    const renderer = renderVxNode(
+      await result.run({ entryName: "main" }),
+      container,
+    );
+    expect(renderer.getSnapshot()?.root).toMatchObject({
       kind: "element",
       tag: "button",
       attrs: { class: "icon-small", "aria-label": "Close" },
     });
+    renderer.dispose();
   });
 
   it("dispatches static event messages from compiled Voyd VX nodes", async () => {
     const entryPath = path.join(fixtureRoot, "vx.voyd");
-    const result = expectCompileSuccess(
-      await vxDomSdk.compile({ entryPath }),
-    );
+    const result = expectCompileSuccess(await vxDomSdk.compile({ entryPath }));
     const host = await createVoydHost({
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const tree = decodeVxWire(await host.run("event_message_button"));
+    const tree = await readVxExport(host, "event_message_button");
     const seenMessages: unknown[] = [];
     const app: VxAppRuntime = {
       retainedCallbacks: host.retainedCallbacks,
@@ -472,7 +527,7 @@ pub fn multi_document() -> String
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const tree = decodeVxWire(await host.run("main")) as {
+    const tree = (await readVxExport(host, "main")) as {
       events?: Array<{ handlerId?: number }>;
     };
     const handlerId = tree.events?.[0]?.handlerId;
@@ -494,7 +549,7 @@ pub fn multi_document() -> String
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const tree = decodeVxWire(await host.run("input_echo")) as {
+    const tree = (await readVxExport(host, "input_echo")) as {
       events?: Array<{ handlerId?: number }>;
     };
     const handlerId = tree.events?.[0]?.handlerId;
@@ -520,7 +575,7 @@ pub fn multi_document() -> String
     });
     const tree = await host.run("value_shadow");
     const container = document.createElement("div");
-    const renderer = renderMsgPackNode(tree, container);
+    const renderer = renderVxNode(tree, container);
 
     expect(container.querySelector("input")?.value).toBe("hello");
     renderer.dispose();
@@ -601,106 +656,118 @@ pub fn multi_document() -> String
     expect(container.innerHTML).toBe("");
   });
 
-  it("keeps Voyd Orbit interactive after a typed API failure", async () => {
-    const result = expectCompileSuccess(
-      await vxDomSdk.compile({
-        entryPath: path.join(voydOrbitRoot, "src/client/pkg.voyd"),
-        roots: {
-          src: path.join(voydOrbitRoot, "src"),
-          pkgDirs: [path.resolve(import.meta.dirname, "../../../packages")],
-        },
-      }),
-    );
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("Orbit API unavailable", { status: 503 }),
-    );
-    const host = await createVoydHost({
-      wasm: result.wasm,
-      bufferSize: 4 * 1024 * 1024,
-      defaultAdapters: { runtime: "browser" },
-    });
-    const noSubscription = () => () => undefined;
-    const runtimeHost = createBrowserVxRuntimeHost({
-      commands: {
-        canvas_render: () => undefined,
-        canvas_measure_text: () => undefined,
-      },
-      subscriptions: {
-        animation_frame: noSubscription,
-        keyboard: noSubscription,
-        window_resize: noSubscription,
-      },
-    });
-    const container = document.createElement("div");
-    const onError = vi.fn();
-    const app = createVoydVxAppRuntime({ host });
-
-    try {
-      const mounted = await mountVxApp({
-        container,
-        app,
-        runtimeHost,
-        onError,
+  it(
+    "keeps Voyd Orbit interactive after a typed API failure",
+    async () => {
+      const result = expectCompileSuccess(
+        await vxDomSdk.compile({
+          entryPath: path.join(voydOrbitRoot, "src/client/pkg.voyd"),
+          roots: {
+            src: path.join(voydOrbitRoot, "src"),
+            pkgDirs: [path.resolve(import.meta.dirname, "../../../packages")],
+          },
+        }),
+      );
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(
+          new Response("Orbit API unavailable", { status: 503 }),
+        );
+      const host = await createVoydHost({
+        wasm: result.wasm,
+        bufferSize: 4 * 1024 * 1024,
+        defaultAdapters: { runtime: "browser" },
       });
-      const canvas = container.querySelector<HTMLCanvasElement>("#orbit-canvas");
-      expect(canvas).toBeDefined();
-      const pointerEvent = (type: string, pointerId: number) => {
-        const event = new Event(type, { bubbles: true });
-        Object.defineProperties(event, {
-          pointerId: { configurable: true, value: pointerId },
-          x: { configurable: true, value: 1 },
-          y: { configurable: true, value: 1 },
-          clientX: { configurable: true, value: 1 },
-          clientY: { configurable: true, value: 1 },
-          button: { configurable: true, value: 0 },
-          altKey: { configurable: true, value: false },
-          ctrlKey: { configurable: true, value: false },
-          metaKey: { configurable: true, value: false },
-          shiftKey: { configurable: true, value: false },
+      const noSubscription = () => () => undefined;
+      const runtimeHost = createBrowserVxRuntimeHost({
+        commands: {
+          canvas_render: () => undefined,
+          canvas_measure_text: () => undefined,
+        },
+        subscriptions: {
+          animation_frame: noSubscription,
+          keyboard: noSubscription,
+          window_resize: noSubscription,
+        },
+      });
+      const container = document.createElement("div");
+      const onError = vi.fn();
+      const app = createVoydVxAppRuntime({ host });
+
+      try {
+        const mounted = await mountVxApp({
+          container,
+          app,
+          runtimeHost,
+          onError,
         });
-        return event;
-      };
+        const canvas =
+          container.querySelector<HTMLCanvasElement>("#orbit-canvas");
+        expect(canvas).toBeDefined();
+        const pointerEvent = (type: string, pointerId: number) => {
+          const event = new Event(type, { bubbles: true });
+          Object.defineProperties(event, {
+            pointerId: { configurable: true, value: pointerId },
+            x: { configurable: true, value: 1 },
+            y: { configurable: true, value: 1 },
+            clientX: { configurable: true, value: 1 },
+            clientY: { configurable: true, value: 1 },
+            button: { configurable: true, value: 0 },
+            altKey: { configurable: true, value: false },
+            ctrlKey: { configurable: true, value: false },
+            metaKey: { configurable: true, value: false },
+            shiftKey: { configurable: true, value: false },
+          });
+          return event;
+        };
 
-      canvas?.dispatchEvent(pointerEvent("pointerdown", 7));
-      await nextTurn();
-      expect(container.querySelector("#orbit-canvas")?.className).toContain("dragging");
-      canvas?.dispatchEvent(pointerEvent("pointercancel", 8));
-      await nextTurn();
-      expect(container.querySelector("#orbit-canvas")?.className).toContain("dragging");
-      canvas?.dispatchEvent(pointerEvent("pointercancel", 7));
-      await nextTurn();
-      expect(container.querySelector("#orbit-canvas")?.className).toBe("simulation-canvas");
+        canvas?.dispatchEvent(pointerEvent("pointerdown", 7));
+        await nextTurn();
+        expect(container.querySelector("#orbit-canvas")?.className).toContain(
+          "dragging",
+        );
+        canvas?.dispatchEvent(pointerEvent("pointercancel", 8));
+        await nextTurn();
+        expect(container.querySelector("#orbit-canvas")?.className).toContain(
+          "dragging",
+        );
+        canvas?.dispatchEvent(pointerEvent("pointercancel", 7));
+        await nextTurn();
+        expect(container.querySelector("#orbit-canvas")?.className).toBe(
+          "simulation-canvas",
+        );
 
-      const saveButton = Array.from(
-        container.querySelectorAll<HTMLButtonElement>("button"),
-      ).find((button) => button.textContent?.trim() === "Save");
-      expect(saveButton).toBeDefined();
+        const saveButton = Array.from(
+          container.querySelectorAll<HTMLButtonElement>("button"),
+        ).find((button) => button.textContent?.trim() === "Save");
+        expect(saveButton).toBeDefined();
 
-      saveButton?.click();
-      await waitForTextContaining(
-        container,
-        '[role="status"]',
-        "Orbit API unavailable",
-        2_000,
-      );
+        saveButton?.click();
+        await waitForTextContaining(
+          container,
+          '[role="status"]',
+          "Orbit API unavailable",
+          2_000,
+        );
 
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/simulations");
-      expect(onError).not.toHaveBeenCalled();
-      const updatedSaveButton = container.querySelector<HTMLButtonElement>(
-        ".primary-button",
-      );
-      expect(updatedSaveButton?.disabled).toBe(false);
-      expect(container.querySelector('[role="status"]')?.textContent).toBe(
-        "Orbit API unavailable",
-      );
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/simulations");
+        expect(onError).not.toHaveBeenCalled();
+        const updatedSaveButton =
+          container.querySelector<HTMLButtonElement>(".primary-button");
+        expect(updatedSaveButton?.disabled).toBe(false);
+        expect(container.querySelector('[role="status"]')?.textContent).toBe(
+          "Orbit API unavailable",
+        );
 
-      mounted.dispose();
-      expect(container.innerHTML).toBe("");
-    } finally {
-      fetchSpy.mockRestore();
-    }
-  }, WEB_PACKAGE_COMPILE_TIMEOUT_MS);
+        mounted.dispose();
+        expect(container.innerHTML).toBe("");
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    },
+    WEB_PACKAGE_COMPILE_TIMEOUT_MS,
+  );
 
   it("runs the mini-wikipedia browser edit, save, and reload flow", async () => {
     const result = expectCompileSuccess(
@@ -963,12 +1030,13 @@ pub fn multi_document() -> String
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const commands = decodeVxWire(await host.run("standard_commands")) as {
+    const commands = (await readVxExport(host, "standard_commands")) as {
       children?: unknown[];
     };
-    const subscriptions = decodeVxWire(
-      await host.run("standard_subscriptions"),
-    ) as { children?: unknown[] };
+    const subscriptions = (await readVxExport(
+      host,
+      "standard_subscriptions",
+    )) as { children?: unknown[] };
 
     expect(commands.children).toHaveLength(21);
     expect(subscriptions.children).toHaveLength(13);
@@ -1079,7 +1147,7 @@ fn count_label(value: i32) -> String
     const tree = await result.run<unknown>({ entryName: "main" });
 
     const container = document.createElement("div");
-    const renderer = renderMsgPackNode(tree, container);
+    const renderer = renderVxNode(tree, container);
 
     expect(container.querySelector(".wiki-demo-shell")).not.toBeNull();
     expect(container.querySelector(".wiki-demo-status")?.textContent).toBe(

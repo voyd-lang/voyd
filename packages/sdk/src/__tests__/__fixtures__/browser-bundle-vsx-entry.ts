@@ -1,6 +1,6 @@
 import { createSdk } from "@voyd-lang/sdk/browser";
 import { createVoydHost } from "@voyd-lang/js-host";
-import { decodeVxWire } from "@voyd-lang/vx-dom";
+import { createVoydVxAppRuntime } from "@voyd-lang/vx-dom";
 
 type SmokeRunner = () => Promise<number>;
 
@@ -60,9 +60,13 @@ export const runBrowserVsxBundleSmoke: SmokeRunner = async () => {
   }
   const wasm = result.wasm;
   const host = await createVoydHost({ wasm, bufferSize: 256 * 1024 });
-  const tree = decodeVxWire(
-    await host.run<unknown>("main"),
-  ) as Record<string, unknown>;
+  const tree = (await createVoydVxAppRuntime({
+    host,
+    app: false,
+    initialModel: {},
+    exports: { view: "main" },
+    viewReceivesModel: false,
+  }).render()) as Record<string, unknown>;
   if (
     !tree ||
     typeof tree !== "object" ||
