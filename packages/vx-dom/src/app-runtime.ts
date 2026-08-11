@@ -20,7 +20,21 @@ export type VoydVxAppHost = {
     release?: (id: number) => void;
     releaseMany?: (ids: Iterable<number>) => void;
   };
+  transportFrame?: (frame: VxTransportFrame) => unknown;
 };
+
+type VxTransportFrame =
+  | {
+      kind: "vx-command";
+      sessionId: number;
+      commandId: number;
+      command: { fingerprint: string; value: unknown };
+    }
+  | {
+      kind: "vx-event";
+      sessionId: number;
+      event: { fingerprint: string; value: unknown };
+    };
 
 type ComponentEffectHandler = (continuation: any, ...args: any[]) => any;
 
@@ -96,10 +110,16 @@ const runtimeResult = (value: Omit<RuntimeResult, "$vx">): RuntimeResult => ({
 });
 
 const noRuntimeMessage = Symbol("vx.noRuntimeMessage");
+let nextVxSessionId = 1;
+
+const VX_COMMAND_FINGERPRINT = "voyd.vx.command-wire@1";
+const VX_EVENT_FINGERPRINT = "voyd.vx.event-wire@1";
 
 export function createVoydVxAppRuntime(
   options: CreateVoydVxAppRuntimeOptions,
 ): VxAppRuntime {
+  const sessionId = nextVxSessionId++;
+  let nextCommandId = 1;
   const entryNames = { ...defaultExports, ...options.exports };
   const appEntryName =
     options.app === false ? undefined : (options.app ?? "app");
@@ -211,7 +231,7 @@ export function createVoydVxAppRuntime(
       : await readSubscriptions();
 
     const commands = attachTaskObserver(
-      runtimeResult?.commands,
+      transportCommand(runtimeResult?.commands),
       readTaskObserver(resolvedResult) ?? readTaskObserver(result),
     );
 
@@ -242,6 +262,7 @@ export function createVoydVxAppRuntime(
     },
     render,
     dispatch: async (message) => {
+      message = transportEvent(message);
       const descriptor = await readProgramRunner();
       if (!descriptor) {
         const resolved = await resolveRuntimeMessage(options.host, message);
@@ -262,6 +283,43 @@ export function createVoydVxAppRuntime(
     },
     getSnapshot: () => model,
   };
+
+  function transportCommand(command: unknown): unknown {
+    if (command === undefined || !options.host.transportFrame) return command;
+    const commandId = nextCommandId++;
+    const frame = options.host.transportFrame({
+      kind: "vx-command",
+      sessionId,
+      commandId,
+      command: { fingerprint: VX_COMMAND_FINGERPRINT, value: command },
+    }) as VxTransportFrame;
+    if (
+      frame.kind !== "vx-command" ||
+      frame.sessionId !== sessionId ||
+      frame.commandId !== commandId ||
+      frame.command.fingerprint !== VX_COMMAND_FINGERPRINT
+    ) {
+      throw new Error("vx-dom: host returned an incompatible command frame");
+    }
+    return frame.command.value;
+  }
+
+  function transportEvent(message: VxRuntimeMessage): VxRuntimeMessage {
+    if (!options.host.transportFrame) return message;
+    const frame = options.host.transportFrame({
+      kind: "vx-event",
+      sessionId,
+      event: { fingerprint: VX_EVENT_FINGERPRINT, value: message },
+    }) as VxTransportFrame;
+    if (
+      frame.kind !== "vx-event" ||
+      frame.sessionId !== sessionId ||
+      frame.event.fingerprint !== VX_EVENT_FINGERPRINT
+    ) {
+      throw new Error("vx-dom: host returned an incompatible event frame");
+    }
+    return frame.event.value as VxRuntimeMessage;
+  }
 }
 
 function createComponentStateRuntime(host: VoydVxAppHost): {

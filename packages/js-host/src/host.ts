@@ -78,7 +78,10 @@ import {
   parseExternalRequirements,
   registerExternalAdapterHandlers,
 } from "./protocol/external.js";
-import { HostFrameFailureError } from "./protocol/host-frame.js";
+import {
+  HostFrameFailureError,
+  type HostFrame,
+} from "./protocol/host-frame.js";
 
 export type HostInitOptions = {
   wasm: Uint8Array | WebAssembly.Module;
@@ -122,6 +125,7 @@ export type VoydHost = {
     args?: unknown[],
   ) => Promise<T>;
   run: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
+  transportFrame: (frame: HostFrame) => HostFrame;
   retainedCallbacks: RetainedEventHandlerRegistry;
 };
 
@@ -932,6 +936,16 @@ export const createVoydHost = async ({
     metadata: exportAbi.host,
     adapters: transportAdapters,
   });
+  const transportFrame = (frame: HostFrame): HostFrame => {
+    const encoded = transport.encodeFrame(frame);
+    if (encoded.length > bufferSize) {
+      throw new Error(
+        `host frame ${frame.kind} exceeds buffer size (${encoded.length} > ${bufferSize})`,
+      );
+    }
+    return transport.decodeFrame(encoded);
+  };
+  let nextCancellationOperationId = 1;
   const externalRequirements = parseExternalRequirements(module);
   const effectSchemasByOpIndex: Array<EffectBoundarySchemas | undefined> =
     parsedTable.ops.map((op) => op.boundary);
@@ -2807,7 +2821,19 @@ export const createVoydHost = async ({
       outcome: publicOutcome,
       observeTask,
       cancel: (reason?: unknown): boolean => {
-        const cancelled = run.cancel(reason);
+        const operationId = nextCancellationOperationId++;
+        const request = transportFrame({
+          kind: "cancellation",
+          operationId,
+          ...(reason === undefined ? {} : { reason: String(reason) }),
+        });
+        if (
+          request.kind !== "cancellation" ||
+          request.operationId !== operationId
+        ) {
+          throw new Error("managed run received an incompatible cancellation frame");
+        }
+        const cancelled = run.cancel(request.reason);
         if (cancelled) {
           const state = liveState;
           if (state) {
@@ -2821,7 +2847,20 @@ export const createVoydHost = async ({
             });
           }
         }
-        return cancelled;
+        const acknowledgement = transportFrame({
+          kind: "cancellation-acknowledgement",
+          operationId,
+          accepted: cancelled,
+        });
+        if (
+          acknowledgement.kind !== "cancellation-acknowledgement" ||
+          acknowledgement.operationId !== operationId
+        ) {
+          throw new Error(
+            "managed run received an incompatible cancellation acknowledgement",
+          );
+        }
+        return acknowledgement.accepted;
       },
     };
     const internalOutcomeWithCleanup = run.outcome.finally(async () => {
@@ -3032,6 +3071,7 @@ export const createVoydHost = async ({
     runManaged,
     runEffectful,
     run,
+    transportFrame,
     retainedCallbacks: callbackRegistry,
   };
 

@@ -74,6 +74,49 @@ describe("createVoydVxAppRuntime", () => {
     });
   });
 
+  it("routes command and event traffic through versioned VX frames", async () => {
+    const seen: unknown[] = [];
+    const host = fakeHost({
+      init: async () => ({
+        $vx: "runtime_result",
+        model: 0,
+        frame: textFrame("Boot"),
+        commands: { type: "cmd", kind: "message", value: "tick" },
+      }),
+      step: async ([model]) => ({
+        $vx: "runtime_result",
+        model,
+        frame: textFrame("Stepped"),
+      }),
+    });
+    host.transportFrame = (frame) => {
+      seen.push(frame);
+      return structuredClone(frame);
+    };
+    const app = createVoydVxAppRuntime({ host });
+
+    await app.init?.();
+    await app.dispatch({ kind: "value", value: "tick" });
+
+    expect(seen).toEqual([
+      expect.objectContaining({
+        kind: "vx-command",
+        command: expect.objectContaining({
+          fingerprint: "voyd.vx.command-wire@1",
+        }),
+      }),
+      expect.objectContaining({
+        kind: "vx-event",
+        event: expect.objectContaining({
+          fingerprint: "voyd.vx.event-wire@1",
+        }),
+      }),
+    ]);
+    expect((seen[0] as { sessionId: number }).sessionId).toBe(
+      (seen[1] as { sessionId: number }).sessionId,
+    );
+  });
+
   it("maps program result models and outward messages", async () => {
     const retainedDispatch = vi.fn(async (id: number, payload: unknown) => {
       if (id === 31) return { parent: payload };
