@@ -90,6 +90,12 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   subscription, program, and canvas composition now retains typed semantic
   plans and creates the private MessagePack renderer wire only at the VX host
   boundary.
+- VX plans are lowered lazily when their DTO representation crosses a host or
+  server-rendering boundary. Building and combining plans no longer performs
+  an eager encode/decode cycle.
+- `std::web` HTML rendering accepts `Html<Msg>` for any message type, so
+  server-rendered event handlers keep their real message type. The public raw
+  `std::vx::lower_html` byte escape hatch has been removed.
 - `Cmd::task(work:, handler:)` has been removed. Use
   `Cmd::perform(work:, handler:)` or pass an existing `Task<T>` with
   `Cmd::perform(task:, handler:)`.

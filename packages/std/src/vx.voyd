@@ -5,7 +5,6 @@ use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
 use std::error::panic
-use std::fixed_array::fns::all
 use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
@@ -21,20 +20,21 @@ pub use self::command::{ Cmd, Ref }
 /// Opaque virtual DOM node plan. The message parameter records the event
 /// message type while the renderer wire stays private to VX.
 type VxLower = fn() : () -> MsgPack
-pub obj Html<Msg> { thunk: FixedArray<VxLower> }
+obj VxPlan { thunk: Array<VxLower> }
+pub obj Html<Msg> { plan: VxPlan }
 
 /// Opaque virtual DOM attribute or event plan.
-pub obj Attr<Msg> { thunk: FixedArray<VxLower> }
+pub obj Attr<Msg> { plan: VxPlan }
 pub type HtmlInput<Msg> = Html<void> | Html<Msg>
 pub type AttrInput<Msg> = Attr<void> | Attr<Msg>
-type VxThunkPlan = { thunk: FixedArray<VxLower> }
+type VxThunkPlan = { plan: VxPlan }
 pub type RenderKey = String
 
 pub obj Program<Model, Msg> {
-  thunk: FixedArray<VxLower>
+  plan: VxPlan
 }
 
-pub obj Sub<Msg> { thunk: FixedArray<VxLower> }
+pub obj Sub<Msg> { plan: VxPlan }
 
 fn lower_program<Model, Msg>(value: Program<Model, Msg>) -> MsgPack
   lower_vx_plan(value)
@@ -49,24 +49,24 @@ fn lower_html_attr<Msg>(value: Attr<Msg>) -> MsgPack
   lower_vx_plan(value)
 
 fn html_plan<Msg>(run: VxLower) -> Html<Msg>
-  Html<Msg> { thunk: vx_thunk(run) }
+  Html<Msg> { plan: vx_plan(run) }
 
 fn attr_plan<Msg>(run: VxLower) -> Attr<Msg>
-  Attr<Msg> { thunk: vx_thunk(run) }
+  Attr<Msg> { plan: vx_plan(run) }
 
 fn program_plan<Model, Msg>(run: VxLower) -> Program<Model, Msg>
-  Program<Model, Msg> { thunk: vx_thunk(run) }
+  Program<Model, Msg> { plan: vx_plan(run) }
 
 fn subscription_plan<Msg>(run: VxLower) -> Sub<Msg>
-  Sub<Msg> { thunk: vx_thunk(run) }
+  Sub<Msg> { plan: vx_plan(run) }
 
-fn vx_thunk(run: VxLower) -> FixedArray<VxLower>
-  let thunk = new_fixed_array<VxLower>(1)
-  thunk.set<VxLower>(0, run)
-  thunk
+fn vx_plan(run: VxLower) -> VxPlan
+  let ~thunk = Array<VxLower>::with_capacity(1)
+  thunk.push(run)
+  VxPlan { thunk: thunk }
 
 fn lower_vx_plan(value: VxThunkPlan) -> MsgPack
-  match(value.thunk.get<VxLower>(0))
+  match(value.plan.thunk.get<VxLower>(0))
     Some<VxLower> { value: run }:
       run()
     None:
@@ -79,7 +79,7 @@ impl<Model, Msg> CustomDto<Program<Model, Msg>, Bytes> for Program<Model, Msg>
   fn read(value: Bytes) -> Result<Program<Model, Msg>, CustomDtoError>
     Ok<Program<Model, Msg>> {
       value: Program<Model, Msg> {
-        thunk: vx_thunk(() -> MsgPack => decode_vx_wire(value))
+        plan: vx_plan(() -> MsgPack => decode_vx_wire(value))
       }
     }
 
@@ -90,7 +90,7 @@ impl<Msg> CustomDto<Sub<Msg>, Bytes> for Sub<Msg>
   fn read(value: Bytes) -> Result<Sub<Msg>, CustomDtoError>
     Ok<Sub<Msg>> {
       value: Sub<Msg> {
-        thunk: vx_thunk(() -> MsgPack => decode_vx_wire(value))
+        plan: vx_plan(() -> MsgPack => decode_vx_wire(value))
       }
     }
 
@@ -110,7 +110,7 @@ impl<Msg> CustomDto<Html<Msg>, Bytes> for Html<Msg>
   fn read(value: Bytes) -> Result<Html<Msg>, CustomDtoError>
     Ok<Html<Msg>> {
       value: Html<Msg> {
-        thunk: vx_thunk(() -> MsgPack => decode_vx_wire(value))
+        plan: vx_plan(() -> MsgPack => decode_vx_wire(value))
       }
     }
 
@@ -121,7 +121,7 @@ impl<Msg> CustomDto<Attr<Msg>, Bytes> for Attr<Msg>
   fn read(value: Bytes) -> Result<Attr<Msg>, CustomDtoError>
     Ok<Attr<Msg>> {
       value: Attr<Msg> {
-        thunk: vx_thunk(() -> MsgPack => decode_vx_wire(value))
+        plan: vx_plan(() -> MsgPack => decode_vx_wire(value))
       }
     }
 
@@ -139,14 +139,10 @@ fn decode_vx_wire(value: Bytes) -> MsgPack
     Err:
       msgpack::make_null()
 
-/// Lowers an opaque HTML plan to the immutable VX renderer wire.
-pub fn lower_html(value: Html<void>) -> Bytes
-  encode_vx_wire(lower_html_node(value))
-
 /// Lifts a static node into a typed message tree. The node cannot emit a
 /// message, so changing its phantom message type is safe.
 pub fn static_html<Msg>(value: Html<void>) -> Html<Msg>
-  Html<Msg> { thunk: value.thunk }
+  Html<Msg> { plan: value.plan }
 
 fn typed_html_node_payloads<Msg>(values: Array<Html<Msg>>) -> Array<MsgPack>
   let ~out = Array<MsgPack>::with_capacity(values.len())
@@ -714,7 +710,7 @@ pub fn task<Key, T>({ key: Key, task: Task<T> }): Component -> Unit
   Unit {}
 
 /// Associates closure-backed handlers in a prebuilt view with the active server render.
-pub fn claim_server_render_callbacks(value: Html<void>): () -> void
+pub fn claim_server_render_callbacks<Msg>(value: Html<Msg>): () -> void
   claim_server_render_callbacks_in(lower_html_node(value))
 
 fn claim_server_render_callbacks_in(value: MsgPack): () -> void
@@ -815,7 +811,7 @@ pub fn html_child<Msg>(value: Html<Msg>): () -> Html<Msg>
   value
 
 pub fn html_child<Msg>(value: HtmlInput<Msg>): () -> Html<Msg>
-  Html<Msg> { thunk: value.thunk }
+  Html<Msg> { plan: value.plan }
 
 /// Converts interpolated text into an opaque child plan.
 pub fn html_child(value: String): () -> Html<void>

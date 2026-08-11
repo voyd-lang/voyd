@@ -1,6 +1,8 @@
 //! Server-side rendering helpers for current `std::vx` HTML values.
 
 use std::array::Array
+use std::data::{ DataBytes }
+use std::data::self as data
 use std::dict::Dict
 use std::error::panic
 use std::http::Response
@@ -30,8 +32,8 @@ impl IntoResponse<HtmlResponse> for HtmlResponse
     typed_responses<String>(status: 200, description: "HTML response", content_type: "text/html; charset=utf-8")
 
 /// Renders a VX value as a typed HTML response.
-pub fn html(value: vx::Html<void>) -> HtmlResponse
-  HtmlResponse { value: render(value) }
+pub fn html<Msg>(value: vx::Html<Msg>) -> HtmlResponse
+  HtmlResponse { value: render<Msg>(value) }
 
 /// Wraps already-rendered HTML as a typed response.
 pub fn html(value: String) -> HtmlResponse
@@ -49,68 +51,73 @@ pub obj Hydration<Model> {
 }
 
 @compiler_contract(id: "voyd.web.render-generic")
-pub fn render(value: vx::Html<void>) -> String
-  render_impl(value)
+pub fn render<Msg>(value: vx::Html<Msg>) -> String
+  render_impl<Msg>(value)
 
 @compiler_contract(id: "voyd.web.document-generic")
-pub fn document(value: vx::Html<void>) -> String
-  document_impl(value)
+pub fn document<Msg>(value: vx::Html<Msg>) -> String
+  document_impl<Msg>(value)
 
 @compiler_contract(id: "voyd.web.document-hydrated-generic")
-pub fn document<Model>({ view: vx::Html<void>, hydrate: Hydration<Model> }) -> String
-  hydrated_document_impl<Model>(view: view, hydrate: hydrate)
+pub fn document<Model, Msg>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
+  hydrated_document_impl<Model, Msg>(view: view, hydrate: hydrate)
 
 @compiler_contract(id: "voyd.web.hydrated-document-generic")
-pub fn hydrated_document<Model>({ view: vx::Html<void>, hydrate: Hydration<Model> }) -> String
-  hydrated_document_impl<Model>(view: view, hydrate: hydrate)
+pub fn hydrated_document<Model, Msg>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
+  hydrated_document_impl<Model, Msg>(view: view, hydrate: hydrate)
 
 @compiler_contract(id: "voyd.web.html-response-generic")
-pub fn html_response(response: Response, value: vx::Html<void>) -> Response
-  html_response_impl(response, value)
+pub fn html_response<Msg>(response: Response, value: vx::Html<Msg>) -> Response
+  html_response_impl<Msg>(response, value)
 
 @compiler_contract(id: "voyd.web.html-response-hydrated-generic")
-pub fn html_response<Model>(response: Response, { view: vx::Html<void>, hydrate: Hydration<Model> }) -> Response
-  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+pub fn html_response<Model, Msg>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model, Msg>(response, view: view, hydrate: hydrate)
 
 @compiler_contract(id: "voyd.web.hydrated-html-response-generic")
-pub fn hydrated_html_response<Model>(response: Response, { view: vx::Html<void>, hydrate: Hydration<Model> }) -> Response
-  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+pub fn hydrated_html_response<Model, Msg>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model, Msg>(response, view: view, hydrate: hydrate)
 
 @compiler_contract(id: "voyd.web.response-html-generic")
-pub fn html(response: Response, value: vx::Html<void>) -> Response
-  html_response_impl(response, value)
+pub fn html<Msg>(response: Response, value: vx::Html<Msg>) -> Response
+  html_response_impl<Msg>(response, value)
 
 @compiler_contract(id: "voyd.web.hydrated-response-html-generic")
-pub fn html<Model>(response: Response, { view: vx::Html<void>, hydrate: Hydration<Model> }) -> Response
-  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+pub fn html<Model, Msg>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model, Msg>(response, view: view, hydrate: hydrate)
 
-fn render_impl(value: vx::Html<void>) -> String
-  vx::claim_server_render_callbacks(value)
-  render_node(lower_html(value))
+fn render_impl<Msg>(value: vx::Html<Msg>) -> String
+  vx::claim_server_render_callbacks<Msg>(value)
+  render_node(lower_html<Msg>(value))
 
-fn document_impl(value: vx::Html<void>) -> String
-  "<!doctype html>".as_slice().to_string().concat(render_impl(value))
+fn document_impl<Msg>(value: vx::Html<Msg>) -> String
+  "<!doctype html>".as_slice().to_string().concat(render_impl<Msg>(value))
 
-fn hydrated_document_impl<Model>({ view: vx::Html<void>, hydrate: Hydration<Model> }) -> String
-  insert_hydration(document_impl(view), render_hydration<Model>(hydrate))
+fn hydrated_document_impl<Model, Msg>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
+  insert_hydration(document_impl<Msg>(view), render_hydration<Model>(hydrate))
 
 pub fn append_hydration<Model>(document: String, hydrate: Hydration<Model>) -> String
   insert_hydration(document, render_hydration<Model>(hydrate))
 
-fn html_response_impl(response: Response, value: vx::Html<void>) -> Response
+fn html_response_impl<Msg>(response: Response, value: vx::Html<Msg>) -> Response
   with_html_content_type(response)
-    .text(render_impl(value))
+    .text(render_impl<Msg>(value))
 
-fn hydrated_html_response_impl<Model>(response: Response, { view: vx::Html<void>, hydrate: Hydration<Model> }) -> Response
+fn hydrated_html_response_impl<Model, Msg>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
   with_html_content_type(response)
-    .text(hydrated_document_impl<Model>(view: view, hydrate: hydrate))
+    .text(hydrated_document_impl<Model, Msg>(view: view, hydrate: hydrate))
 
-fn lower_html(value: vx::Html<void>) -> MsgPack
-  match(msgpack::decode_value_bytes(vx::lower_html(value)))
-    Ok<MsgPack> { value }:
-      value
-    Err<MsgPackError>:
-      panic("invalid VX HTML plan")
+fn lower_html<Msg>(value: vx::Html<Msg>) -> MsgPack
+  match(data::encode(value))
+    DataBytes { value: bytes }:
+      match(msgpack::decode_value_bytes(bytes))
+        Ok<MsgPack> { value }:
+          value
+        Err<MsgPackError>:
+          panic("invalid VX HTML plan")
+          msgpack::make_null()
+    else:
+      panic("invalid VX HTML DTO representation")
       msgpack::make_null()
 
 fn with_html_content_type(response: Response): () -> Response
