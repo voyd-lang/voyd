@@ -120,13 +120,13 @@ export const buildExternalImportModule = ({
   adapters,
   bufferSize,
   getInstance,
-  transport,
+  getTransport,
 }: {
   requirements: ParsedExternalRequirements;
   adapters: readonly VoydPackageAdapter[];
   bufferSize: number;
   getInstance: () => WebAssembly.Instance;
-  transport: HostTransportAdapter;
+  getTransport: () => HostTransportAdapter;
 }): WebAssembly.Imports => {
   if (requirements.functions.length === 0) return {};
   if (requirements.version !== 1) {
@@ -172,6 +172,7 @@ export const buildExternalImportModule = ({
         outCap: number,
       ) => {
         const memory = requireMemory(getInstance());
+        const transport = getTransport();
         const invocation = transport.decodeFrame(
           new Uint8Array(memory.buffer, inPtr, inLen),
         );

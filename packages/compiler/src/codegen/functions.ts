@@ -111,8 +111,8 @@ import {
   markCustomDtoFunctionReachable as markCustomDtoBoundaryFunctionReachable,
 } from "./boundary/custom-dto-reachability.js";
 import {
+  buildSelectedHostTransportIdentity,
   enqueueSelectedHostTransportProviderReachability,
-  linkedSelectedHostTransportIdentity,
 } from "./host-transport/selected-provider.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
@@ -1770,7 +1770,11 @@ export const emitModuleExports = (
   );
   emitExportAbiSection({
     mod: ctx.mod,
-    transport: linkedSelectedHostTransportIdentity(ctx),
+    transport:
+      ctx.options.effectsHostBoundary !== "off" ||
+      ctx.options.boundaryExports !== false
+        ? buildSelectedHostTransportIdentity()
+        : undefined,
     entries: exportAbiEntries,
     taskCompletions,
     callbacks: Array.from(

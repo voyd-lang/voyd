@@ -284,6 +284,12 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
         }),
       }),
       expect.objectContaining({
+        name: "echo_user_profile",
+        abi: "serialized",
+        params: [expect.objectContaining({ kind: "record" })],
+        result: expect.objectContaining({ kind: "record" }),
+      }),
+      expect.objectContaining({
         name: "get_point",
         abi: "serialized",
         wrapperName: "__voyd_serialized_export_get_point",

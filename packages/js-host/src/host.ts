@@ -380,7 +380,7 @@ const buildRetainedCallbackImportModules = ({
   bufferSize,
   annotateTrap,
   runEffectfulRetainedCallback,
-  transport,
+  getTransport,
   decorateResult,
   scopeManager,
   getActiveScopeOwner,
@@ -393,7 +393,7 @@ const buildRetainedCallbackImportModules = ({
   bufferSize: number;
   annotateTrap: (error: unknown, opts?: VoydTrapAnnotation) => Error;
   runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner;
-  transport: HostTransportAdapter;
+  getTransport: () => HostTransportAdapter;
   decorateResult?: (value: unknown) => unknown;
   scopeManager: RetainedCallbackScopeManager;
   getActiveScopeOwner: () => RetainedCallbackScopeOwner | undefined;
@@ -471,7 +471,7 @@ const buildRetainedCallbackImportModules = ({
             name: LINEAR_MEMORY_EXPORT,
           });
           const invocationId = nextInvocationId();
-          const encodedPayload = transport.encodeFrame({
+          const encodedPayload = getTransport().encodeFrame({
             kind: "callback-invocation",
             invocationId,
             callbackId: 0,
@@ -538,7 +538,7 @@ const buildRetainedCallbackImportModules = ({
             throw new Error("retained callback payload exceeds buffer size");
           }
           const bytes = new Uint8Array(transportMemory.buffer, outPtr, written);
-          const completion = transport.decodeFrame(bytes);
+          const completion = getTransport().decodeFrame(bytes);
           if (
             completion.kind !== "callback-completion" ||
             completion.invocationId !== invocationId
@@ -986,18 +986,23 @@ export const createVoydHost = async ({
   const parsedTable = parseEffectTable(module, EFFECT_TABLE_EXPORT);
   const table = toHostProtocolTable(parsedTable);
   const exportAbi = parseExportAbi(module);
-  const transport = resolveHostTransport({
-    metadata: exportAbi.host,
-    adapters: transportAdapters,
-  });
+  let transport: HostTransportAdapter | undefined;
+  const requireTransport = (): HostTransportAdapter => {
+    transport ??= resolveHostTransport({
+      metadata: exportAbi.host,
+      adapters: transportAdapters,
+    });
+    return transport;
+  };
   const transportFrame = (frame: HostFrame): HostFrame => {
-    const encoded = transport.encodeFrame(frame);
+    const selectedTransport = requireTransport();
+    const encoded = selectedTransport.encodeFrame(frame);
     if (encoded.length > bufferSize) {
       throw new Error(
         `host frame ${frame.kind} exceeds buffer size (${encoded.length} > ${bufferSize})`,
       );
     }
-    return transport.decodeFrame(encoded);
+    return selectedTransport.decodeFrame(encoded);
   };
   let nextCancellationOperationId = 1;
   const externalRequirements = parseExternalRequirements(module);
@@ -1104,7 +1109,7 @@ export const createVoydHost = async ({
     annotateTrap,
     runEffectfulRetainedCallback: (params) =>
       runEffectfulRetainedCallback(params),
-    transport,
+    getTransport: requireTransport,
     decorateResult: (value) => attachTaskObserver(value, observeStandaloneTask),
     scopeManager: callbackScopeManager,
     getActiveScopeOwner: () => activeCallbackScopeOwner,
@@ -1128,7 +1133,7 @@ export const createVoydHost = async ({
       }
       return instanceRef;
     },
-    transport,
+    getTransport: requireTransport,
   });
   instanceRef = new WebAssembly.Instance(
     module,
@@ -1249,7 +1254,7 @@ export const createVoydHost = async ({
           args,
         })
       : args;
-    const encodedArgs = transport.encodeFrame({
+    const encodedArgs = requireTransport().encodeFrame({
       kind: "export-invocation",
       exportId: abi.id,
       args: boundaryArgs.map((value, index) => ({
@@ -1296,7 +1301,7 @@ export const createVoydHost = async ({
       );
     }
     const bytes = new Uint8Array(transportMemory.buffer, outPtr, written);
-    const completion = transport.decodeFrame(bytes);
+    const completion = requireTransport().decodeFrame(bytes);
     if (
       completion.kind !== "export-completion" ||
       completion.exportId !== abi.id
@@ -1439,7 +1444,7 @@ export const createVoydHost = async ({
             schemas,
             args,
           });
-          return transport.encodeFrame({
+          return requireTransport().encodeFrame({
             kind: "export-invocation",
             exportId: exportAbi.id,
             args: boundaryArgs.map((value, index) => {
@@ -1599,7 +1604,7 @@ export const createVoydHost = async ({
               transportMemory,
               bufferPtr,
               bufferSize,
-              transport,
+              transport: requireTransport(),
               registerResourceCleanup: registerRunResourceCleanup,
               annotateTrap,
               fallbackFunctionName: startRaw
@@ -1757,7 +1762,7 @@ export const createVoydHost = async ({
             value,
             schemas: frame.schemas,
           });
-      const encoded = transport.encodeFrame({
+      const encoded = requireTransport().encodeFrame({
         kind: "effect-outcome",
         requestId: frame.requestId,
         outcome: {
@@ -1834,7 +1839,7 @@ export const createVoydHost = async ({
           memory: transportMemory,
           ptr: bufferPtr,
           length: payloadLength,
-          transport,
+          transport: requireTransport(),
           completion,
         });
       } catch (error) {
@@ -2690,7 +2695,7 @@ export const createVoydHost = async ({
             );
             const payloadLength = effectLen(effectResult) as number;
             const request = effectCont(effectResult);
-            const frame = transport.decodeFrame(
+            const frame = requireTransport().decodeFrame(
               new Uint8Array(transportMemory.buffer, bufferPtr, payloadLength),
             );
             if (frame.kind !== "effect-request") {
@@ -3105,7 +3110,7 @@ export const createVoydHost = async ({
         `Voyd module is missing DTO metadata for retained callback ${callbackExportName}`,
       );
     }
-    const encodedPayload = transport.encodeFrame({
+    const encodedPayload = requireTransport().encodeFrame({
       kind: "callback-invocation",
       invocationId,
       callbackId: 0,
@@ -3228,7 +3233,7 @@ export const createVoydHost = async ({
           table,
           registerHandler,
           encodedPayloadSize: (value) =>
-            transport.encodeFrame({
+            requireTransport().encodeFrame({
               kind: "effect-outcome",
               requestId: 0x7fffffff,
               outcome: {
