@@ -30,36 +30,12 @@ const decodeDataValue = (value: unknown): unknown => {
       : typeof value.tag === "string"
         ? value.tag
         : undefined;
-  if (Array.isArray(value.fields) && variant === undefined) {
-    return decodeDataFields(value.fields);
-  }
   if (variant === undefined) {
     return Object.keys(value).length === 1 && Object.hasOwn(value, "node")
       ? decodeDataValue(value.node)
       : value;
   }
   switch (variant) {
-    case "DataNull":
-      return null;
-    case "DataBool":
-    case "DataI32":
-    case "DataI64":
-    case "DataF32":
-    case "DataF64":
-    case "DataString":
-    case "DataBytes":
-      return value.value;
-    case "DataArray":
-      return Array.isArray(value.values)
-        ? value.values.map(decodeDataValue)
-        : [];
-    case "DataObject":
-      return decodeDataFields(value.fields);
-    case "DataVariant":
-      return decodeDataValue({
-        tag: value.name,
-        ...decodeDataFields(value.fields),
-      });
     case "CommandNone":
       return { type: "cmd", kind: "none" };
     case "CommandMessage":
@@ -87,8 +63,8 @@ const decodeDataValue = (value: unknown): unknown => {
       return {
         type: "cmd",
         kind: value.kind,
-        ...(Object.hasOwn(value, "value")
-          ? { value: decodeDataValue(value.value) }
+        ...(Object.hasOwn(value, "payload")
+          ? { value: decodeEncodedPayload(value.payload) }
           : {}),
       };
     case "CommandReadClipboard":
@@ -123,8 +99,106 @@ const decodeDataValue = (value: unknown): unknown => {
           }
         : child;
     }
-    case "CommandLegacy":
-      return decodeDataValue(value.value);
+    case "CommandCanvasRender":
+      return {
+        type: "cmd",
+        kind: "canvas_render",
+        value: decodeEncodedPayload(value.payload),
+      };
+    case "CommandCanvasMeasureText":
+      return {
+        type: "cmd",
+        kind: "canvas_measure_text",
+        selector: value.selector,
+        value: value.value,
+        font: value.font,
+        handlerId: value.handler_ref,
+      };
+    case "SubscriptionNone":
+      return { type: "sub", kind: "none" };
+    case "SubscriptionBatch":
+      return {
+        type: "sub",
+        kind: "batch",
+        children: Array.isArray(value.children)
+          ? value.children.map(decodeDataValue)
+          : [],
+      };
+    case "SubscriptionRuntime":
+      return {
+        type: "sub",
+        kind: value.kind,
+        key: value.key,
+        ...(typeof value.event === "string" ? { event: value.event } : {}),
+        ...(typeof value.query === "string" ? { query: value.query } : {}),
+        ...(typeof value.name === "string" ? { name: value.name } : {}),
+        ...(typeof value.millis === "bigint"
+          ? { ms: Number(value.millis) }
+          : typeof value.millis === "number"
+            ? { ms: value.millis }
+            : {}),
+        ...(Object.hasOwn(value, "payload")
+          ? { value: decodeEncodedPayload(value.payload) }
+          : {}),
+      };
+    case "SubscriptionMap":
+      return {
+        type: "sub",
+        kind: "map",
+        child: decodeDataValue(value.child),
+        handlerId: value.handler_ref,
+        ...(typeof value.handler_key === "number"
+          ? { handlerKey: value.handler_key }
+          : {}),
+      };
+    case "SubscriptionOwned": {
+      const child = decodeDataValue(value.child);
+      return isRecord(child)
+        ? { ...child, __vxOwnedMapHandlerIds: [value.handler_ref] }
+        : child;
+    }
+    case "ProgramResult": {
+      const frame = decodeOptionalWire(value.frame);
+      const commands = decodeOptionalWire(value.commands);
+      const subscriptions = decodeOptionalWire(value.subscriptions);
+      return {
+        $vx: "runtime_result",
+        model: decodeEncodedPayload(value.model),
+        ...(frame !== undefined ? { frame } : {}),
+        ...(commands !== undefined ? { commands } : {}),
+        ...(subscriptions !== undefined ? { subscriptions } : {}),
+      };
+    }
+    case "ProgramMapModel": {
+      const hydrateHandlerId = decodeOptionalWire(value.hydrate_handler_ref);
+      return {
+        kind: "program_map_model",
+        child: decodeDataValue(value.child),
+        handlerId: value.handler_ref,
+        ...(typeof hydrateHandlerId === "number" ? { hydrateHandlerId } : {}),
+      };
+    }
+    case "ProgramMapMessage":
+      return {
+        kind: "program_map_message",
+        child: decodeDataValue(value.child),
+        handlerId: value.handler_ref,
+      };
+    case "ProgramHandlers": {
+      const subscriptionsHandlerId = decodeOptionalWire(
+        value.subscriptions_handler_ref,
+      );
+      return {
+        kind: "program",
+        initHandlerId: value.init_handler_ref,
+        hydrateHandlerId: value.hydrate_handler_ref,
+        stepHandlerId: value.step_handler_ref,
+        viewHandlerId: value.view_handler_ref,
+        ...(typeof subscriptionsHandlerId === "number"
+          ? { subscriptionsHandlerId }
+          : {}),
+      };
+    }
     case "AttrString":
     case "AttrBool":
     case "AttrI32":
@@ -251,15 +325,16 @@ const decodeEncodedPayload = (value: unknown): unknown => {
   return decodeMsgPack(value.bytes, { useBigInt64: true });
 };
 
-const decodeDataFields = (value: unknown): Record<string, unknown> => {
-  if (!Array.isArray(value)) return {};
-  return Object.fromEntries(
-    value.flatMap((field) =>
-      isRecord(field) && typeof field.name === "string"
-        ? [[field.name, decodeDataValue(field.value)] as const]
-        : [],
-    ),
-  );
+const decodeOptionalWire = (value: unknown): unknown => {
+  if (!isRecord(value)) return undefined;
+  const tag =
+    typeof value.$variant === "string"
+      ? value.$variant
+      : typeof value.tag === "string"
+        ? value.tag
+        : undefined;
+  if (tag === "None") return undefined;
+  return tag === "Some" ? decodeDataValue(value.value) : undefined;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

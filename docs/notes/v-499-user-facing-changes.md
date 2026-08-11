@@ -100,14 +100,16 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - VX plans are lowered lazily when their DTO representation crosses a host or
   server-rendering boundary. Building and combining plans no longer performs
   an eager encode/decode cycle.
-- VX boundary values now use the provider-neutral `DataValue` representation.
-  The DOM runtime receives decoded values from the selected host transport and
-  no longer decodes a nested MessagePack byte payload. Runtime value messages
-  use `kind: "value"`; the former `kind: "msgpack"` wrapper is removed.
-- Server rendering consumes the same provider-neutral VX wire and no longer
-  converts renderer plans through a MessagePack tree.
-- Component-local state, keyed scopes, and task keys use neutral DTO values;
-  the VX runtime no longer stores nested MessagePack byte payloads for them.
+- VX boundaries use private typed structural wires. Erased model, message,
+  command, subscription, canvas, state, keyed-scope, and task-key leaves carry
+  immutable encoded bytes together with their DTO fingerprint. The former
+  public `DataValue`/MessagePack plan maps and `kind: "msgpack"` wrapper are
+  removed.
+- Server rendering walks the typed HTML and attribute wire directly; it no
+  longer materializes a `DataValue`, JSON, or MessagePack tree.
+- Component-local state, keyed scopes, and task keys use fingerprinted encoded
+  payloads. Values with a mismatched DTO fingerprint are rejected before typed
+  decoding.
 - `std::web` HTML rendering accepts `Html<Msg>` for any message type, so
   server-rendered event handlers keep their real message type. The public raw
   `std::vx::lower_html` byte escape hatch has been removed.

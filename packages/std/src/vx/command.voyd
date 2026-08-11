@@ -1,15 +1,12 @@
 //! Core VX command envelope and constructors shared by VX feature modules.
 
 use std::array::Array
-use std::data::{ DataValue }
 use std::enums::{ enum }
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use std::task::Task
 use std::task::self as tasks
-use super::wire::{ WireMap }
-use super::wire::self as wire
 use super::payload::{ EncodedPayload, encode_payload }
 
 pub enum CommandWire
@@ -17,15 +14,20 @@ pub enum CommandWire
   CommandMessage { payload: EncodedPayload }
   CommandBatch { children: Array<CommandWire> }
   CommandMap { child: CommandWire, handler_id: i32 }
-  CommandRuntime { kind: String, value?: DataValue }
+  CommandRuntime { kind: String, payload?: EncodedPayload }
   CommandReadClipboard { handler_ref: i32 }
   CommandTask { task_ref: i32, handler_ref: i32 }
   CommandDelay { millis: i64, payload: EncodedPayload }
+  CommandCanvasRender { payload: EncodedPayload }
+  CommandCanvasMeasureText { selector: String, value: String, font: String, handler_ref: i32 }
   CommandOwned { child: CommandWire, handler_ref: i32 }
-  CommandLegacy { value: DataValue }
 
 type CommandLower = fn() : () -> CommandWire
-type RuntimeValueLower = fn() : () -> DataValue
+type RuntimeValueLower = fn() : () -> EncodedPayload
+
+obj WindowScrollPayload { x: f64, y: f64 }
+obj StorageEntryPayload { key: String, value: String }
+obj OpenUrlPayload { url: String, target: String }
 
 pub obj Cmd<Msg> { thunk: Array<CommandLower> }
 
@@ -33,9 +35,6 @@ pub fn command_plan<Msg>(run: CommandLower) -> Cmd<Msg>
   let ~thunk = Array<CommandLower>::with_capacity(1)
   thunk.push(run)
   Cmd<Msg> { thunk: thunk }
-
-pub fn legacy_command_plan<Msg>(run: fn() : () -> DataValue) -> Cmd<Msg>
-  command_plan<Msg>(() -> CommandWire => CommandWire::CommandLegacy { value: run() })
 
 pub fn lower_command<Msg>(value: Cmd<Msg>) -> CommandWire
   let run = value.thunk.at(0)
@@ -91,7 +90,7 @@ impl<Msg> Cmd<Msg>
     command_plan<Msg>(() -> CommandWire =>
       match(value)
         Some<RuntimeValueLower> { value: lower_value }:
-          CommandWire::CommandRuntime { kind, value: lower_value() }
+          CommandWire::CommandRuntime { kind, payload: lower_value() }
         None:
           CommandWire::CommandRuntime { kind }
     )
@@ -101,7 +100,7 @@ impl<Msg> Cmd<Msg>
 
   /// Copies text to the browser clipboard through the VX runtime host.
   api fn copy_to_clipboard(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "copy_to_clipboard", value: () -> DataValue => wire::make_string(value))
+    Cmd<Msg>::runtime(kind: "copy_to_clipboard", value: () -> EncodedPayload => encode_payload(value))
 
   api fn copy_to_clipboard(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::copy_to_clipboard(value.to_string())
@@ -118,28 +117,28 @@ impl<Msg> Cmd<Msg>
 
   /// Sets the browser document title through the VX runtime host.
   api fn set_document_title(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "set_document_title", value: () -> DataValue => wire::make_string(value))
+    Cmd<Msg>::runtime(kind: "set_document_title", value: () -> EncodedPayload => encode_payload(value))
 
   api fn set_document_title(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::set_document_title(value.to_string())
 
   /// Pushes a URL into browser history through the VX runtime host.
   api fn push_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "push_url", value: () -> DataValue => wire::make_string(value))
+    Cmd<Msg>::runtime(kind: "push_url", value: () -> EncodedPayload => encode_payload(value))
 
   api fn push_url(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::push_url(value.to_string())
 
   /// Replaces the current browser history URL through the VX runtime host.
   api fn replace_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "replace_url", value: () -> DataValue => wire::make_string(value))
+    Cmd<Msg>::runtime(kind: "replace_url", value: () -> EncodedPayload => encode_payload(value))
 
   api fn replace_url(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::replace_url(value.to_string())
 
   /// Replaces the browser location hash through the VX runtime host.
   api fn set_hash(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "set_hash", value: () -> DataValue => wire::make_string(value))
+    Cmd<Msg>::runtime(kind: "set_hash", value: () -> EncodedPayload => encode_payload(value))
 
   api fn set_hash(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::set_hash(value.to_string())
@@ -154,35 +153,35 @@ impl<Msg> Cmd<Msg>
 
   /// Opens a URL in a browser window or tab.
   api fn open_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "open_url", value: () -> DataValue => wire::make_string(value))
+    Cmd<Msg>::runtime(kind: "open_url", value: () -> EncodedPayload => encode_payload(value))
 
   api fn open_url(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::open_url(value.to_string())
 
   api fn open_url({ url: String, target: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "open_url", value: () -> DataValue => open_url_value(url: url, target: target))
+    Cmd<Msg>::runtime(kind: "open_url", value: () -> EncodedPayload => encode_payload(open_url_value(url: url, target: target)))
 
   api fn open_url({ url: StringSlice, target: StringSlice }) -> Cmd<Msg>
     Cmd<Msg>::open_url(url: url.to_string(), target: target.to_string())
 
   /// Scrolls the browser window to an absolute coordinate.
   api fn scroll_window_to({ x: f64, y: f64 }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_window_to", value: () -> DataValue => window_scroll_value(x: x, y: y))
+    Cmd<Msg>::runtime(kind: "scroll_window_to", value: () -> EncodedPayload => encode_payload(window_scroll_value(x: x, y: y)))
 
   /// Scrolls the browser window by a relative coordinate.
   api fn scroll_window_by({ x: f64, y: f64 }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_window_by", value: () -> DataValue => window_scroll_value(x: x, y: y))
+    Cmd<Msg>::runtime(kind: "scroll_window_by", value: () -> EncodedPayload => encode_payload(window_scroll_value(x: x, y: y)))
 
   /// Writes a string value into localStorage.
   api fn local_storage_set({ key: String, value: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "local_storage_set", value: () -> DataValue => storage_entry_value(key: key, value: value))
+    Cmd<Msg>::runtime(kind: "local_storage_set", value: () -> EncodedPayload => encode_payload(storage_entry_value(key: key, value: value)))
 
   api fn local_storage_set({ key: StringSlice, value: StringSlice }) -> Cmd<Msg>
     Cmd<Msg>::local_storage_set(key: key.to_string(), value: value.to_string())
 
   /// Removes a localStorage key.
   api fn local_storage_remove(key: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "local_storage_remove", value: () -> DataValue => wire::make_string(key))
+    Cmd<Msg>::runtime(kind: "local_storage_remove", value: () -> EncodedPayload => encode_payload(key))
 
   api fn local_storage_remove(key: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::local_storage_remove(key.to_string())
@@ -193,14 +192,14 @@ impl<Msg> Cmd<Msg>
 
   /// Writes a string value into sessionStorage.
   api fn session_storage_set({ key: String, value: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "session_storage_set", value: () -> DataValue => storage_entry_value(key: key, value: value))
+    Cmd<Msg>::runtime(kind: "session_storage_set", value: () -> EncodedPayload => encode_payload(storage_entry_value(key: key, value: value)))
 
   api fn session_storage_set({ key: StringSlice, value: StringSlice }) -> Cmd<Msg>
     Cmd<Msg>::session_storage_set(key: key.to_string(), value: value.to_string())
 
   /// Removes a sessionStorage key.
   api fn session_storage_remove(key: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "session_storage_remove", value: () -> DataValue => wire::make_string(key))
+    Cmd<Msg>::runtime(kind: "session_storage_remove", value: () -> EncodedPayload => encode_payload(key))
 
   api fn session_storage_remove(key: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::session_storage_remove(key.to_string())
@@ -237,34 +236,25 @@ impl<Msg> Cmd<Msg>
 
   /// Creates a DOM focus command for a constrained VX ref.
   api fn focus<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "focus", value: () -> DataValue => wire::make_string(target.id))
+    Cmd<Msg>::runtime(kind: "focus", value: () -> EncodedPayload => encode_payload(target.id))
 
   /// Creates a scroll-into-view command for a constrained VX ref.
   api fn scroll_into_view<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_into_view", value: () -> DataValue => wire::make_string(target.id))
+    Cmd<Msg>::runtime(kind: "scroll_into_view", value: () -> EncodedPayload => encode_payload(target.id))
 
   /// Selects text in an input-like DOM element found by `data-vx-ref`.
   api fn select_text<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "select_text", value: () -> DataValue => wire::make_string(target.id))
+    Cmd<Msg>::runtime(kind: "select_text", value: () -> EncodedPayload => encode_payload(target.id))
 
 
-fn window_scroll_value({ x: f64, y: f64 }) -> DataValue
-  let ~out = WireMap::init()
-  out.set("x", wire::make_f64(x))
-  out.set("y", wire::make_f64(y))
-  wire::make_map(out)
+fn window_scroll_value({ x: f64, y: f64 }) -> WindowScrollPayload
+  WindowScrollPayload { x, y }
 
-fn storage_entry_value({ key: String, value: String }) -> DataValue
-  let ~out = WireMap::init()
-  out.set("key", key)
-  out.set("value", value)
-  wire::make_map(out)
+fn storage_entry_value({ key: String, value: String }) -> StorageEntryPayload
+  StorageEntryPayload { key, value }
 
-fn open_url_value({ url: String, target: String }) -> DataValue
-  let ~out = WireMap::init()
-  out.set("url", url)
-  out.set("target", target)
-  wire::make_map(out)
+fn open_url_value({ url: String, target: String }) -> OpenUrlPayload
+  OpenUrlPayload { url, target }
 
 pub fn mark_owned_handler<Msg>(cmd: Cmd<Msg>, handler_id: i32) -> Cmd<Msg>
   command_plan<Msg>(() -> CommandWire =>

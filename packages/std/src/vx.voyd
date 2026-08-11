@@ -1,6 +1,5 @@
 use std::array::Array
-use std::data::{ CustomDto, CustomDtoError, DataValue }
-use std::data::self as data
+use std::data::{ CustomDto, CustomDtoError }
 use std::enums::{ enum }
 use std::error::panic
 use std::optional::types::all
@@ -10,9 +9,8 @@ use std::task::{ Task, TaskRuntime }
 use std::task::self as tasks
 
 pub self::canvas
-use self::wire::{ WireMap }
-use self::wire::self as wire
 use self::command::{ CommandWire, command_plan, lower_command, retain_typed_message_mapper }
+use self::payload::{ EncodedPayload, decode_payload, encode_payload }
 pub use self::command::{ Cmd, Ref }
 
 pub obj EventOptionsWire {
@@ -56,10 +54,46 @@ fn html_wire(node: HtmlWireNode) -> HtmlWire
 fn attr_wire(node: AttrWireNode) -> AttrWire
   AttrWire { node }
 
+pub enum SubscriptionWire
+  SubscriptionNone
+  SubscriptionBatch { children: Array<SubscriptionWire> }
+  SubscriptionRuntime {
+    kind: String,
+    key: String,
+    event?: String,
+    query?: String,
+    name?: String,
+    millis?: i64,
+    payload?: EncodedPayload
+  }
+  SubscriptionMap { child: SubscriptionWire, handler_ref: i32, handler_key?: i32 }
+  SubscriptionOwned { child: SubscriptionWire, handler_ref: i32 }
+
+pub enum ProgramWire
+  ProgramResult {
+    model: EncodedPayload,
+    frame: Optional<HtmlWire>,
+    commands: Optional<CommandWire>,
+    subscriptions: Optional<SubscriptionWire>
+  }
+  ProgramMapModel { child: ProgramWire, handler_ref: i32, hydrate_handler_ref: Optional<i32> }
+  ProgramMapMessage { child: ProgramWire, handler_ref: i32 }
+  ProgramHandlers {
+    init_handler_ref: i32,
+    hydrate_handler_ref: i32,
+    step_handler_ref: i32,
+    view_handler_ref: i32,
+    subscriptions_handler_ref: Optional<i32>
+  }
+
+type ProgramLower = fn() : () -> ProgramWire
+obj ProgramPlan { thunk: Array<ProgramLower> }
+type SubscriptionLower = fn() : () -> SubscriptionWire
+obj SubscriptionPlan { thunk: Array<SubscriptionLower> }
+type PayloadLower = fn() : () -> EncodedPayload
+
 /// Opaque virtual DOM node plan. The message parameter records the event
 /// message type while the renderer wire stays private to VX.
-type VxLower = fn() : () -> DataValue
-obj VxPlan { thunk: Array<VxLower> }
 type HtmlLower = fn() : () -> HtmlWire
 obj HtmlPlan { thunk: Array<HtmlLower> }
 type HtmlThunkPlan = { plan: HtmlPlan }
@@ -72,20 +106,21 @@ type AttrThunkPlan = { plan: AttrPlan }
 pub obj Attr<Msg> { plan: AttrPlan }
 pub type HtmlInput<Msg> = Html<void> | Html<Msg>
 pub type AttrInput<Msg> = Attr<void> | Attr<Msg>
-type VxThunkPlan = { plan: VxPlan }
 pub type RenderKey = String
 
 pub obj Program<Model, Msg> {
-  plan: VxPlan
+  plan: ProgramPlan
 }
 
-pub obj Sub<Msg> { plan: VxPlan }
+pub obj Sub<Msg> { plan: SubscriptionPlan }
 
-fn lower_program<Model, Msg>(value: Program<Model, Msg>) -> DataValue
-  lower_vx_plan(value)
+fn lower_program<Model, Msg>(value: Program<Model, Msg>) -> ProgramWire
+  let run = value.plan.thunk.at(0)
+  run()
 
-fn lower_sub<Msg>(value: Sub<Msg>) -> DataValue
-  lower_vx_plan(value)
+fn lower_sub<Msg>(value: Sub<Msg>) -> SubscriptionWire
+  let run = value.plan.thunk.at(0)
+  run()
 
 pub fn lower_html_node<Msg>(value: Html<Msg>) -> HtmlWire
   let run = value.plan.thunk.at(0)
@@ -105,44 +140,32 @@ fn attr_plan<Msg>(run: AttrLower) -> Attr<Msg>
   thunk.push(run)
   Attr<Msg> { plan: AttrPlan { thunk } }
 
-fn program_plan<Model, Msg>(run: VxLower) -> Program<Model, Msg>
-  Program<Model, Msg> { plan: vx_plan(run) }
-
-fn subscription_plan<Msg>(run: VxLower) -> Sub<Msg>
-  Sub<Msg> { plan: vx_plan(run) }
-
-fn vx_plan(run: VxLower) -> VxPlan
-  let ~thunk = Array<VxLower>::with_capacity(1)
+fn program_plan<Model, Msg>(run: ProgramLower) -> Program<Model, Msg>
+  let ~thunk = Array<ProgramLower>::with_capacity(1)
   thunk.push(run)
-  VxPlan { thunk: thunk }
+  Program<Model, Msg> { plan: ProgramPlan { thunk } }
 
-fn lower_vx_plan(value: VxThunkPlan) -> DataValue
-  match(value.plan.thunk.get<VxLower>(0))
-    Some<VxLower> { value: run }:
-      run()
-    None:
-      wire::make_null()
+fn subscription_plan<Msg>(run: SubscriptionLower) -> Sub<Msg>
+  let ~thunk = Array<SubscriptionLower>::with_capacity(1)
+  thunk.push(run)
+  Sub<Msg> { plan: SubscriptionPlan { thunk } }
 
-impl<Model, Msg> CustomDto<Program<Model, Msg>, DataValue> for Program<Model, Msg>
-  fn write(value: Program<Model, Msg>) -> DataValue
-    wire::to_data_value(lower_program(value))
+impl<Model, Msg> CustomDto<Program<Model, Msg>, ProgramWire> for Program<Model, Msg>
+  fn write(value: Program<Model, Msg>) -> ProgramWire
+    lower_program(value)
 
-  fn read(value: DataValue) -> Result<Program<Model, Msg>, CustomDtoError>
+  fn read(value: ProgramWire) -> Result<Program<Model, Msg>, CustomDtoError>
     Ok<Program<Model, Msg>> {
-      value: Program<Model, Msg> {
-        plan: vx_plan(() -> DataValue => wire::from_data_value(value))
-      }
+      value: program_plan<Model, Msg>(() -> ProgramWire => value)
     }
 
-impl<Msg> CustomDto<Sub<Msg>, DataValue> for Sub<Msg>
-  fn write(value: Sub<Msg>) -> DataValue
-    wire::to_data_value(lower_sub(value))
+impl<Msg> CustomDto<Sub<Msg>, SubscriptionWire> for Sub<Msg>
+  fn write(value: Sub<Msg>) -> SubscriptionWire
+    lower_sub(value)
 
-  fn read(value: DataValue) -> Result<Sub<Msg>, CustomDtoError>
+  fn read(value: SubscriptionWire) -> Result<Sub<Msg>, CustomDtoError>
     Ok<Sub<Msg>> {
-      value: Sub<Msg> {
-        plan: vx_plan(() -> DataValue => wire::from_data_value(value))
-      }
+      value: subscription_plan<Msg>(() -> SubscriptionWire => value)
     }
 
 impl<Msg> CustomDto<Cmd<Msg>, CommandWire> for Cmd<Msg>
@@ -326,15 +349,15 @@ pub type GenericEvent = {
 
 @effect(id: "voyd.std.vx.component")
 pub eff Component
-  state_scope(tail, key: DataValue) -> void
+  state_scope(tail, key: EncodedPayload) -> void
 
   state_key(tail, id: i32) -> i32
 
-  state_get(tail, id: i32, initial: DataValue) -> DataValue
+  state_get(tail, id: i32, initial: EncodedPayload) -> EncodedPayload
 
-  state_set(tail, id: i32, value: DataValue) -> void
+  state_set(tail, id: i32, value: EncodedPayload) -> void
 
-  task_started(tail, key: DataValue, task_id: i32) -> void
+  task_started(tail, key: EncodedPayload, task_id: i32) -> void
 
 @intrinsic(name: "__render_retain_callback", uses_signature: true)
 fn retain_typed_event_handler_id<Msg>(handler: fn() -> Msg): () -> i32
@@ -360,15 +383,11 @@ fn retain_program_callback_id<Handler>(handler: Handler): () -> i32
 fn stable_callsite_id(): () -> i32
   0
 
-fn encode_vx_value<T>(value: T) -> DataValue
-  data::encode(value)
+fn encode_vx_value<T>(value: T) -> EncodedPayload
+  encode_payload(value)
 
-fn decode_vx_value<T>(value: DataValue, fallback: T) -> T
-  match(data::decode<T>(value))
-    Ok<T> { value }:
-      value
-    Err:
-      fallback
+fn decode_vx_value<T>(value: EncodedPayload, fallback: T) -> T
+  decode_payload(value, fallback)
 
 impl<T> StateHandle<T>
   /// Replaces component-local typed state and schedules the component runtime.
@@ -396,35 +415,34 @@ impl<Msg> Sub<Msg>
 impl<Msg> Sub<Msg>
   /// Creates an empty subscription set.
   api fn none() -> Sub<Msg>
-    subscription_plan(() -> DataValue => subscription_payload("none"))
+    subscription_plan(() -> SubscriptionWire => SubscriptionWire::SubscriptionNone {})
 
   /// Creates a subscription batch from existing subscription values.
   api fn batch(values: Array<Sub<Msg>>) -> Sub<Msg>
-    subscription_plan(() -> DataValue =>
-      let ~children = Array<DataValue>::with_capacity(values.len())
+    subscription_plan(() -> SubscriptionWire =>
+      let ~children = Array<SubscriptionWire>::with_capacity(values.len())
       var index = 0
       while index < values.len():
         children.push(lower_sub(values.at(index)))
         index = index + 1
-      let ~out = subscription_map("batch")
-      out.set("children", wire::make_array(children))
-      wire::make_map(out)
+      SubscriptionWire::SubscriptionBatch { children }
     )
 
   /// Creates a host/runtime subscription envelope for a registered VX subscription runner.
-  fn runtime({ kind: String, key: String, value?: VxLower }) -> Sub<Msg>
-    subscription_plan(() -> DataValue =>
-      let out = subscription_map(kind).setting("key", key)
-      let complete =
-        match(value)
-          Some<VxLower> { value: lower_value }:
-            out.setting("value", lower_value())
-          None:
-            out
-      wire::make_map(complete)
+  fn runtime({ kind: String, key: String, value?: PayloadLower }) -> Sub<Msg>
+    subscription_plan(() -> SubscriptionWire =>
+      match(value)
+        Some<PayloadLower> { value: lower_value }:
+          SubscriptionWire::SubscriptionRuntime {
+            kind,
+            key,
+            payload: lower_value()
+          }
+        None:
+          SubscriptionWire::SubscriptionRuntime { kind, key }
     )
 
-  fn runtime({ kind: StringSlice, key: StringSlice, value?: VxLower }) -> Sub<Msg>
+  fn runtime({ kind: StringSlice, key: StringSlice, value?: PayloadLower }) -> Sub<Msg>
     Sub<Msg>::runtime(kind: kind.to_string(), key: key.to_string(), value: value)
 
   /// Creates a host/runtime subscription and maps incoming payloads through a typed handler.
@@ -448,12 +466,13 @@ impl<Msg> Sub<Msg>
 
   /// Creates an interval subscription that dispatches a typed message.
   api fn every({ key: String, millis: i64, value: Msg }) -> Sub<Msg>
-    subscription_plan(() -> DataValue =>
-      let ~out = subscription_map("interval")
-      out.set("key", key)
-      out.set("ms", wire::make_i64(millis))
-      out.set("value", wire::from_data_value(data::encode(value)))
-      wire::make_map(out)
+    subscription_plan(() -> SubscriptionWire =>
+      SubscriptionWire::SubscriptionRuntime {
+        kind: "interval",
+        key,
+        millis,
+        payload: encode_payload(value)
+      }
     )
 
   api fn every({ key: StringSlice, millis: i64, value: Msg }) -> Sub<Msg>
@@ -464,7 +483,7 @@ pub fn keyboard_on_key_down<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   keyboard_subscription<Msg>(
     kind: "keydown",
     key: key,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn keyboard_on_key_down<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
@@ -484,7 +503,7 @@ pub fn keyboard_on_key_up<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   keyboard_subscription<Msg>(
     kind: "keyup",
     key: key,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn keyboard_on_key_up<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
@@ -504,7 +523,7 @@ pub fn online_status<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "online_status",
     key: key,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn online_status<Msg>({ key: String, handler: fn(bool) -> Msg }) -> Sub<Msg>
@@ -521,7 +540,7 @@ pub fn window_on_resize<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "window_resize",
     key: key,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn window_on_resize<Msg>({
@@ -544,7 +563,7 @@ pub fn document_on_visibility_change<Msg>({ key: String, value: Msg }) -> Sub<Ms
   Sub<Msg>::runtime(
     kind: "visibility_change",
     key: key,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn document_on_visibility_change<Msg>({
@@ -571,7 +590,7 @@ pub fn location_on_change<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "location_change",
     key: key,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn location_on_change<Msg>({ key: String, handler: fn(Location) -> Msg }) -> Sub<Msg>
@@ -589,7 +608,7 @@ pub fn window_on_focus<Msg>({ key: String, value: Msg }) -> Sub<Msg>
     kind: "window_focus",
     event: "focus",
     key: key,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn window_on_focus<Msg>({ key: String, handler: fn(GenericEvent) -> Msg }) -> Sub<Msg>
@@ -610,7 +629,7 @@ pub fn window_on_blur<Msg>({ key: String, value: Msg }) -> Sub<Msg>
     kind: "window_blur",
     event: "blur",
     key: key,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn window_on_blur<Msg>({ key: String, handler: fn(GenericEvent) -> Msg }) -> Sub<Msg>
@@ -630,7 +649,7 @@ pub fn animation_frame<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "animation_frame",
     key: key,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn animation_frame<Msg>({
@@ -652,7 +671,7 @@ pub fn animation_frame<Msg>({
 pub fn media_query<Msg>({ query: String, value: Msg }) -> Sub<Msg>
   media_query_subscription<Msg>(
     query: query,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn media_query<Msg>({ query: String, handler: fn(MediaQuery) -> Msg }) -> Sub<Msg>
@@ -669,7 +688,7 @@ pub fn storage_on_change<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "storage",
     key: key,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn storage_on_change<Msg>({ key: String, handler: fn(StorageChange) -> Msg }) -> Sub<Msg>
@@ -688,7 +707,7 @@ pub fn storage_on_change<Msg>({
 pub fn broadcast_channel<Msg>({ name: String, value: Msg }) -> Sub<Msg>
   broadcast_channel_subscription<Msg>(
     name: name,
-    value: () -> DataValue => wire::from_data_value(data::encode(value))
+    value: () -> EncodedPayload => encode_payload(value)
   )
 
 pub fn broadcast_channel<Payload, Msg>({
@@ -1295,23 +1314,28 @@ pub fn program<Model, Msg>({
   commands?: Cmd<Msg>,
   subscriptions?: Sub<Msg>
 }) -> Program<Model, Msg>
-  program_plan<Model, Msg>(() -> DataValue =>
-    let ~out = WireMap::init()
-    out.set("$vx", "runtime_result")
-    out.set("model", wire::from_data_value(data::encode(model)))
-    if frame is Some:
-      out.set(
-        "frame",
-        wire::from_data_value(data::encode(lower_html_node(frame.value)))
-      )
-    if commands is Some:
-      out.set(
-        "commands",
-        wire::from_data_value(data::encode(lower_command(commands.value)))
-      )
-    if subscriptions is Some:
-      out.set("subscriptions", lower_sub(subscriptions.value))
-    wire::make_map(out)
+  program_plan<Model, Msg>(() -> ProgramWire =>
+    let lowered_frame: Optional<HtmlWire> = match(frame)
+      Some<Html<Msg>> { value }:
+        Some<HtmlWire> { value: lower_html_node(value) }
+      None:
+        None {}
+    let lowered_commands: Optional<CommandWire> = match(commands)
+      Some<Cmd<Msg>> { value }:
+        Some<CommandWire> { value: lower_command(value) }
+      None:
+        None {}
+    let lowered_subscriptions: Optional<SubscriptionWire> = match(subscriptions)
+      Some<Sub<Msg>> { value }:
+        Some<SubscriptionWire> { value: lower_sub(value) }
+      None:
+        None {}
+    ProgramWire::ProgramResult {
+      model: encode_payload(model),
+      frame: lowered_frame,
+      commands: lowered_commands,
+      subscriptions: lowered_subscriptions
+    }
   )
 
 /// Creates the next program transition from an explicit model.
@@ -1327,14 +1351,12 @@ fn map_model_with_handler_ids<Model, Msg, NextModel>({
   handler_id: i32,
   hydrate_handler_id?: i32
 }) -> Program<NextModel, Msg>
-  program_plan<NextModel, Msg>(() -> DataValue =>
-    let ~out = WireMap::init()
-    out.set("kind", "program_map_model")
-    out.set("child", lower_program(program))
-    out.set("handlerId", wire::make_i32(handler_id))
-    if hydrate_handler_id is Some:
-      out.set("hydrateHandlerId", wire::make_i32(hydrate_handler_id.value))
-    wire::make_map(out)
+  program_plan<NextModel, Msg>(() -> ProgramWire =>
+    ProgramWire::ProgramMapModel {
+      child: lower_program(program),
+      handler_ref: handler_id,
+      hydrate_handler_ref: hydrate_handler_id
+    }
   )
 
 /// Lifts a child program result through a typed model mapper.
@@ -1364,12 +1386,11 @@ fn map_message_with_handler_id<Model, ChildMsg, ParentMsg>({
   program: Program<Model, ChildMsg>,
   handler_id: i32
 }) -> Program<Model, ParentMsg>
-  program_plan<Model, ParentMsg>(() -> DataValue =>
-    let ~out = WireMap::init()
-    out.set("kind", "program_map_message")
-    out.set("child", lower_program(program))
-    out.set("handlerId", wire::make_i32(handler_id))
-    wire::make_map(out)
+  program_plan<Model, ParentMsg>(() -> ProgramWire =>
+    ProgramWire::ProgramMapMessage {
+      child: lower_program(program),
+      handler_ref: handler_id
+    }
   )
 
 /// Lifts a child program result through a typed message mapper.
@@ -1419,16 +1440,14 @@ fn program_handlers<Model, Msg>({
   view_id: i32,
   subscriptions_id?: i32
 }) -> Program<Model, Msg>
-  program_plan<Model, Msg>(() -> DataValue =>
-    let ~out = WireMap::init()
-    out.set("kind", "program")
-    out.set("initHandlerId", wire::make_i32(init_id))
-    out.set("hydrateHandlerId", wire::make_i32(hydrate_id))
-    out.set("stepHandlerId", wire::make_i32(step_id))
-    out.set("viewHandlerId", wire::make_i32(view_id))
-    if subscriptions_id is Some:
-      out.set("subscriptionsHandlerId", wire::make_i32(subscriptions_id.value))
-    wire::make_map(out)
+  program_plan<Model, Msg>(() -> ProgramWire =>
+    ProgramWire::ProgramHandlers {
+      init_handler_ref: init_id,
+      hydrate_handler_ref: hydrate_id,
+      step_handler_ref: step_id,
+      view_handler_ref: view_id,
+      subscriptions_handler_ref: subscriptions_id
+    }
   )
 
 fn named_value(kind: String, name: String, value: AttrValueWire): () -> AttrWire
@@ -1459,70 +1478,48 @@ fn event_options_to_wire(options: EventOptions): () -> EventOptionsWire
   }
 
 fn mark_owned_subscription<Msg>(sub: Sub<Msg>, handler_id: i32) -> Sub<Msg>
-  subscription_plan(() -> DataValue =>
-    match(wire::unpack_map(lower_sub(sub)))
-      Ok<WireMap> { value }:
-        wire::make_map(with_owned_handler(value, handler_id))
-      Err:
-        lower_sub(sub)
+  subscription_plan(() -> SubscriptionWire =>
+    SubscriptionWire::SubscriptionOwned {
+      child: lower_sub(sub),
+      handler_ref: handler_id
+    }
   )
 
 fn sub_map_with_handler_id<ChildMsg, ParentMsg>(
   sub: Sub<ChildMsg>,
   { handler_id: i32, handler_key?: i32 }
 ) -> Sub<ParentMsg>
-  subscription_plan(() -> DataValue =>
-    let ~out = subscription_map("map")
-    out.set("child", lower_sub(sub))
-    out.set("handlerId", wire::make_i32(handler_id))
-    if handler_key is Some:
-      out.set("handlerKey", wire::make_i32(handler_key.value))
-    wire::make_map(out)
+  subscription_plan(() -> SubscriptionWire =>
+    SubscriptionWire::SubscriptionMap {
+      child: lower_sub(sub),
+      handler_ref: handler_id,
+      handler_key: handler_key
+    }
   )
 
-fn with_owned_handler(
-  out: WireMap,
-  handler_id: i32
-) -> WireMap
-  let ~owned = Array<DataValue>::with_capacity(1)
-  owned.push(wire::make_i32(handler_id))
-  out.setting("__vxOwnedMapHandlerIds", wire::make_array(owned))
-
-fn subscription_payload(kind: String): () -> DataValue
-  wire::make_map(subscription_map(kind))
-
-fn subscription_map(kind: String): () -> WireMap
-  tagged_vx_runtime_map("sub", kind)
-
-fn keyboard_subscription<Msg>({ kind: String, key: String, value: VxLower }) -> Sub<Msg>
-  subscription_plan(() -> DataValue =>
-    let ~out = subscription_map("keyboard")
-    out.set("key", key)
-    out.set("event", kind)
-    out.set("value", value())
-    wire::make_map(out)
+fn keyboard_subscription<Msg>({ kind: String, key: String, value: PayloadLower }) -> Sub<Msg>
+  subscription_plan(() -> SubscriptionWire =>
+    SubscriptionWire::SubscriptionRuntime {
+      kind: "keyboard",
+      key,
+      event: kind,
+      payload: value()
+    }
   )
 
 fn keyboard_payload_subscription({ kind: String, key: String }) -> Sub<KeyboardEvent>
-  subscription_plan(() -> DataValue =>
-    let ~out = subscription_map("keyboard")
-    out.set("key", key)
-    out.set("event", kind)
-    wire::make_map(out)
+  subscription_plan(() -> SubscriptionWire =>
+    SubscriptionWire::SubscriptionRuntime { kind: "keyboard", key, event: kind }
   )
 
 fn window_event_subscription<Msg>({
   kind: String,
   event: String,
   key: String,
-  value: VxLower
+  value: PayloadLower
 }) -> Sub<Msg>
-  subscription_plan(() -> DataValue =>
-    let out = subscription_map(kind)
-      .setting("key", key)
-      .setting("event", event)
-      .setting("value", value())
-    wire::make_map(out)
+  subscription_plan(() -> SubscriptionWire =>
+    SubscriptionWire::SubscriptionRuntime { kind, key, event, payload: value() }
   )
 
 fn window_event_payload_subscription({
@@ -1530,49 +1527,40 @@ fn window_event_payload_subscription({
   event: String,
   key: String
 }) -> Sub<GenericEvent>
-  subscription_plan(() -> DataValue =>
-    let out = subscription_map(kind)
-      .setting("key", key)
-      .setting("event", event)
-    wire::make_map(out)
+  subscription_plan(() -> SubscriptionWire =>
+    SubscriptionWire::SubscriptionRuntime { kind, key, event }
   )
 
-fn media_query_subscription<Msg>({ query: String, value: VxLower }) -> Sub<Msg>
-  subscription_plan(() -> DataValue =>
-    let ~out = subscription_map("media_query")
-    out.set("key", query)
-    out.set("query", query)
-    out.set("value", value())
-    wire::make_map(out)
+fn media_query_subscription<Msg>({ query: String, value: PayloadLower }) -> Sub<Msg>
+  subscription_plan(() -> SubscriptionWire =>
+    SubscriptionWire::SubscriptionRuntime {
+      kind: "media_query",
+      key: query,
+      query,
+      payload: value()
+    }
   )
 
 fn media_query_payload_subscription(query: String) -> Sub<MediaQuery>
-  subscription_plan(() -> DataValue =>
-    let ~out = subscription_map("media_query")
-    out.set("key", query)
-    out.set("query", query)
-    wire::make_map(out)
+  subscription_plan(() -> SubscriptionWire =>
+    SubscriptionWire::SubscriptionRuntime { kind: "media_query", key: query, query }
   )
 
-fn broadcast_channel_subscription<Msg>({ name: String, value: VxLower }) -> Sub<Msg>
-  subscription_plan(() -> DataValue =>
-    let ~out = subscription_map("broadcast_channel")
-    out.set("key", name)
-    out.set("name", name)
-    out.set("value", value())
-    wire::make_map(out)
+fn broadcast_channel_subscription<Msg>({ name: String, value: PayloadLower }) -> Sub<Msg>
+  subscription_plan(() -> SubscriptionWire =>
+    SubscriptionWire::SubscriptionRuntime {
+      kind: "broadcast_channel",
+      key: name,
+      name,
+      payload: value()
+    }
   )
 
 fn broadcast_channel_payload_subscription<Payload>(name: String) -> Sub<Payload>
-  subscription_plan(() -> DataValue =>
-    let ~out = subscription_map("broadcast_channel")
-    out.set("key", name)
-    out.set("name", name)
-    wire::make_map(out)
+  subscription_plan(() -> SubscriptionWire =>
+    SubscriptionWire::SubscriptionRuntime {
+      kind: "broadcast_channel",
+      key: name,
+      name
+    }
   )
-
-fn tagged_vx_runtime_map(type_name: String, kind: String): () -> WireMap
-  let ~out = WireMap::init()
-  out.set("type", type_name)
-  out.set("kind", kind)
-  out

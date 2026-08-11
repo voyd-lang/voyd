@@ -28,3 +28,12 @@ pub fn encode_payload<T>(value: T): () -> EncodedPayload
         bytes: ByteBuffer::init().as_bytes(),
         fingerprint: "".to_string()
       }
+
+pub fn decode_payload<T>(payload: EncodedPayload, fallback: T): () -> T
+  if payload.fingerprint != dto_fingerprint(fallback):
+    return fallback
+  match(msgpack::decode<T>(payload.bytes))
+    Ok<T> { value }:
+      value
+    Err:
+      fallback
