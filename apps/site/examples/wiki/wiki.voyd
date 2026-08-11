@@ -271,12 +271,8 @@ fn Inspector({ model: WikiModel }) -> Html<WikiMsg>
       </dl>
     </PanelSection>
 
-fn PanelSection({ class: String, children: Array<Html<WikiMsg>> }) -> Html<WikiMsg>
-  element(
-    tag: "section",
-    attrs: [attr(name: "class", value: class)],
-    children: children
-  )
+fn PanelSection({ class: String, children: Array<HtmlInput<WikiMsg>> }) -> Html<WikiMsg>
+  <section class={class}>{children}</section>
 
 fn ActionButton({ label: String, button_class: String, on_press: fn() -> WikiMsg }) -> Html<WikiMsg>
   <button type="button" class={button_class} on_click={on_press}>

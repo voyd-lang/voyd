@@ -50,12 +50,13 @@ fn feature_list() -> Array<String>
 pub fn main()
   App()
 
-pub fn event_message_button() -> Html<void>
-  <button on_click={VxMessage::Save {}}>Save</button>
+pub fn event_message_button() -> Html<VxMessage>
+  let message: VxMessage = VxMessage::Save {}
+  <button on_click={message}>Save</button>
 
-pub fn full_event_options_form() -> Html<void>
-  <form
-    on_submit={on_submit_with(
+pub fn full_event_options_form() -> Html<VxMessage>
+  let message: VxMessage = VxMessage::Save {}
+  let submit: Attr<VxMessage> = on_submit_with(
       options: EventOptions {
         prevent_default: true,
         stop_propagation: false,
@@ -63,8 +64,8 @@ pub fn full_event_options_form() -> Html<void>
         passive: false,
         pointer_capture: false
       },
-      message: VxMessage::Save {}
-    )}
-  >
-    Save
-  </form>
+      message: message
+    )
+  let attrs: Array<Attr<VxMessage>> = [submit]
+  let children: Array<Html<void>> = [text("Save")]
+  element<VxMessage>(tag: "form", attrs: attrs, children: children)

@@ -7192,6 +7192,17 @@ const scoreOverloadMatchesByLambdaCompatibility = <
 
   return new Map(
     matches.map((candidate) => {
+      const candidateArgs = argsForCandidate
+        ? argsForCandidate(candidate)
+        : args;
+      const argumentConversionPenalty = overloadArgumentConversionPenalty({
+        candidate,
+        args: candidateArgs,
+        typeArguments,
+        targetTypeArguments,
+        ctx,
+        state,
+      });
       const compatibilityScore =
         !compatibilityNarrowed || compatibleSet.has(candidate) ? 1 : 0;
       const returnScore =
@@ -7203,12 +7214,102 @@ const scoreOverloadMatchesByLambdaCompatibility = <
       return [
         candidate,
         {
+          argumentConversionPenalty,
           lambdaCompatibility:
             compatibilityScore + returnScore + arityScore + expectedTypeScore,
         },
       ];
     }),
   );
+};
+
+const overloadArgumentConversionPenalty = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  candidate,
+  args,
+  typeArguments,
+  targetTypeArguments,
+  ctx,
+  state,
+}: {
+  candidate: T;
+  args: readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): number => {
+  const substitution =
+    candidate.signature.typeParams && candidate.signature.typeParams.length > 0
+      ? inferOverloadCandidateSubstitution({
+          signature: candidate.signature,
+          args,
+          typeArguments,
+          targetTypeArguments,
+          calleeSymbol: candidate.symbol,
+          ctx,
+          state,
+        })
+      : undefined;
+  const parameters = publicCallParametersFor({ signature: candidate.signature }).map(
+    (parameter) => ({
+      ...parameter,
+      type: substitution
+        ? applyCurrentSubstitution(
+            ctx.arena.substitute(parameter.type, substitution),
+            ctx,
+            state,
+          )
+        : parameter.type,
+    }),
+  );
+
+  if (
+    (candidate.signature.typeParams?.length ?? 0) > 0 &&
+    !substitution
+  ) {
+    return 0;
+  }
+
+  const conversionPenalty = (actual: TypeId, expected: TypeId): number => {
+    return actual === expected ? 0 : 1;
+  };
+
+  if (
+    args.length === 1 &&
+    args[0]!.label === undefined &&
+    parameters.length > 1 &&
+    parameters.every(({ label }) => typeof label === "string")
+  ) {
+    const fields = getStructuralFields(args[0]!.type, ctx, state);
+    if (!fields) {
+      return 0;
+    }
+    return parameters.reduce((penalty, parameter) => {
+      const field = fields.find(({ name }) => name === parameter.label);
+      return field
+        ? penalty + conversionPenalty(field.type, parameter.type)
+        : penalty;
+    }, 0);
+  }
+
+  if (args.length !== parameters.length) {
+    return 0;
+  }
+
+  return args.reduce((penalty, arg, index) => {
+    const parameter =
+      arg.label === undefined
+        ? parameters[index]
+        : parameters.find(({ label, name }) =>
+            label === arg.label || name === arg.label,
+          );
+    if (!parameter || arg.type === parameter.type) {
+      return penalty;
+    }
+    return penalty + conversionPenalty(arg.type, parameter.type);
+  }, 0);
 };
 
 type LambdaReturnInferenceResult =

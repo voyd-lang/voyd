@@ -4,7 +4,7 @@ use std::string::type::String
 use std::vx::self as vx
 
 type View<Msg> = vx::Html<Msg>
-type Child<Msg> = vx::Html<Msg>
+type Child<Msg> = vx::Html<void> | vx::Html<Msg>
 
 enum ButtonSize
   Default

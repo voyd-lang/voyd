@@ -4008,6 +4008,17 @@ const bindTypeParamsFromUnion = ({
     return undefined;
   }
 
+  const repeatedNominalBindings = bindRepeatedNominalUnionMember({
+    expectedMembers,
+    actualMembers: actualDesc.members,
+    bindings,
+    ctx,
+    state,
+  });
+  if (repeatedNominalBindings) {
+    return repeatedNominalBindings;
+  }
+
   const bareTypeParamMembers = expectedMembers.filter((member) => {
     const desc = ctx.arena.get(member);
     return desc.kind === "type-param-ref";
@@ -4106,6 +4117,90 @@ const bindTypeParamsFromUnion = ({
   }
 
   return [...solutionsByKey.values()][0];
+};
+
+const bindRepeatedNominalUnionMember = ({
+  expectedMembers,
+  actualMembers,
+  bindings,
+  ctx,
+  state,
+}: {
+  expectedMembers: readonly TypeId[];
+  actualMembers: readonly TypeId[];
+  bindings: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+}): Map<TypeParamId, TypeId> | undefined => {
+  const genericMembers = expectedMembers.filter((member) =>
+    containsAnyTypeParam(member, ctx),
+  );
+  if (genericMembers.length !== 1) {
+    return undefined;
+  }
+
+  const genericMember = genericMembers[0]!;
+  const genericNominal = getNominalComponent(genericMember, ctx);
+  if (typeof genericNominal !== "number") {
+    return undefined;
+  }
+  const genericDesc = ctx.arena.get(genericNominal);
+  if (
+    genericDesc.kind !== "nominal-object" &&
+    genericDesc.kind !== "value-object"
+  ) {
+    return undefined;
+  }
+
+  const fixedMembers = expectedMembers.filter(
+    (member) => !containsAnyTypeParam(member, ctx),
+  );
+  const remainingActualMembers = actualMembers.filter(
+    (actualMember) =>
+      !fixedMembers.some((fixedMember) =>
+        typeSatisfies(actualMember, fixedMember, ctx, state),
+      ),
+  );
+  if (remainingActualMembers.length === 0) {
+    return undefined;
+  }
+
+  const actualNominals = remainingActualMembers.map((member) => {
+    const nominal = getNominalComponent(member, ctx);
+    return typeof nominal === "number" ? ctx.arena.get(nominal) : undefined;
+  });
+  const allShareGenericOwner = actualNominals.every(
+    (desc) =>
+      desc?.kind === genericDesc.kind &&
+      symbolRefEquals(desc.owner, genericDesc.owner) &&
+      desc.typeArgs.length === genericDesc.typeArgs.length,
+  );
+  if (!allShareGenericOwner) {
+    return undefined;
+  }
+
+  const nextBindings = new Map(bindings);
+  genericDesc.typeArgs.forEach((expectedArg, index) => {
+    const actualArgs = actualNominals.map((desc) =>
+      desc!.kind === "nominal-object" || desc!.kind === "value-object"
+        ? desc!.typeArgs[index]!
+        : ctx.primitives.unknown,
+    );
+    bindTypeParamsFromType(
+      expectedArg,
+      ctx.arena.internUnion(actualArgs),
+      nextBindings,
+      ctx,
+      state,
+    );
+  });
+
+  const substitutedMember = ctx.arena.substitute(genericMember, nextBindings);
+  return remainingActualMembers.every((actualMember) =>
+    typeSatisfies(actualMember, substitutedMember, ctx, state),
+  )
+    ? nextBindings
+    : undefined;
 };
 
 type UnionBindingCandidate = {

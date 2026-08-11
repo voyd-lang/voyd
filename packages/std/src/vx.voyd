@@ -5,7 +5,6 @@ use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
 use std::error::panic
-use std::fixed_array::fns::all
 use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
@@ -21,74 +20,71 @@ pub use self::command::{ Cmd, Ref }
 /// Opaque virtual DOM node plan. The message parameter records the event
 /// message type while the renderer wire stays private to VX.
 type VxLower = fn() : () -> MsgPack
-pub obj HtmlPlan { thunk: FixedArray<VxLower> }
-pub type Html<Msg> = HtmlPlan
+pub obj Html<Msg> { wire: Bytes }
 
 /// Opaque virtual DOM attribute or event plan.
-pub obj AttrPlan { thunk: FixedArray<VxLower> }
-pub type Attr<Msg> = AttrPlan
-type HtmlInput = HtmlPlan
-type AttrInput = AttrPlan
+pub obj Attr<Msg> { wire: Bytes }
+pub type HtmlInput<Msg> = Html<void> | Html<Msg>
+pub type AttrInput<Msg> = Attr<void> | Attr<Msg>
+type VxWirePlan = { wire: Bytes }
 pub type RenderKey = String
 
-pub obj ProgramPlan { thunk: FixedArray<VxLower> }
-pub type Program<Model, Msg> = ProgramPlan
+pub obj Program<Model, Msg> {
+  wire: Bytes
+}
 
-pub obj SubPlan { thunk: FixedArray<VxLower> }
-pub type Sub<Msg> = SubPlan
+pub obj Sub<Msg> { wire: Bytes }
 
-fn lower_program(value: ProgramPlan) -> MsgPack
-  lower_vx_thunk(value.thunk)
+fn lower_program<Model, Msg>(value: Program<Model, Msg>) -> MsgPack
+  decode_vx_wire(value.wire)
 
-fn lower_sub(value: SubPlan) -> MsgPack
-  lower_vx_thunk(value.thunk)
+fn lower_sub<Msg>(value: Sub<Msg>) -> MsgPack
+  decode_vx_wire(value.wire)
 
-fn lower_html_node(value: HtmlPlan) -> MsgPack
-  lower_vx_thunk(value.thunk)
+fn lower_html_node<Msg>(value: Html<Msg>) -> MsgPack
+  decode_vx_wire(value.wire)
 
-fn lower_html_attr(value: AttrPlan) -> MsgPack
-  lower_vx_thunk(value.thunk)
+fn lower_html_attr<Msg>(value: Attr<Msg>) -> MsgPack
+  decode_vx_wire(value.wire)
 
-fn lower_vx_thunk(thunk: FixedArray<VxLower>) -> MsgPack
-  match(thunk.get<VxLower>(0))
-    Some<VxLower> { value: run }:
-      run()
-    None:
-      msgpack::make_null()
+fn html_plan<Msg>(run: VxLower) -> Html<Msg>
+  Html<Msg> {
+    wire: encode_vx_wire(run())
+  }
 
-fn vx_thunk(run: VxLower) -> FixedArray<VxLower>
-  let thunk = new_fixed_array<VxLower>(1)
-  thunk.set<VxLower>(0, run)
-  thunk
+fn attr_plan<Msg>(run: VxLower) -> Attr<Msg>
+  Attr<Msg> {
+    wire: encode_vx_wire(run())
+  }
 
-fn html_plan(run: VxLower) -> HtmlPlan
-  HtmlPlan { thunk: vx_thunk(run) }
+fn program_plan<Model, Msg>(run: VxLower) -> Program<Model, Msg>
+  Program<Model, Msg> {
+    wire: encode_vx_wire(run())
+  }
 
-fn attr_plan(run: VxLower) -> AttrPlan
-  AttrPlan { thunk: vx_thunk(run) }
+fn subscription_plan<Msg>(run: VxLower) -> Sub<Msg>
+  Sub<Msg> {
+    wire: encode_vx_wire(run())
+  }
 
-fn program_plan(run: VxLower) -> ProgramPlan
-  ProgramPlan { thunk: vx_thunk(run) }
+impl<Model, Msg> CustomDto<Program<Model, Msg>, Bytes> for Program<Model, Msg>
+  fn write(value: Program<Model, Msg>) -> Bytes
+    value.wire
 
-fn subscription_plan(run: VxLower) -> SubPlan
-  SubPlan { thunk: vx_thunk(run) }
-
-impl CustomDto<ProgramPlan, Bytes> for ProgramPlan
-  fn write(value: ProgramPlan) -> Bytes
-    encode_vx_wire(lower_program(value))
-
-  fn read(value: Bytes) -> Result<ProgramPlan, CustomDtoError>
-    Ok<ProgramPlan> {
-      value: program_plan(() -> MsgPack => decode_vx_wire(value))
+  fn read(value: Bytes) -> Result<Program<Model, Msg>, CustomDtoError>
+    Ok<Program<Model, Msg>> {
+      value: Program<Model, Msg> {
+        wire: value
+      }
     }
 
-impl CustomDto<SubPlan, Bytes> for SubPlan
-  fn write(value: SubPlan) -> Bytes
-    encode_vx_wire(lower_sub(value))
+impl<Msg> CustomDto<Sub<Msg>, Bytes> for Sub<Msg>
+  fn write(value: Sub<Msg>) -> Bytes
+    value.wire
 
-  fn read(value: Bytes) -> Result<SubPlan, CustomDtoError>
-    Ok<SubPlan> {
-      value: subscription_plan(() -> MsgPack => decode_vx_wire(value))
+  fn read(value: Bytes) -> Result<Sub<Msg>, CustomDtoError>
+    Ok<Sub<Msg>> {
+      value: Sub<Msg> { wire: value }
     }
 
 impl<Msg> CustomDto<Cmd<Msg>, Bytes> for Cmd<Msg>
@@ -100,19 +96,27 @@ impl<Msg> CustomDto<Cmd<Msg>, Bytes> for Cmd<Msg>
       value: command_plan<Msg>(() -> MsgPack => decode_vx_wire(value))
     }
 
-impl CustomDto<HtmlPlan, Bytes> for HtmlPlan
-  fn write(value: HtmlPlan) -> Bytes
-    encode_vx_wire(lower_html_node(value))
+impl<Msg> CustomDto<Html<Msg>, Bytes> for Html<Msg>
+  fn write(value: Html<Msg>) -> Bytes
+    value.wire
 
-  fn read(value: Bytes) -> Result<HtmlPlan, CustomDtoError>
-    Ok<HtmlPlan> { value: html_plan(() -> MsgPack => decode_vx_wire(value)) }
+  fn read(value: Bytes) -> Result<Html<Msg>, CustomDtoError>
+    Ok<Html<Msg>> {
+      value: Html<Msg> {
+        wire: value
+      }
+    }
 
-impl CustomDto<AttrPlan, Bytes> for AttrPlan
-  fn write(value: AttrPlan) -> Bytes
-    encode_vx_wire(lower_html_attr(value))
+impl<Msg> CustomDto<Attr<Msg>, Bytes> for Attr<Msg>
+  fn write(value: Attr<Msg>) -> Bytes
+    value.wire
 
-  fn read(value: Bytes) -> Result<AttrPlan, CustomDtoError>
-    Ok<AttrPlan> { value: attr_plan(() -> MsgPack => decode_vx_wire(value)) }
+  fn read(value: Bytes) -> Result<Attr<Msg>, CustomDtoError>
+    Ok<Attr<Msg>> {
+      value: Attr<Msg> {
+        wire: value
+      }
+    }
 
 fn encode_vx_wire(value: MsgPack) -> Bytes
   match(msgpack::encode_value_bytes(value))
@@ -130,21 +134,50 @@ fn decode_vx_wire(value: Bytes) -> MsgPack
 
 /// Lowers an opaque HTML plan to the immutable VX renderer wire.
 pub fn lower_html(value: Html<void>) -> Bytes
-  encode_vx_wire(lower_html_node(value))
+  value.wire
 
-fn html_node_payloads(values: Array<HtmlInput>) -> Array<MsgPack>
+/// Lifts a static node into a typed message tree. The node cannot emit a
+/// message, so changing its phantom message type is safe.
+pub fn static_html<Msg>(value: Html<void>) -> Html<Msg>
+  Html<Msg> { wire: value.wire }
+
+/// Lifts a static attribute into a typed message tree. Static attributes do
+/// not emit messages, so changing the phantom message type is safe.
+pub fn static_attr<Msg>(value: Attr<void>) -> Attr<Msg>
+  Attr<Msg> { wire: value.wire }
+
+fn typed_html_node_payloads<Msg>(values: Array<Html<Msg>>) -> Array<MsgPack>
   let ~out = Array<MsgPack>::with_capacity(values.len())
   var index = 0
   while index < values.len():
-    out.push(lower_vx_thunk(values.at(index).thunk))
+    out.push(lower_html_node(values.at(index)))
     index = index + 1
   out
 
-fn html_attr_payloads(values: Array<AttrInput>) -> Array<MsgPack>
+fn typed_html_attr_payloads<Msg>(values: Array<Attr<Msg>>) -> Array<MsgPack>
   let ~out = Array<MsgPack>::with_capacity(values.len())
   var index = 0
   while index < values.len():
-    out.push(lower_vx_thunk(values.at(index).thunk))
+    out.push(lower_html_attr(values.at(index)))
+    index = index + 1
+  out
+
+fn vx_wire(value: VxWirePlan) -> Bytes
+  value.wire
+
+fn html_node_payloads<Msg>(values: Array<HtmlInput<Msg>>) -> Array<MsgPack>
+  let ~out = Array<MsgPack>::with_capacity(values.len())
+  var index = 0
+  while index < values.len():
+    out.push(decode_vx_wire(vx_wire(values.at(index))))
+    index = index + 1
+  out
+
+fn html_attr_payloads<Msg>(values: Array<AttrInput<Msg>>) -> Array<MsgPack>
+  let ~out = Array<MsgPack>::with_capacity(values.len())
+  var index = 0
+  while index < values.len():
+    out.push(decode_vx_wire(vx_wire(values.at(index))))
     index = index + 1
   out
 
@@ -309,9 +342,9 @@ impl<T> StateHandle<T>
     Component::state_set(self.id, encode_vx_payload(value))
     StateHandle<T> { id: self.id, value: value }
 
-impl SubPlan
+impl<Msg> Sub<Msg>
   /// Lifts a child subscription through a retained typed message mapper.
-  api fn map<NextMsg, Msg>(
+  api fn map<NextMsg>(
     self,
     handler: fn(Msg) -> NextMsg,
     { handler_key: i32 = stable_callsite_id() }
@@ -322,7 +355,7 @@ impl SubPlan
       handler_id
     )
 
-impl<Msg> SubPlan
+impl<Msg> Sub<Msg>
   /// Creates an empty subscription set.
   api fn none() -> Sub<Msg>
     subscription_plan(() -> MsgPack => subscription_payload("none"))
@@ -752,7 +785,7 @@ fn claim_server_render_callback_field(value: Dict<String, MsgPack>, name: String
 
 /// Creates a versioned VX render frame.
 pub fn frame<Msg>(root: Html<Msg>): () -> Html<Msg>
-  html_plan(() -> MsgPack =>
+  html_plan<Msg>(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("version", msgpack::make_i32(1))
     out.set("root", lower_html_node(root))
@@ -761,7 +794,7 @@ pub fn frame<Msg>(root: Html<Msg>): () -> Html<Msg>
 
 /// Creates a VX text node.
 pub fn text(value: String): () -> Html<void>
-  html_plan(() -> MsgPack =>
+  html_plan<void>(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("kind", "text")
     out.set("value", value)
@@ -776,6 +809,12 @@ pub fn text(value: StringSlice): () -> Html<void>
 pub fn html_child(value: Html<void>): () -> Html<void>
   value
 
+pub fn html_child<Msg>(value: Html<Msg>): () -> Html<Msg>
+  value
+
+pub fn html_child<Msg>(value: HtmlInput<Msg>): () -> Html<Msg>
+  Html<Msg> { wire: vx_wire(value) }
+
 /// Converts interpolated text into an opaque child plan.
 pub fn html_child(value: String): () -> Html<void>
   text(value)
@@ -784,58 +823,267 @@ pub fn html_child(value: StringSlice): () -> Html<void>
   text(value)
 
 /// Flattens an interpolated child list into one fragment plan.
-pub fn html_child(value: Array<HtmlInput>): () -> Html<void>
+pub fn html_child(value: Array<Html<void>>): () -> Html<void>
   fragment(value)
 
-/// Creates a VX fragment node.
-pub fn fragment(children: Array<HtmlInput>): () -> Html<void>
-  html_plan(() -> MsgPack =>
+pub fn html_child<Msg>(value: Array<HtmlInput<Msg>>): () -> Html<Msg>
+  fragment<Msg>(value)
+
+pub fn html_child<Msg>(value: Array<Html<Msg>>): () -> Html<Msg>
+  html_plan<Msg>(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("kind", "fragment")
-    out.set("children", html_node_payloads(children))
+    out.set("children", typed_html_node_payloads<Msg>(value))
+    msgpack::make_map(out)
+  )
+
+/// Creates a VX fragment node.
+pub fn fragment(children: Array<Html<void>>): () -> Html<void>
+  html_plan<void>(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("kind", "fragment")
+    out.set("children", typed_html_node_payloads<void>(children))
+    msgpack::make_map(out)
+  )
+
+pub fn fragment<Msg>(children: Array<HtmlInput<Msg>>): () -> Html<Msg>
+  html_plan<Msg>(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("kind", "fragment")
+    out.set("children", html_node_payloads<Msg>(children))
+    msgpack::make_map(out)
+  )
+
+fn element_plan<Msg>({
+  tag: String,
+  attrs: Array<MsgPack>,
+  children: Array<MsgPack>
+}) -> Html<Msg>
+  html_plan<Msg>(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("kind", "element")
+    out.set("tag", tag)
+    out.set("children", children)
+    let normalized = normalize_attrs(attrs)
+    if normalized.attrs.len() > 0:
+      out.set("attrs", msgpack::make_map(normalized.attrs))
+    if normalized.props.len() > 0:
+      out.set("props", msgpack::make_map(normalized.props))
+    if normalized.styles.len() > 0:
+      out.set("styles", msgpack::make_map(normalized.styles))
+    if normalized.events.len() > 0:
+      out.set("events", normalized.events)
     msgpack::make_map(out)
   )
 
 /// Creates a VX element node using the versioned renderer schema.
 pub fn element({
   tag: String,
-  attrs?: Array<AttrInput>,
-  children: Array<HtmlInput>
+  attrs: Array<Attr<void>> = Array<Attr<void>>::init(),
+  children: Array<Html<void>>
 }) -> Html<void>
-  html_plan(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
-    out.set("kind", "element")
-    out.set("tag", tag)
-    out.set("children", html_node_payloads(children))
-    if attrs is Some:
-      let normalized = normalize_attrs(html_attr_payloads(attrs.value))
-      if normalized.attrs.len() > 0:
-        out.set("attrs", msgpack::make_map(normalized.attrs))
-      if normalized.props.len() > 0:
-        out.set("props", msgpack::make_map(normalized.props))
-      if normalized.styles.len() > 0:
-        out.set("styles", msgpack::make_map(normalized.styles))
-      if normalized.events.len() > 0:
-        out.set("events", normalized.events)
-    msgpack::make_map(out)
+  element_plan<void>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<void>(attrs),
+    children: typed_html_node_payloads<void>(children)
+  )
+
+pub fn element<Msg>({
+  tag: String,
+  attrs: Array<AttrInput<Msg>> = Array<AttrInput<Msg>>::init(),
+  children: Array<HtmlInput<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: html_attr_payloads<Msg>(attrs),
+    children: html_node_payloads<Msg>(children)
+  )
+
+pub fn element<Msg>({
+  tag: String,
+  attrs: Array<AttrInput<Msg>>,
+  children: Array<Html<void>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: html_attr_payloads<Msg>(attrs),
+    children: typed_html_node_payloads<void>(children)
+  )
+
+pub fn element<Msg>({
+  tag: String,
+  attrs: Array<Attr<void>>,
+  children: Array<HtmlInput<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<void>(attrs),
+    children: html_node_payloads<Msg>(children)
+  )
+
+pub fn element<Msg>({
+  tag: String,
+  attrs: Array<Attr<Msg>>,
+  children: Array<Html<void>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<Msg>(attrs),
+    children: typed_html_node_payloads<void>(children)
+  )
+
+pub fn element<Msg>({
+  tag: String,
+  attrs: Array<Attr<void>>,
+  children: Array<Html<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<void>(attrs),
+    children: typed_html_node_payloads<Msg>(children)
+  )
+
+pub fn element<Msg>({
+  tag: String,
+  attrs: Array<Attr<Msg>>,
+  children: Array<Html<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<Msg>(attrs),
+    children: typed_html_node_payloads<Msg>(children)
+  )
+
+pub fn element<Msg>({
+  tag: String,
+  attrs: Array<AttrInput<Msg>>,
+  children: Array<Html<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: html_attr_payloads<Msg>(attrs),
+    children: typed_html_node_payloads<Msg>(children)
+  )
+
+pub fn element<Msg>({
+  tag: String,
+  attrs: Array<Attr<Msg>>,
+  children: Array<HtmlInput<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<Msg>(attrs),
+    children: html_node_payloads<Msg>(children)
   )
 
 pub fn html_element({
   tag: String,
-  attrs?: Array<AttrInput>,
-  children: Array<HtmlInput>
+  attrs: Array<Attr<void>> = Array<Attr<void>>::init(),
+  children: Array<Html<void>>
 }) -> Html<void>
-  element(tag: tag, attrs: attrs, children: children)
+  element_plan<void>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<void>(attrs),
+    children: typed_html_node_payloads<void>(children)
+  )
+
+pub fn html_element<Msg>({
+  tag: String,
+  attrs: Array<AttrInput<Msg>> = Array<AttrInput<Msg>>::init(),
+  children: Array<HtmlInput<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: html_attr_payloads<Msg>(attrs),
+    children: html_node_payloads<Msg>(children)
+  )
+
+pub fn html_element<Msg>({
+  tag: String,
+  attrs: Array<AttrInput<Msg>>,
+  children: Array<Html<void>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: html_attr_payloads<Msg>(attrs),
+    children: typed_html_node_payloads<void>(children)
+  )
+
+pub fn html_element<Msg>({
+  tag: String,
+  attrs: Array<Attr<void>>,
+  children: Array<HtmlInput<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<void>(attrs),
+    children: html_node_payloads<Msg>(children)
+  )
+
+pub fn html_element<Msg>({
+  tag: String,
+  attrs: Array<Attr<Msg>>,
+  children: Array<Html<void>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<Msg>(attrs),
+    children: typed_html_node_payloads<void>(children)
+  )
+
+pub fn html_element<Msg>({
+  tag: String,
+  attrs: Array<Attr<void>>,
+  children: Array<Html<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<void>(attrs),
+    children: typed_html_node_payloads<Msg>(children)
+  )
+
+pub fn html_element<Msg>({
+  tag: String,
+  attrs: Array<Attr<Msg>>,
+  children: Array<Html<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<Msg>(attrs),
+    children: typed_html_node_payloads<Msg>(children)
+  )
+
+pub fn html_element<Msg>({
+  tag: String,
+  attrs: Array<AttrInput<Msg>>,
+  children: Array<Html<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: html_attr_payloads<Msg>(attrs),
+    children: typed_html_node_payloads<Msg>(children)
+  )
+
+pub fn html_element<Msg>({
+  tag: String,
+  attrs: Array<Attr<Msg>>,
+  children: Array<HtmlInput<Msg>>
+}) -> Html<Msg>
+  element_plan<Msg>(
+    tag: tag,
+    attrs: typed_html_attr_payloads<Msg>(attrs),
+    children: html_node_payloads<Msg>(children)
+  )
 
 /// Creates a string-valued DOM attribute.
 pub fn attr({ name: String, value: String }): () -> Attr<void>
-  attr_plan(() -> MsgPack => named_value("attr", name, value))
+  attr_plan<void>(() -> MsgPack => named_value("attr", name, value))
 
 pub fn attr({ name: String, value: bool }): () -> Attr<void>
-  attr_plan(() -> MsgPack => named_value("attr", name, msgpack::make_bool(value)))
+  attr_plan<void>(() -> MsgPack => named_value("attr", name, msgpack::make_bool(value)))
 
 pub fn attr({ name: String, value: i32 }): () -> Attr<void>
-  attr_plan(() -> MsgPack => named_value("attr", name, msgpack::make_i32(value)))
+  attr_plan<void>(() -> MsgPack => named_value("attr", name, msgpack::make_i32(value)))
 
 pub fn attr({ name: StringSlice, value: String }): () -> Attr<void>
   attr(name: name.to_string(), value: value)
@@ -910,7 +1158,7 @@ pub fn checked(value: bool): () -> Attr<void>
   prop(name: "checked", value: value)
 
 fn prop_value({ name: String, value: VxLower }): () -> Attr<void>
-  attr_plan(() -> MsgPack => named_value("prop", name, value()))
+  attr_plan<void>(() -> MsgPack => named_value("prop", name, value()))
 
 pub fn prop({ name: String, value: String }): () -> Attr<void>
   prop_value(name: name, value: () -> MsgPack => msgpack::make_string(value))
@@ -931,7 +1179,7 @@ pub fn prop({ name: StringSlice, value: i32 }): () -> Attr<void>
   prop(name: name.to_string(), value: value)
 
 pub fn style({ name: String, value: String }): () -> Attr<void>
-  attr_plan(() -> MsgPack => named_value("style", name, value))
+  attr_plan<void>(() -> MsgPack => named_value("style", name, value))
 
 pub fn style({ name: StringSlice, value: StringSlice }): () -> Attr<void>
   style(name: name.to_string(), value: value.to_string())
@@ -949,7 +1197,7 @@ pub fn styles(values: Array<(String, String)>): () -> Array<Attr<void>>
   out
 
 pub fn keyed({ key: String, child: Html<void> }): () -> Html<void>
-  html_plan(() -> MsgPack =>
+  html_plan<void>(() -> MsgPack =>
     match(msgpack::unpack_map(lower_html_node(child)))
       Ok<Dict<String, MsgPack>> { value }:
         msgpack::make_map(value.setting("key", key))
@@ -959,6 +1207,18 @@ pub fn keyed({ key: String, child: Html<void> }): () -> Html<void>
 
 pub fn keyed({ key: StringSlice, child: Html<void> }): () -> Html<void>
   keyed(key: key.to_string(), child: child)
+
+pub fn keyed<Msg>({ key: String, child: Html<Msg> }): () -> Html<Msg>
+  html_plan<Msg>(() -> MsgPack =>
+    match(msgpack::unpack_map(lower_html_node(child)))
+      Ok<Dict<String, MsgPack>> { value }:
+        msgpack::make_map(value.setting("key", key))
+      Err:
+        lower_html_node(child)
+  )
+
+pub fn keyed<Msg>({ key: StringSlice, child: Html<Msg> }): () -> Html<Msg>
+  keyed<Msg>(key: key.to_string(), child: child)
 
 pub fn keyed({ key: String, body: fn() -> Html<void> }): Component -> Html<void>
   Component::state_scope(encode_vx_payload(key))
@@ -975,7 +1235,7 @@ pub fn map_html<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler: fn(ChildMs
   )
 
 fn map_html_with_handler_id<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler_id: i32 }) -> Html<ParentMsg>
-  html_plan(() -> MsgPack =>
+  html_plan<ParentMsg>(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("kind", "map")
     out.set("child", lower_html_node(html))
@@ -984,7 +1244,7 @@ fn map_html_with_handler_id<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler
   )
 
 fn event_with_handler_id<Msg>({ name: String, handler_id: i32, options?: EventOptions }): () -> Attr<Msg>
-  attr_plan(() -> MsgPack =>
+  attr_plan<Msg>(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("kind", "event")
     out.set("event", name)
@@ -1203,7 +1463,7 @@ pub fn program<Model, Msg>({
   commands?: Cmd<Msg>,
   subscriptions?: Sub<Msg>
 }) -> Program<Model, Msg>
-  program_plan(() -> MsgPack =>
+  program_plan<Model, Msg>(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("$vx", "runtime_result")
     out.set("model", msgpack::from_data_value(data::encode(model)))
@@ -1217,19 +1477,19 @@ pub fn program<Model, Msg>({
   )
 
 /// Creates the next program transition from an explicit model.
-pub fn next<Model>(model: Model) -> Program<Model, void>
-  program<Model, void>(model: model)
+pub fn next<Model, Msg>(model: Model) -> Program<Model, Msg>
+  program<Model, Msg>(model: model)
 
 /// Creates the next program transition with one command.
 pub fn next<Model, Msg>({ model: Model, cmd: Cmd<Msg> }) -> Program<Model, Msg>
   program<Model, Msg>(model: model, commands: cmd)
 
-fn map_model_with_handler_ids({
-  program: ProgramPlan,
+fn map_model_with_handler_ids<Model, Msg, NextModel>({
+  program: Program<Model, Msg>,
   handler_id: i32,
   hydrate_handler_id?: i32
-}) -> ProgramPlan
-  program_plan(() -> MsgPack =>
+}) -> Program<NextModel, Msg>
+  program_plan<NextModel, Msg>(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("kind", "program_map_model")
     out.set("child", lower_program(program))
@@ -1240,10 +1500,10 @@ fn map_model_with_handler_ids({
   )
 
 /// Lifts a child program result through a typed model mapper.
-pub fn map_model<Model, NextModel>(
-  program: ProgramPlan,
+pub fn map_model<Model, Msg, NextModel>(
+  program: Program<Model, Msg>,
   handler: fn(Model) -> NextModel
-) -> ProgramPlan
+) -> Program<NextModel, Msg>
   map_model_with_handler_ids(
     program: program,
     handler_id: retain_program_callback_id(handler)
@@ -1251,22 +1511,22 @@ pub fn map_model<Model, NextModel>(
 
 /// Lifts a child program through model mappers in both runtime directions.
 /// The hydrate mapper is required when the mapped program adopts an SSR model.
-pub fn map_model<Model, NextModel>({
-  program: ProgramPlan,
+pub fn map_model<Model, Msg, NextModel>({
+  program: Program<Model, Msg>,
   map: fn(Model) -> NextModel,
   hydrate: fn(NextModel) -> Model
-}) -> ProgramPlan
+}) -> Program<NextModel, Msg>
   map_model_with_handler_ids(
     program: program,
     handler_id: retain_program_callback_id(map),
     hydrate_handler_id: retain_program_callback_id(hydrate)
   )
 
-fn map_message_with_handler_id({
-  program: ProgramPlan,
+fn map_message_with_handler_id<Model, ChildMsg, ParentMsg>({
+  program: Program<Model, ChildMsg>,
   handler_id: i32
-}) -> ProgramPlan
-  program_plan(() -> MsgPack =>
+}) -> Program<Model, ParentMsg>
+  program_plan<Model, ParentMsg>(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("kind", "program_map_message")
     out.set("child", lower_program(program))
@@ -1275,10 +1535,10 @@ fn map_message_with_handler_id({
   )
 
 /// Lifts a child program result through a typed message mapper.
-pub fn map_message<ChildMsg, ParentMsg>(
-  program: ProgramPlan,
+pub fn map_message<Model, ChildMsg, ParentMsg>(
+  program: Program<Model, ChildMsg>,
   handler: fn(ChildMsg) -> ParentMsg
-) -> ProgramPlan
+) -> Program<Model, ParentMsg>
   map_message_with_handler_id(
     program: program,
     handler_id: retain_program_callback_id(handler)
@@ -1321,7 +1581,7 @@ fn program_handlers<Model, Msg>({
   view_id: i32,
   subscriptions_id?: i32
 }) -> Program<Model, Msg>
-  program_plan(() -> MsgPack =>
+  program_plan<Model, Msg>(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("kind", "program")
     out.set("initHandlerId", msgpack::make_i32(init_id))

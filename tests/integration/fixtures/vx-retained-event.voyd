@@ -3,10 +3,10 @@ use std::vx::all
 fn clicked(payload: GenericEvent) -> GenericEvent
   payload
 
-pub fn main() -> Html<void>
+pub fn main() -> Html<GenericEvent>
   <button on_click={(payload: GenericEvent) -> GenericEvent => clicked(payload)}>Click</button>
 
-pub fn input_echo() -> Html<void>
+pub fn input_echo() -> Html<InputEvent>
   <input value="hello" on_input={(payload: InputEvent) -> InputEvent => payload} />
 
 fn ValueField({ value: String }) -> Html<void>

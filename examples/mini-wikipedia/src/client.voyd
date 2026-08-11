@@ -158,19 +158,19 @@ fn Sidebar({ model: Model }) -> Html<Msg>
     <p class="storage-note">Saved to <code>data/articles.json</code></p>
   </aside>
 
-fn ArticleLink({ article: Article, current_slug: String }) -> Html<Msg>
+fn ArticleLink({ article: Article, current_slug: String }) -> Html<void>
   <a class={article_link_class(article.slug, current_slug)} href={article_url(article.slug)}>
     <span>{article.title}</span>
     <small>{article.overview}</small>
   </a>
 
-fn EmptySearch({ matches: Array<Article> }) -> Html<Msg>
+fn EmptySearch({ matches: Array<Article> }) -> Html<void>
   if matches.is_empty():
     <p class="empty-search">No articles match that search.</p>
   else:
     fragment(Array<Html<void>>::init())
 
-fn StatusBar({ model: Model }) -> Html<Msg>
+fn StatusBar({ model: Model }) -> Html<void>
   <div class="status-bar">
     <a href="/">Index</a>
     <span aria-hidden="true">/</span>
@@ -245,7 +245,7 @@ fn DeleteConfirmation({ model: Model, article: Article }) -> Html<Msg>
   else:
     fragment(Array<Html<void>>::init())
 
-fn RelatedSection({ article: Article, articles: Array<Article> }) -> Html<Msg>
+fn RelatedSection({ article: Article, articles: Array<Article> }) -> Html<void>
   let related = related_articles(article, articles)
   <section class="related-section">
     <p class="eyebrow">Continue exploring</p>

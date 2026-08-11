@@ -208,9 +208,9 @@ pub fn static_event_tree() -> Html<void>
   let ~attrs = Array<Attr<void>>::init()
   let interactive = false
   if interactive:
-    attrs.push(event_payload_handler<InputEvent, Html<void>>(
+    attrs.push(event_payload_handler<InputEvent, void>(
       name: "input",
-      handler: (event: InputEvent) -> Html<void> => text(event.value)
+      handler: (_event: InputEvent) -> void => void
     ))
   element(tag: "textarea", attrs: attrs, children: [text("Draft")])
 

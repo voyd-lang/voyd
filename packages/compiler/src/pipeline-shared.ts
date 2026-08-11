@@ -14,7 +14,12 @@ import { diagnosticFromCode, DiagnosticError } from "./diagnostics/index.js";
 import { codegenErrorToDiagnostic } from "./codegen/diagnostics.js";
 import type { CodegenOptions } from "./codegen/context.js";
 import type { ContinuationBackendKind } from "./codegen/codegen.js";
-import { buildProgramCodegenView } from "./semantics/codegen-view/index.js";
+import {
+  buildProgramCodegenView,
+  type MonomorphizedInstanceRequest,
+  type ProgramCodegenView,
+} from "./semantics/codegen-view/index.js";
+import type { AutoDtoPlan } from "./semantics/codegen-view/auto-dto-plan.js";
 import { optimizeProgram } from "./optimize/pipeline.js";
 import {
   analyzeModuleSemantics,
@@ -481,9 +486,23 @@ const prepareProgramForCodegen = ({
   }
 
   const linkStartedAt = startCompilerPerfPhase();
+  const boundaryInstances =
+    linkSemantics !== false
+      ? collectBoundaryDtoInstances(
+          buildProgramCodegenView(modules, {
+            instances: [],
+            moduleTyping: new Map(),
+          }),
+          targetModuleId,
+        )
+      : [];
   const monomorphized =
     linkSemantics !== false
-      ? monomorphizeProgram({ modules, semantics })
+      ? monomorphizeProgram({
+          modules,
+          semantics,
+          rootInstances: boundaryInstances,
+        })
       : { instances: [], moduleTyping: new Map() };
   markCompilerPerfPhaseDuration("monomorphizeProgram", linkStartedAt);
   recordCompilerPerfDuration({
@@ -519,6 +538,73 @@ const prepareProgramForCodegen = ({
     startedAt: optimizeStartedAt,
   });
   return { entryModuleId: targetModuleId, program, optimization };
+};
+
+const collectBoundaryDtoInstances = (
+  program: ProgramCodegenView,
+  targetModuleId: string,
+): readonly MonomorphizedInstanceRequest[] => {
+  const requests = new Map<string, MonomorphizedInstanceRequest>();
+  const visit = (plan: AutoDtoPlan): void => {
+    if (plan.kind === "custom") {
+      const desc = program.types.getTypeDesc(plan.typeId);
+      const nominal =
+        desc.kind === "intersection" && typeof desc.nominal === "number"
+          ? program.types.getTypeDesc(desc.nominal)
+          : desc;
+      const typeArgs =
+        nominal.kind === "nominal-object" || nominal.kind === "value-object"
+          ? nominal.typeArgs
+          : [];
+      [plan.writeFunction, plan.readFunction].forEach((functionId) => {
+        const callee = program.symbols.refOf(functionId);
+        const key = `${callee.moduleId}:${callee.symbol}<${typeArgs.join(",")}>`;
+        requests.set(key, { callee, typeArgs });
+      });
+      visit(plan.representation);
+      return;
+    }
+    if (plan.kind === "array") {
+      visit(plan.element);
+      return;
+    }
+    if (plan.kind === "record") {
+      plan.fields.forEach((field) => visit(field.schema));
+      return;
+    }
+    if (plan.kind === "union") {
+      plan.variants.forEach((variant) =>
+        variant.fields.forEach((field) => visit(field.schema)),
+      );
+    }
+  };
+
+  program.modules.forEach((module, moduleId) => {
+    if (moduleId !== targetModuleId) {
+      return;
+    }
+    const boundaryFunctions = [...module.hir.items.values()]
+      .filter((item) => item.kind === "function")
+      .map((item) => item.symbol);
+    boundaryFunctions.forEach((symbol) => {
+      const signature = program.functions.getSignature(moduleId, symbol);
+      if (!signature) {
+        return;
+      }
+      [
+        ...signature.parameters.map((parameter) => parameter.typeId),
+        signature.returnType,
+      ].forEach((typeId) => {
+        try {
+          visit(program.dtoPlans.get({ typeId, moduleId }));
+        } catch {
+          // Normal boundary validation reports unsupported exported types.
+        }
+      });
+    });
+  });
+
+  return [...requests.values()];
 };
 
 export const emitProgram = async ({
