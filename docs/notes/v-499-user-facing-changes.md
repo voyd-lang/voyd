@@ -35,6 +35,9 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   host adapter payloads. Voyd `void` results use JavaScript `undefined`.
 - Optional record fields are represented by omission. Supplying `null` is a
   type error unless the declared DTO representation explicitly accepts null.
+- Typed decoding rejects unknown record and variant fields by default. Pass
+  `DecodeOptions { unknown_fields: IgnoreUnknownFields {} }` when a boundary
+  intentionally accepts additional fields.
 - HTTP and filesystem byte bodies are `Uint8Array` values in JavaScript host
   adapters.
 - VX component state is generic and typed. The serialized `MsgPack` state

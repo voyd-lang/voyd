@@ -961,7 +961,7 @@ pub obj DecodeError {
   api actual: String
 }
 
-/// Returns decoder options that ignore unknown fields.
+/// Returns decoder options that reject unknown fields.
 pub fn default_decode_options() -> DecodeOptions
   DecodeOptions { unknown_fields: RejectUnknownFields {} }
 

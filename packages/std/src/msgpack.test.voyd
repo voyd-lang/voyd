@@ -138,6 +138,34 @@ test "typed msgpack decode accepts compact integer encodings for float DTO field
     Ok<f64> { value }:
       assert(value, eq: 10.0)
 
+test "typed msgpack decode rejects unsigned integers above i64 max":
+  let ~encoded = ByteBuffer::with_capacity(9)
+  encoded.push(207)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+
+  match(decode<i32>(encoded.as_bytes()))
+    Ok<i32>:
+      Test::fail()
+    Err<MsgPackError>:
+      void
+  match(decode<i64>(encoded.as_bytes()))
+    Ok<i64>:
+      Test::fail()
+    Err<MsgPackError>:
+      void
+  match(decode<f64>(encoded.as_bytes()))
+    Ok<f64>:
+      Test::fail()
+    Err<MsgPackError>:
+      void
+
 test "typed msgpack codecs stream recursive DTO values":
   let source = RecursiveCodecNode {
     value: 1,

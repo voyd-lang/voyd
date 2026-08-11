@@ -1513,7 +1513,16 @@ impl Decoder
       return Some<i32> { value: if value >= 32768 then: value - 65536 else: value }
     if prefix == 210:
       return Some<i32> { value: self.read_u32() }
-    if prefix == 207 or prefix == 211:
+    if prefix == 207:
+      let value = self.read_u64()
+      if value < cast::to_i64(0):
+        return None {}
+      match(cast::to_i32_checked(value))
+        Err:
+          return None {}
+        Ok<i32> { value }:
+          return Some<i32> { value }
+    if prefix == 211:
       match(cast::to_i32_checked(self.read_u64()))
         Err:
           return None {}
@@ -1533,7 +1542,12 @@ impl Decoder
       return Some<i64> { value: cast::to_i64(self.read_u16()) }
     if prefix == 206:
       return Some<i64> { value: extend_i32_u(self.read_u32()) }
-    if prefix == 207 or prefix == 211:
+    if prefix == 207:
+      let value = self.read_u64()
+      if value < cast::to_i64(0):
+        return None {}
+      return Some<i64> { value }
+    if prefix == 211:
       return Some<i64> { value: self.read_u64() }
     if prefix == 208:
       let value = self.read_u8()

@@ -138,8 +138,8 @@ as `$.profile.age` or `$.items[2]`. Errors distinguish missing fields, unknown
 fields, duplicate fields, wrong value kinds, invalid union variants, and invalid shape
 references.
 
-Unknown fields are ignored by default. Pass `DecodeOptions` with
-`RejectUnknownFields {}` to reject them. This policy applies consistently to
+Unknown fields are rejected by default. Pass `DecodeOptions` with
+`IgnoreUnknownFields {}` to accept them. This policy applies consistently to
 records and union payloads at every nesting level.
 
 ## Supported types and limitations
