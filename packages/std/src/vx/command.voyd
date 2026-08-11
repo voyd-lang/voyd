@@ -18,6 +18,7 @@ pub enum CommandWire
   CommandBatch { children: Array<CommandWire> }
   CommandMap { child: CommandWire, handler_id: i32 }
   CommandRuntime { kind: String, value?: DataValue }
+  CommandReadClipboard { handler_ref: i32 }
   CommandTask { task_ref: i32, handler_ref: i32 }
   CommandDelay { millis: i64, payload: EncodedPayload }
   CommandOwned { child: CommandWire, handler_ref: i32 }
@@ -107,10 +108,8 @@ impl<Msg> Cmd<Msg>
 
   /// Reads text from the browser clipboard and dispatches the handler result.
   fn read_clipboard_with_handler_id(handler_id: i32) -> Cmd<Msg>
-    command_plan<Msg>(() -> DataValue =>
-      let ~out = command_map("read_clipboard")
-      out.set("handlerId", wire::make_i32(handler_id))
-      wire::make_map(out)
+    command_plan<Msg>(() -> CommandWire =>
+      CommandWire::CommandReadClipboard { handler_ref: handler_id }
     )
 
   api fn read_clipboard(handler: fn(String) -> Msg) -> Cmd<Msg>
