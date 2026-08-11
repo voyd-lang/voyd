@@ -396,7 +396,7 @@ const encodeRecord = ({
   allowVariantTag?: boolean;
 }): Record<string, unknown> => {
   return withContainerLimits(
-    { exportName, path, length: fields.length, state },
+    { exportName, path, length: fields.length + (tag ? 1 : 0), state },
     () =>
       withCycleCheck(
         { exportName, path, value: toCycleObject(value), ancestors },
@@ -417,28 +417,31 @@ const encodeRecord = ({
               );
             }
           }
-          return Object.fromEntries(
-            fields.flatMap((field) => {
-              const fieldValue = record[field.name];
-              if (field.optional && fieldValue === undefined) {
-                return [];
-              }
-              return [
-                [
-                  field.name,
-                  encodeBoundaryValue({
-                    exportName,
-                    schema: field.schema,
-                    value: fieldValue,
-                    path: `${path}.${field.name}`,
-                    registry,
-                    ancestors,
-                    state,
-                  }),
-                ],
-              ];
-            }),
-          );
+          return {
+            ...(tag ? { $variant: tag } : {}),
+            ...Object.fromEntries(
+              fields.flatMap((field) => {
+                const fieldValue = record[field.name];
+                if (field.optional && fieldValue === undefined) {
+                  return [];
+                }
+                return [
+                  [
+                    field.name,
+                    encodeBoundaryValue({
+                      exportName,
+                      schema: field.schema,
+                      value: fieldValue,
+                      path: `${path}.${field.name}`,
+                      registry,
+                      ancestors,
+                      state,
+                    }),
+                  ],
+                ];
+              }),
+            ),
+          };
         },
       ),
   );

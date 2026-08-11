@@ -119,7 +119,7 @@ export const emitEffectTableSection = ({
   const sectionBytes = new Uint8Array(buffer);
   mod.addCustomSection(exportName, sectionBytes);
   const boundaryOps = effectRegistry.entries.flatMap((entry) =>
-    entry.boundary
+    entry.boundary && effectRegistry.usedOpIndexes.has(entry.opIndex)
       ? [
           {
             opIndex: entry.opIndex,

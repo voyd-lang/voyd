@@ -63,6 +63,7 @@ export type EffectOpEntry = {
 
 export type EffectRegistry = {
   entries: readonly EffectOpEntry[];
+  usedOpIndexes: ReadonlySet<number>;
   effectIdsByModule: ReadonlyMap<string, readonly EffectIdInfo[]>;
   getEntry: (key: EffectOpKey) => EffectOpEntry | undefined;
   getOpIndex: (key: EffectOpKey) => number | undefined;
@@ -859,12 +860,21 @@ export const buildEffectRegistry = (
     );
     byKey.set(key, entry);
   });
+  const usedOpIndexes = new Set<number>();
+  const markUsed = (key: EffectOpKey): EffectOpEntry | undefined => {
+    const entry = byKey.get(key);
+    if (entry) {
+      usedOpIndexes.add(entry.opIndex);
+    }
+    return entry;
+  };
 
   return {
     entries,
+    usedOpIndexes,
     effectIdsByModule,
-    getEntry: (key) => byKey.get(key),
-    getOpIndex: (key) => byKey.get(key)?.opIndex,
+    getEntry: markUsed,
+    getOpIndex: (key) => markUsed(key)?.opIndex,
     getEffectId: (moduleId, localEffectIndex) =>
       effectIdsByModule.get(moduleId)?.[localEffectIndex],
     keyFor: (effectId, opId, signatureHash) =>

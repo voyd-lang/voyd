@@ -59,6 +59,20 @@ describe("boundary DTO decoding", () => {
 
     expect(union).toEqual({ tag: "Some", value: 3 });
     expect(variant).toEqual({ tag: "Some", value: 4 });
+
+    expect(
+      encodeBoundaryArgs({
+        exportName: "standalone variant",
+        schemas: [
+          {
+            kind: "record",
+            tag: "Some",
+            fields: [{ name: "value", schema: { kind: "i32" } }],
+          },
+        ],
+        args: [{ tag: "Some", value: 5 }],
+      }),
+    ).toEqual([{ $variant: "Some", value: 5 }]);
   });
 
   it("rejects unknown record fields and validates explicit null values", () => {

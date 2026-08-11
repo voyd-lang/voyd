@@ -8,6 +8,7 @@ import type {
 } from "../context.js";
 import {
   liftHeapValueToInline,
+  loadStructuralField,
   storeValueIntoStorageRef,
 } from "../structural.js";
 import { abiTypeFor, getSignatureSpillBoxType, wasmTypeFor } from "../types.js";
@@ -17,6 +18,8 @@ import { withDtoFingerprint, type BoundarySchema } from "../boundary/schema.js";
 import {
   readDtoValueFromHostStream,
   readHostStreamValue,
+  resultMember,
+  resultPayload,
 } from "../boundary/dto-stream-reader.js";
 import {
   hostStreamWriterResultTypeId,
@@ -39,6 +42,11 @@ import {
 } from "../host-transport/frame-codec.js";
 import { hostExportId } from "./export-abi.js";
 import { emitStringLiteral } from "../expressions/primitives.js";
+import {
+  requiredField,
+  requiredStructuralInfo,
+  variantMatches,
+} from "../boundary/dto-tree-codec.js";
 
 export const emitSerializedExportWrapper = ({
   ctx,
@@ -225,6 +233,49 @@ export const emitSerializedExportWrapper = ({
     writerTypeId: provider.writerTypeId,
     ctx,
   });
+  const dtoWriteResult = allocateTempLocal(
+    wasmTypeFor(dtoWriteResultTypeId, ctx),
+    fnCtx,
+    dtoWriteResultTypeId,
+    ctx,
+  );
+  const dtoWriteResultRef = () => loadLocalValue(dtoWriteResult, ctx);
+  const dtoWriteErrorMember = resultMember({
+    resultTypeId: dtoWriteResultTypeId,
+    name: "Err",
+    ctx,
+  });
+  const dtoWriteError = resultPayload({
+    value: dtoWriteResultRef(),
+    resultTypeId: dtoWriteResultTypeId,
+    memberTypeId: dtoWriteErrorMember,
+    fieldName: "error",
+    ctx,
+    fnCtx,
+  });
+  const dtoWriteErrorField = requiredField(
+    requiredStructuralInfo(dtoWriteErrorMember, ctx).fieldMap,
+    "error",
+    dtoWriteErrorMember,
+  );
+  const dtoWriteErrorTypeId = dtoWriteErrorField.typeId;
+  const dtoWriteErrorValueInfo = requiredStructuralInfo(
+    dtoWriteErrorTypeId,
+    ctx,
+  );
+  const dtoWriteErrorMessageField = requiredField(
+    dtoWriteErrorValueInfo.fieldMap,
+    "message",
+    dtoWriteErrorTypeId,
+  );
+  const dtoWriteErrorMessage = () =>
+    loadStructuralField({
+      structInfo: dtoWriteErrorValueInfo,
+      field: dtoWriteErrorMessageField,
+      pointer: () => dtoWriteError,
+      ctx,
+      fnCtx,
+    });
   const readerCompleteCall = lowerSerializedExportCall({
     meta: provider.readerComplete,
     args: [readerRef()],
@@ -232,6 +283,21 @@ export const emitSerializedExportWrapper = ({
     fnCtx,
   });
   const finishWriterCall = lowerSerializedExportCall({
+    meta: provider.finishWriter,
+    args: [writerRef()],
+    ctx,
+    fnCtx,
+  });
+  const resetWriterCall = lowerSerializedExportCall({
+    meta: provider.createWriter,
+    args: [
+      ctx.mod.local.get(outPtrLocal, binaryen.i32),
+      ctx.mod.local.get(outLenLocal, binaryen.i32),
+    ],
+    ctx,
+    fnCtx,
+  });
+  const finishFailureWriterCall = lowerSerializedExportCall({
     meta: provider.finishWriter,
     args: [writerRef()],
     ctx,
@@ -269,8 +335,9 @@ export const emitSerializedExportWrapper = ({
       write("write_i32", [ctx.mod.i32.const(0)]),
       write("begin_array", [ctx.mod.i32.const(2)]),
       write("write_string", [emitStringLiteral(resultFingerprint, ctx)]),
-      ctx.mod.drop(
-        writeDtoValueToHostStream({
+      storeLocalValue({
+        binding: dtoWriteResult,
+        value: writeDtoValueToHostStream({
           writer: writerRef,
           writerTypeId: provider.writerTypeId,
           value: resultValue(),
@@ -279,6 +346,37 @@ export const emitSerializedExportWrapper = ({
           ctx,
           fnCtx,
         }),
+        ctx,
+        fnCtx,
+      }),
+      ctx.mod.if(
+        variantMatches({
+          unionValue: dtoWriteResultRef(),
+          unionTypeId: dtoWriteResultTypeId,
+          variant: { name: "Err", typeId: dtoWriteErrorMember, fields: [] },
+          ctx,
+        }),
+        ctx.mod.block(null, [
+          ...resetWriterCall.setup,
+          ctx.mod.local.set(writerLocal, resetWriterCall.value),
+          write("begin_array", [ctx.mod.i32.const(4)]),
+          write("write_i32", [ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION)]),
+          write("write_i32", [
+            ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportCompletion),
+          ]),
+          write("write_i32", [ctx.mod.i32.const(hostExportId(exportName))]),
+          write("begin_array", [ctx.mod.i32.const(2)]),
+          write("write_i32", [ctx.mod.i32.const(1)]),
+          write("begin_array", [ctx.mod.i32.const(3)]),
+          write("write_string", [emitStringLiteral("dto.write", ctx)]),
+          write("write_string", [dtoWriteErrorMessage()]),
+          write("write_null"),
+          write("end_array"),
+          write("end_array"),
+          write("end_array"),
+          ...finishFailureWriterCall.setup,
+          ctx.mod.return(finishFailureWriterCall.value),
+        ]),
       ),
       write("end_array"),
       write("end_array"),

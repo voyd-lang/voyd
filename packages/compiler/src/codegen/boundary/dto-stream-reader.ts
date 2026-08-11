@@ -1503,7 +1503,7 @@ const defaultWasmValue = (
   return ctx.mod.ref.null(type);
 };
 
-const resultPayload = ({
+export const resultPayload = ({
   value,
   resultTypeId,
   memberTypeId,
@@ -1536,7 +1536,7 @@ const resultPayload = ({
   });
 };
 
-const resultMember = ({
+export const resultMember = ({
   resultTypeId,
   name,
   ctx,

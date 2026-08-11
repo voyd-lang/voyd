@@ -31,6 +31,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   MessagePack envelope objects.
 - Typed `Unit` values use their structural JavaScript representation `{}` in
   host adapter payloads. Voyd `void` results use JavaScript `undefined`.
+- Optional record fields are represented by omission. Supplying `null` is a
+  type error unless the declared DTO representation explicitly accepts null.
 - HTTP and filesystem byte bodies are `Uint8Array` values in JavaScript host
   adapters.
 - VX component state is generic and typed. The serialized `MsgPack` state

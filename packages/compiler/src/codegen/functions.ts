@@ -660,6 +660,7 @@ const collectReachableFunctionSymbols = ({
   const testScope = entryCtx.options.testScope ?? "all";
   const exportContexts =
     entryCtx.options.testMode && testScope === "all" ? contexts : [entryCtx];
+  let requiresSelectedHostTransport = false;
   exportContexts.forEach((exportCtx) => {
     getModuleExportEntries(exportCtx).forEach((entry) => {
       const intrinsicMetadata =
@@ -676,8 +677,50 @@ const collectReachableFunctionSymbols = ({
         exportCtx.moduleId,
         entry.symbol,
       );
+      const targetRef =
+        typeof targetId === "number"
+          ? exportCtx.program.symbols.refOf(targetId)
+          : { moduleId: exportCtx.moduleId, symbol: entry.symbol };
+      const metas = getFunctionMetas(
+        exportCtx,
+        targetRef.moduleId,
+        targetRef.symbol,
+      );
+      const meta =
+        metas?.find((candidate) => candidate.typeArgs.length === 0) ??
+        metas?.[0];
+      const baseExportName =
+        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
+      const exportName = exportCtx.options.testMode
+        ? formatTestExportName({
+            moduleId: exportCtx.moduleId,
+            testId: baseExportName,
+          })
+        : baseExportName;
+      if (meta?.effectful) {
+        requiresSelectedHostTransport = true;
+      } else if (
+        meta &&
+        !exportCtx.options.testMode &&
+        shouldConsiderBoundaryExport({
+          exportName,
+          options: resolveBoundaryExportOptions(exportCtx),
+        })
+      ) {
+        try {
+          const schemas = boundarySchemasForExport({
+            ctx: exportCtx,
+            meta,
+            exportName,
+          });
+          if (!supportsDirectScalarBoundary({ meta, schemas })) {
+            requiresSelectedHostTransport = true;
+          }
+        } catch {
+          // Unsupported export types are handled by normal boundary diagnostics.
+        }
+      }
       if (typeof targetId === "number") {
-        const targetRef = exportCtx.program.symbols.refOf(targetId);
         enqueueExportDtoMethods(targetRef);
         enqueue(
           exportCtx.program.symbols.canonicalIdOf(
@@ -699,7 +742,7 @@ const collectReachableFunctionSymbols = ({
       );
     });
   });
-  if (resolveBoundaryExportOptions(entryCtx).mode !== "off") {
+  if (requiresSelectedHostTransport) {
     enqueueSelectedHostTransportProviderReachability({
       ctx: entryCtx,
       enqueue,

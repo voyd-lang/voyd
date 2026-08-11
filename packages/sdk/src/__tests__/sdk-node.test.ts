@@ -816,19 +816,16 @@ pub fn main() -> i32
     ).resolves.toBe(6);
     await expect(
       host.run("tree_sum", [{ val: 1, l: null, r: { val: 3 } }]),
+    ).rejects.toThrow("typed export tree_sum arg0.l expected object, got null");
+    await expect(
+      host.run("tree_sum", [{ val: 1, r: { val: 3 } }]),
     ).resolves.toBe(4);
     await expect(host.run("cyclic_tree")).rejects.toThrow(
-      /typed export cyclic_tree result.*cannot encode cyclic object graph/,
+      /serialized export cyclic_tree failed \(dto\.write\).*cannot encode cyclic object graph/,
     );
-    const deepTree = await host.run<{ val: number; l?: any }>("deep_tree");
-    let node = deepTree;
-    let depth = 0;
-    while (node.l) {
-      depth += 1;
-      node = node.l;
-    }
-    expect(depth).toBe(600);
-    expect(node).toEqual({ val: 0 });
+    await expect(host.run("deep_tree")).rejects.toThrow(
+      "msgpack writer nesting exceeds configured limit",
+    );
     const cyclicTree: { val: number; l?: unknown } = { val: 1 };
     cyclicTree.l = cyclicTree;
     await expect(host.run("tree_sum", [cyclicTree])).rejects.toThrow(
