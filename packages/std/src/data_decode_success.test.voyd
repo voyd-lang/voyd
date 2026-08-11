@@ -146,9 +146,9 @@ test "DataValue decoding preserves nested CustomDto errors":
         else:
           Test::fail()
 
-  let ~fields = Array<DataField>::init()
-  fields.push(DataField { name: "value", value: DataString { value: "ready" } })
-  match(decode<Optional<String>>(DataVariant { name: "Some", fields }))
+  let ~optional_fields = Array<DataField>::init()
+  optional_fields.push(DataField { name: "value", value: DataString { value: "ready" } })
+  match(decode<Optional<String>>(DataVariant { name: "Some", fields: optional_fields }))
     Ok<Optional<String>> { value }:
       match(value)
         Some<String> { value: decoded }:

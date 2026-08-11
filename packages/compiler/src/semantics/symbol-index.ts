@@ -15,6 +15,8 @@ export type IntrinsicFunctionFlags = {
   external?: { interfaceId: string; functionName: string };
 };
 
+export type HostTransportDeclaration = { id: string; version: number };
+
 export type ModuleSymbolIndex = {
   moduleId: string;
   packageId: string;
@@ -22,6 +24,10 @@ export type ModuleSymbolIndex = {
   resolveTopLevel(name: string): SymbolId | undefined;
   isModuleScoped(symbol: SymbolId): boolean;
   getIntrinsicType(symbol: SymbolId): string | undefined;
+  resolveIntrinsicType(id: string): SymbolId | undefined;
+  getHostTransportDeclaration(
+    symbol: SymbolId,
+  ): HostTransportDeclaration | undefined;
   getStdIntrinsicTypeContract(
     symbol: SymbolId,
   ): StdIntrinsicTypeContractProvider | undefined;
@@ -51,6 +57,8 @@ export const buildModuleSymbolIndex = ({
   const topLevelByName = new Map<string, SymbolId>();
   const moduleScopedBySymbol = new Map<SymbolId, boolean>();
   const intrinsicTypeBySymbol = new Map<SymbolId, string>();
+  const symbolsByIntrinsicType = new Map<string, SymbolId[]>();
+  const hostTransportBySymbol = new Map<SymbolId, HostTransportDeclaration>();
   const stdIntrinsicTypeContractBySymbol = new Map<
     SymbolId,
     StdIntrinsicTypeContractProvider
@@ -97,10 +105,19 @@ export const buildModuleSymbolIndex = ({
       externalFunction?: unknown;
       compilerFunctionContract?: unknown;
       import?: unknown;
+      hostTransport?: unknown;
     };
 
     if (typeof metadata.intrinsicType === "string") {
       intrinsicTypeBySymbol.set(symbol, metadata.intrinsicType);
+      if (!metadata.import) {
+        const symbols = symbolsByIntrinsicType.get(metadata.intrinsicType) ?? [];
+        symbols.push(symbol);
+        symbolsByIntrinsicType.set(metadata.intrinsicType, symbols);
+      }
+    }
+    if (!metadata.import && isHostTransportDeclaration(metadata.hostTransport)) {
+      hostTransportBySymbol.set(symbol, metadata.hostTransport);
     }
     const stdIntrinsicTypeContract = metadata.import
       ? undefined
@@ -154,6 +171,15 @@ export const buildModuleSymbolIndex = ({
     resolveTopLevel: (name) => topLevelByName.get(name),
     isModuleScoped: (symbol) => moduleScopedBySymbol.get(symbol) === true,
     getIntrinsicType: (symbol) => intrinsicTypeBySymbol.get(symbol),
+    resolveIntrinsicType: (id) => {
+      const symbols = symbolsByIntrinsicType.get(id) ?? [];
+      if (symbols.length > 1) {
+        throw new Error(`duplicate intrinsic type '${id}' in ${moduleId}`);
+      }
+      return symbols[0];
+    },
+    getHostTransportDeclaration: (symbol) =>
+      hostTransportBySymbol.get(symbol),
     getStdIntrinsicTypeContract: (symbol) =>
       stdIntrinsicTypeContractBySymbol.get(symbol),
     resolveStdIntrinsicTypeContract: (id) => {
@@ -188,6 +214,14 @@ export const buildModuleSymbolIndex = ({
     },
   };
 };
+
+const isHostTransportDeclaration = (
+  value: unknown,
+): value is HostTransportDeclaration =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { id?: unknown }).id === "string" &&
+  typeof (value as { version?: unknown }).version === "number";
 
 const isExternalFunctionMetadata = (
   value: unknown,

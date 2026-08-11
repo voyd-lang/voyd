@@ -44,8 +44,9 @@ export const bindTraitDecl = (
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
+  const intrinsicType = decl.form.attributes?.intrinsicType;
   resolveStdIntrinsicTypeContractProvider({
-    id: decl.form.attributes?.intrinsicType,
+    id: intrinsicType,
     declarationName: decl.name.value,
     declarationKind: "trait",
     ctx,
@@ -78,7 +79,10 @@ export const bindTraitDecl = (
     kind: "trait",
     declaredAt: decl.form.syntaxId,
     bindingIdentity: bindingIdentityForSyntax(decl.name),
-    metadata: { entity: "trait" },
+    metadata: {
+      entity: "trait",
+      ...(typeof intrinsicType === "string" ? { intrinsicType } : {}),
+    },
   });
 
   const traitScope = ctx.symbolTable.createScope({

@@ -105,6 +105,11 @@ pub trait CustomDto<T, Representation>
   fn write(value: T) -> Representation
   fn read(value: Representation) -> Result<T, CustomDtoError>
 
+/// Compiler-known marker implemented by a stateless host transport provider.
+@intrinsic_type(type: "voyd.std.host-transport-provider")
+pub trait HostTransportProvider
+  fn __host_transport_marker(self) -> void
+
 /// Ignore object fields absent from the target Voyd type.
 pub obj IgnoreUnknownFields {}
 

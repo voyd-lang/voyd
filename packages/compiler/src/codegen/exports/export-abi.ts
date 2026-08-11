@@ -1,6 +1,6 @@
 import type binaryen from "binaryen";
 import type { BoundarySchema } from "../boundary/schema.js";
-import { SELECTED_HOST_TRANSPORT_IDENTITY } from "../host-transport/selected-provider.js";
+import type { HostTransportIdentity } from "../host-transport/provider.js";
 
 export const EXPORT_ABI_SECTION = "voyd.export_abi";
 export const HOST_ABI_VERSION = 2;
@@ -39,11 +39,13 @@ export const emitExportAbiSection = ({
   entries,
   taskCompletions = [],
   callbacks = [],
+  transport,
 }: {
   mod: binaryen.Module;
   entries: readonly ExportAbiEntry[];
   taskCompletions?: readonly TaskCompletionAbiEntry[];
   callbacks?: readonly CallbackAbiEntry[];
+  transport?: HostTransportIdentity;
 }): void => {
   const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
   const ids = new Set(sorted.map((entry) => entry.id));
@@ -54,7 +56,7 @@ export const emitExportAbiSection = ({
     version: 2,
     hostAbi: HOST_ABI_VERSION,
     dtoSchemaAbi: DTO_SCHEMA_ABI_VERSION,
-    transport: SELECTED_HOST_TRANSPORT_IDENTITY,
+    ...(transport ? { transport } : {}),
     exports: sorted,
     taskCompletions: [...taskCompletions].sort((a, b) =>
       a.name.localeCompare(b.name),

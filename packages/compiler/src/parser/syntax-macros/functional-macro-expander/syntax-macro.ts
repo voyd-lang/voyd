@@ -51,6 +51,7 @@ const RESERVED_ATTRIBUTE_NAMES = new Set([
   "compiler_contract",
   "effect",
   "external",
+  "host_transport",
   "intrinsic",
   "intrinsic_type",
   "operation",

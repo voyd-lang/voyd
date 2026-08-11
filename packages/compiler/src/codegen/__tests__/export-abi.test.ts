@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import {
   createVoydHost,
-  HostFrameFailureError,
   parseExportAbi,
 } from "@voyd-lang/js-host";
 import { compileProgram, type CompileProgramResult } from "../../pipeline.js";
@@ -356,7 +355,7 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     });
     await expect(
       host.runPure("echo_user_profile", [{ user: { id: 0 } }]),
-    ).rejects.toMatchObject<Partial<HostFrameFailureError>>({
+    ).rejects.toMatchObject({
       failure: {
         direction: "host->vm",
         frameCategory: "export-invocation",

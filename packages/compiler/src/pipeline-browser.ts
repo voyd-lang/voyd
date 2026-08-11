@@ -37,6 +37,9 @@ export const compileProgram = (
       roots: loadOptions.roots,
       includeTests: loadOptions.includeTests,
       includeSelectedHostTransport:
-        options.codegenOptions?.effectsHostBoundary !== "off",
+        options.codegenOptions?.effectsHostBoundary !== "off" ||
+        (options.codegenOptions?.boundaryExports !== undefined &&
+          options.codegenOptions.boundaryExports !== "off" &&
+          options.codegenOptions.boundaryExports !== false),
     });
   });

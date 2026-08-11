@@ -29,6 +29,7 @@ use std::data::{
   EncodeLimits,
   F32Kind,
   F64Kind,
+  HostTransportProvider,
   I32Kind,
   I64Kind,
   NullKind,
@@ -46,6 +47,13 @@ use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ new_string, String, StringSlice }
+
+@host_transport(id: "voyd.std.msgpack", version: 1)
+obj MsgPackHostTransport {}
+
+impl HostTransportProvider for MsgPackHostTransport
+  fn __host_transport_marker(self) -> void
+    void
 
 /// Recursive MessagePack value union used by the serializer boundary.
 pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | MsgPackMap

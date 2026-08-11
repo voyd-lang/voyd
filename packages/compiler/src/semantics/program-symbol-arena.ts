@@ -1,5 +1,6 @@
 import type { ProgramSymbolId, SymbolId } from "./ids.js";
 import type { IntrinsicFunctionFlags } from "./symbol-index.js";
+import type { HostTransportDeclaration } from "./symbol-index.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import type {
@@ -23,6 +24,14 @@ export type ProgramSymbolArena = {
   getDocumentation(id: ProgramSymbolId): string | undefined;
   getPackageId(id: ProgramSymbolId): string;
   getIntrinsicType(id: ProgramSymbolId): string | undefined;
+  resolveIntrinsicType(id: string): ProgramSymbolId | undefined;
+  getHostTransportDeclaration(
+    id: ProgramSymbolId,
+  ): HostTransportDeclaration | undefined;
+  hostTransportDeclarations(): readonly {
+    symbol: ProgramSymbolId;
+    declaration: HostTransportDeclaration;
+  }[];
   getStdIntrinsicTypeContract(
     id: ProgramSymbolId,
   ): StdIntrinsicTypeContractProvider | undefined;
@@ -67,6 +76,11 @@ export const buildProgramSymbolArena = (
   const documentationById: (string | undefined)[] = [];
   const packageIdsById: string[] = [];
   const intrinsicTypesById: (string | undefined)[] = [];
+  const idsByIntrinsicType = new Map<string, ProgramSymbolId[]>();
+  const hostTransportDeclarationsById: (
+    | HostTransportDeclaration
+    | undefined
+  )[] = [];
   const stdIntrinsicTypeContractsById: (
     | StdIntrinsicTypeContractProvider
     | undefined
@@ -112,6 +126,14 @@ export const buildProgramSymbolArena = (
         mod.binding.decls.getTypeAlias(symbol)?.documentation;
       packageIdsById[id] = mod.binding.packageId;
       intrinsicTypesById[id] = mod.symbols.getIntrinsicType(symbol);
+      const intrinsicType = mod.symbols.getIntrinsicType(symbol);
+      if (intrinsicType && mod.symbols.resolveIntrinsicType(intrinsicType) === symbol) {
+        const ids = idsByIntrinsicType.get(intrinsicType) ?? [];
+        ids.push(id);
+        idsByIntrinsicType.set(intrinsicType, ids);
+      }
+      hostTransportDeclarationsById[id] =
+        mod.symbols.getHostTransportDeclaration(symbol);
       const stdIntrinsicTypeContract =
         mod.symbols.getStdIntrinsicTypeContract(symbol);
       stdIntrinsicTypeContractsById[id] = stdIntrinsicTypeContract;
@@ -188,6 +210,19 @@ export const buildProgramSymbolArena = (
     getDocumentation: (id) => documentationById[id],
     getPackageId,
     getIntrinsicType: (id) => intrinsicTypesById[id],
+    resolveIntrinsicType: (id) => {
+      const ids = idsByIntrinsicType.get(id) ?? [];
+      if (ids.length > 1) throw new Error(`duplicate intrinsic type '${id}'`);
+      return ids[0];
+    },
+    getHostTransportDeclaration: (id) =>
+      hostTransportDeclarationsById[id],
+    hostTransportDeclarations: () =>
+      hostTransportDeclarationsById.flatMap((declaration, symbol) =>
+        declaration
+          ? [{ symbol: symbol as ProgramSymbolId, declaration }]
+          : [],
+      ),
     getStdIntrinsicTypeContract: (id) => stdIntrinsicTypeContractsById[id],
     resolveStdIntrinsicTypeContract: (id) =>
       idsByStdIntrinsicTypeContract.get(id),
