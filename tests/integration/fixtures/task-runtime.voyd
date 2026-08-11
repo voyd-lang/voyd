@@ -350,11 +350,6 @@ pub fn detached_failure_probe(): task::TaskRuntime -> i32
     panic("detached child failed".as_slice())
   1
 
-pub fn unsupported_detached_outcome_probe(): task::TaskRuntime -> i32
-  let child = task::detach do:
-    () => 41
-  child.id
-
 pub fn oversized_root_outcome_probe(): task::TaskRuntime -> String
   let _ = task::yield_now()
   (

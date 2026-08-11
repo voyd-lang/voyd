@@ -139,12 +139,66 @@ const TASK_RUNTIME_EFFECT_ID = "voyd.std.task.runtime";
 const TASK_RUNTIME_WAIT_OP_ID = 0;
 const TASK_RUNTIME_YIELD_OP_ID = 1;
 const TASK_RUNTIME_FAILURE_MESSAGE_OP_ID = 2;
+const TASK_CAPABILITY_SESSION_BITS = 10;
+const TASK_CAPABILITY_GENERATION_BITS = 8;
+const TASK_CAPABILITY_SLOT_BITS =
+  31 - TASK_CAPABILITY_SESSION_BITS - TASK_CAPABILITY_GENERATION_BITS;
+const TASK_CAPABILITY_SESSION_MASK = (1 << TASK_CAPABILITY_SESSION_BITS) - 1;
+const TASK_CAPABILITY_GENERATION_MASK =
+  (1 << TASK_CAPABILITY_GENERATION_BITS) - 1;
+const TASK_CAPABILITY_SLOT_MASK = (1 << TASK_CAPABILITY_SLOT_BITS) - 1;
 const RESUME_EFFECTFUL_RAW_EXPORT = "resume_effectful_raw";
 const END_REQUEST_RAW_EXPORT = "end_request_raw";
 const HANDLE_OUTCOME_EXPORT = "handle_outcome";
 const OUTCOME_TAG_EXPORT = "__voyd_outcome_tag";
 const TASK_OBSERVER_SYMBOL = Symbol.for("voyd.taskObserver");
 let detachedRunCounter = 1;
+let nextTaskCapabilitySession = 1;
+
+const allocateTaskCapabilitySession = (): number => {
+  if (nextTaskCapabilitySession > TASK_CAPABILITY_SESSION_MASK) {
+    throw new Error("task capability session capacity exhausted");
+  }
+  return nextTaskCapabilitySession++;
+};
+
+const encodeTaskCapability = ({
+  session,
+  slot,
+  generation,
+}: {
+  session: number;
+  slot: number;
+  generation: number;
+}): number => {
+  if (slot > TASK_CAPABILITY_SLOT_MASK) {
+    throw new Error("task capability slot capacity exhausted");
+  }
+  return (
+    (session <<
+      (TASK_CAPABILITY_GENERATION_BITS + TASK_CAPABILITY_SLOT_BITS)) |
+    (generation << TASK_CAPABILITY_SLOT_BITS) |
+    slot
+  );
+};
+
+const decodeTaskCapability = (
+  token: number,
+): { session: number; slot: number; generation: number } => {
+  if (!Number.isInteger(token) || token <= 0) {
+    throw new Error("invalid task capability token");
+  }
+  return {
+    session:
+      (token >>>
+        (TASK_CAPABILITY_GENERATION_BITS + TASK_CAPABILITY_SLOT_BITS)) &
+      TASK_CAPABILITY_SESSION_MASK,
+    generation:
+      (token >>> TASK_CAPABILITY_SLOT_BITS) &
+      TASK_CAPABILITY_GENERATION_MASK,
+    slot: token & TASK_CAPABILITY_SLOT_MASK,
+  };
+};
 
 type ActiveTaskImportContext = {
   spawnTask: (params: {
@@ -996,16 +1050,30 @@ export const createVoydHost = async ({
     cleanupTimer?: ReturnType<typeof setTimeout>;
   };
   const standaloneTaskRuns = new Map<number, StandaloneTaskEntry>();
+  const standaloneTaskCapabilitySession = allocateTaskCapabilitySession();
   let nextStandaloneTaskId = 1_000_000;
+  let nextStandaloneTaskSlot = 1;
   let nextRetainedCallbackInvocationId = 1;
   const observeStandaloneTask = async (
-    taskId: number,
+    capability: number,
   ): Promise<RunOutcome<unknown>> => {
-    const entry = standaloneTaskRuns.get(taskId);
+    let decoded: ReturnType<typeof decodeTaskCapability>;
+    try {
+      decoded = decodeTaskCapability(capability);
+    } catch (error) {
+      return { kind: "failed", error: toError(error) };
+    }
+    if (decoded.session !== standaloneTaskCapabilitySession) {
+      return {
+        kind: "failed",
+        error: new Error("task belongs to a different runtime session"),
+      };
+    }
+    const entry = standaloneTaskRuns.get(capability);
     if (!entry) {
       return {
         kind: "failed",
-        error: new Error(`unknown task ${taskId}`),
+        error: new Error("task capability is stale or has already completed"),
       };
     }
     if (entry.cleanupTimer) {
@@ -1013,7 +1081,7 @@ export const createVoydHost = async ({
       entry.cleanupTimer = undefined;
     }
     return entry.outcome.finally(() => {
-      standaloneTaskRuns.delete(taskId);
+      standaloneTaskRuns.delete(capability);
     });
   };
   let runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner = () => {
@@ -1334,6 +1402,7 @@ export const createVoydHost = async ({
     completionOverride?: HostCompletionIdentity,
   ): VoydRunHandle<T> => {
     const callbackScopeRunId = detachedRunCounter++;
+    const taskCapabilitySession = allocateTaskCapabilitySession();
     const callbackScopeOwnerForTask = (taskId: number): string =>
       `${callbackScopeRunId}:${taskId}`;
     if (!initialized) {
@@ -1625,6 +1694,8 @@ export const createVoydHost = async ({
 
     type TaskRecord = {
       id: number;
+      capability: number;
+      capabilityClaimed: boolean;
       ownerId: number | null;
       detached: boolean;
       sourceFunctionName: string;
@@ -1643,6 +1714,8 @@ export const createVoydHost = async ({
       nextTaskId: number;
       rootTaskId: number;
       tasks: Map<number, TaskRecord>;
+      taskIdsByCapability: Map<number, number>;
+      cancelTaskById: (id: number) => boolean;
       readyQueue: number[];
       wakeResolver?: (result: RuntimeStepResult<RunState>) => void;
       finalOutcome?: RunOutcome<T>;
@@ -1720,6 +1793,19 @@ export const createVoydHost = async ({
       }
     >();
     const completedTaskOutcomes = new Map<number, RunOutcome<unknown>>();
+    const taskIdsByCapability = new Map<number, number>();
+
+    const resolveTaskCapability = (token: number): number => {
+      const decoded = decodeTaskCapability(token);
+      if (decoded.session !== taskCapabilitySession) {
+        throw new Error("task belongs to a different runtime session");
+      }
+      const taskId = taskIdsByCapability.get(token);
+      if (taskId === undefined) {
+        throw new Error("task capability is stale or has already completed");
+      }
+      return taskId;
+    };
 
     const decodeRawOutcome = (
       rawOutcome: unknown,
@@ -1770,12 +1856,23 @@ export const createVoydHost = async ({
     const notifyTaskTerminal = (task: TaskRecord): void => {
       if (!task.terminal) return;
       const outcome = taskRunOutcomeFor(task.terminal);
-      if (task.detached) {
-        completedTaskOutcomes.set(task.id, outcome);
+      if (task.detached && task.capability !== 0) {
+        completedTaskOutcomes.set(task.capability, outcome);
       }
-      const observer = taskObservers.get(task.id);
-      if (!observer) return;
-      taskObservers.delete(task.id);
+      const observer = taskObservers.get(task.capability);
+      if (!observer) {
+        if (
+          task.capabilityClaimed &&
+          task.terminal.kind === "cancelled"
+        ) {
+          completedTaskOutcomes.delete(task.capability);
+          taskIdsByCapability.delete(task.capability);
+        }
+        return;
+      }
+      taskObservers.delete(task.capability);
+      completedTaskOutcomes.delete(task.capability);
+      taskIdsByCapability.delete(task.capability);
       task.terminal.observed = true;
       observer.resolve(outcome);
     };
@@ -1933,11 +2030,52 @@ export const createVoydHost = async ({
     const run = runtimeScheduler.startRun<T>({
       start: () => {
         const rootTaskId = 1;
-        const state: RunState = {
+        let state: RunState;
+        const cancelTaskById = (taskId: number): boolean => {
+          const task = state.tasks.get(taskId);
+          if (!task || task.state === "terminal") {
+            return false;
+          }
+          task.children.forEach((childId) => cancelTaskById(childId));
+          task.state = "terminal";
+          task.pendingRawOutcome = undefined;
+          task.pendingResume = undefined;
+          task.pendingCompletion = undefined;
+          task.terminal = {
+            kind: "cancelled",
+            observed: false,
+          };
+          finishRetainedCallbackScopesForTask(taskId);
+          task.waiters.forEach(({ taskId: waiterTaskId, request }) => {
+            try {
+              const resumed = resumeTask({
+                state,
+                taskId: waiterTaskId,
+                request,
+                value: 2,
+              });
+              const waiter = state.tasks.get(waiterTaskId);
+              if (waiter && waiter.state !== "terminal") {
+                waiter.pendingRawOutcome = resumed;
+                waiter.state = "ready";
+                state.readyQueue.push(waiterTaskId);
+              }
+            } catch {
+              // Ignore late waiter wakeups after cancellation.
+            }
+          });
+          task.waiters = [];
+          notifyTaskTerminal(task);
+          state.onTaskTerminal?.(taskId);
+          return true;
+        };
+        state = {
           nextTaskId: 2,
           rootTaskId,
           tasks: new Map<number, TaskRecord>(),
+          taskIdsByCapability,
           readyQueue: [rootTaskId],
+          cancelTaskById,
           spawnTask: ({
             detached,
             starterExportName,
@@ -1949,6 +2087,11 @@ export const createVoydHost = async ({
           }): number => {
             const ownerId = currentActiveTaskId();
             const taskId = state.nextTaskId++;
+            const capability = encodeTaskCapability({
+              session: taskCapabilitySession,
+              generation: 1,
+              slot: taskId,
+            });
             const sourceFunctionName =
               ownerId === null
                 ? starterExportName
@@ -1960,6 +2103,8 @@ export const createVoydHost = async ({
             });
             state.tasks.set(taskId, {
               id: taskId,
+              capability,
+              capabilityClaimed: false,
               ownerId: detached ? null : ownerId,
               detached,
               sourceFunctionName,
@@ -1997,68 +2142,46 @@ export const createVoydHost = async ({
               state.tasks.get(ownerId)?.children.add(taskId);
             }
             state.readyQueue.push(taskId);
+            taskIdsByCapability.set(capability, taskId);
             state.wakeResolver?.({ kind: "next", result: state });
             state.wakeResolver = undefined;
-            return taskId;
+            return capability;
           },
-          cancelTask: (id: number): boolean => {
-            const cancelTask = (taskId: number): boolean => {
-              const task = state.tasks.get(taskId);
-              if (!task || task.state === "terminal") {
-                return false;
-              }
-              task.children.forEach((childId) => cancelTask(childId));
-              task.state = "terminal";
-              task.pendingRawOutcome = undefined;
-              task.pendingResume = undefined;
-              task.pendingCompletion = undefined;
-              task.terminal = {
-                kind: "cancelled",
-                observed: false,
-              };
-              finishRetainedCallbackScopesForTask(taskId);
-              task.waiters.forEach(({ taskId: waiterTaskId, request }) => {
-                try {
-                  const resumed = resumeTask({
-                    state,
-                    taskId: waiterTaskId,
-                    request,
-                    value: 2,
-                  });
-                  const waiter = state.tasks.get(waiterTaskId);
-                  if (waiter && waiter.state !== "terminal") {
-                    waiter.pendingRawOutcome = resumed;
-                    waiter.state = "ready";
-                    state.readyQueue.push(waiterTaskId);
-                  }
-                } catch {
-                  // Ignore late waiter wakeups after cancellation.
-                }
-              });
-              task.waiters = [];
-              notifyTaskTerminal(task);
-              state.onTaskTerminal?.(taskId);
-              return true;
-            };
-            const changed = cancelTask(id);
+          cancelTask: (token: number): boolean => {
+            let taskId: number;
+            try {
+              taskId = resolveTaskCapability(token);
+            } catch {
+              return false;
+            }
+            const changed = cancelTaskById(taskId);
             if (changed) {
               state.wakeResolver?.({ kind: "next", result: state });
               state.wakeResolver = undefined;
             }
             return changed;
           },
-          takeTaskValue: (id: number): unknown => {
-            const task = state.tasks.get(id);
-            if (!task?.terminal || task.terminal.kind !== "value") {
-              throw new Error(`task ${id} is not complete with a value`);
+          takeTaskValue: (token: number): unknown => {
+            const taskId = resolveTaskCapability(token);
+            const task = state.tasks.get(taskId);
+            if (
+              !task?.capabilityClaimed ||
+              !task.terminal ||
+              task.terminal.kind !== "value"
+            ) {
+              throw new Error(`task capability is not complete with a value`);
             }
             task.terminal.observed = true;
+            taskIdsByCapability.delete(token);
+            completedTaskOutcomes.delete(token);
             return task.terminal.rawOutcome;
           },
         };
 
         state.tasks.set(rootTaskId, {
           id: rootTaskId,
+          capability: 0,
+          capabilityClaimed: false,
           ownerId: null,
           detached: false,
           sourceFunctionName: entryName,
@@ -2372,7 +2495,7 @@ export const createVoydHost = async ({
             }
             if (completion.kind !== "value") {
               current.children.forEach((childId) => {
-                state.cancelTask(childId);
+                state.cancelTaskById(childId);
               });
             }
             const liveChildren = liveChildrenFor(current);
@@ -2613,18 +2736,43 @@ export const createVoydHost = async ({
 
             if (opEntry.effectId === TASK_RUNTIME_EFFECT_ID) {
               if (opEntry.opId === TASK_RUNTIME_WAIT_OP_ID) {
-                const targetId = Number(decodedEffect.args?.[0]);
+                const token = Number(decodedEffect.args?.[0]);
+                let targetId: number;
+                try {
+                  targetId = resolveTaskCapability(token);
+                } catch (error) {
+                  const message = toError(error).message;
+                  completeTask(nextTaskId, {
+                    kind: "failed",
+                    error: new Error(message),
+                    message,
+                  });
+                  return { kind: "next", result: state };
+                }
                 const target = state.tasks.get(targetId);
                 if (!target) {
                   completeTask(nextTaskId, {
                     kind: "failed",
-                    error: new Error(`unknown task ${targetId}`),
-                    message: `unknown task ${targetId}`,
+                    error: new Error("task capability is stale"),
+                    message: "task capability is stale",
                   });
                   return { kind: "next", result: state };
                 }
+                if (target.capabilityClaimed) {
+                  completeTask(nextTaskId, {
+                    kind: "failed",
+                    error: new Error("task capability has already been observed"),
+                    message: "task capability has already been observed",
+                  });
+                  return { kind: "next", result: state };
+                }
+                target.capabilityClaimed = true;
                 if (target.terminal) {
                   target.terminal.observed = true;
+                  if (target.terminal.kind === "cancelled") {
+                    taskIdsByCapability.delete(token);
+                    completedTaskOutcomes.delete(token);
+                  }
                   applyContinuation({
                     taskId: nextTaskId,
                     request,
@@ -2652,7 +2800,19 @@ export const createVoydHost = async ({
               }
 
               if (opEntry.opId === TASK_RUNTIME_FAILURE_MESSAGE_OP_ID) {
-                const targetId = Number(decodedEffect.args?.[0]);
+                const token = Number(decodedEffect.args?.[0]);
+                let targetId: number;
+                try {
+                  targetId = resolveTaskCapability(token);
+                } catch (error) {
+                  const message = toError(error).message;
+                  completeTask(nextTaskId, {
+                    kind: "failed",
+                    error: new Error(message),
+                    message,
+                  });
+                  return { kind: "next", result: state };
+                }
                 const target = state.tasks.get(targetId);
                 if (!target?.terminal || target.terminal.kind !== "failed") {
                   completeTask(nextTaskId, {
@@ -2663,6 +2823,8 @@ export const createVoydHost = async ({
                   return { kind: "next", result: state };
                 }
                 target.terminal.observed = true;
+                taskIdsByCapability.delete(token);
+                completedTaskOutcomes.delete(token);
                 applyContinuation({
                   taskId: nextTaskId,
                   request,
@@ -2784,26 +2946,41 @@ export const createVoydHost = async ({
         return wakeRun();
       },
     });
-    const observeTask: NonNullable<VoydRunHandle["observeTask"]> = (taskId) => {
+    const observeTask: NonNullable<VoydRunHandle["observeTask"]> = (token) => {
+      let taskId: number;
+      try {
+        taskId = resolveTaskCapability(token);
+      } catch (error) {
+        return Promise.resolve({ kind: "failed", error: toError(error) });
+      }
       const state = liveState;
       const task = state?.tasks.get(taskId);
+      if (task?.capabilityClaimed) {
+        return Promise.resolve({
+          kind: "failed",
+          error: new Error("task capability has already been observed"),
+        });
+      }
+      if (task) task.capabilityClaimed = true;
       if (task?.terminal) {
         task.terminal.observed = true;
         const outcome =
-          completedTaskOutcomes.get(taskId) ?? taskRunOutcomeFor(task.terminal);
+          completedTaskOutcomes.get(token) ?? taskRunOutcomeFor(task.terminal);
+        completedTaskOutcomes.delete(token);
+        taskIdsByCapability.delete(token);
         return Promise.resolve(outcome);
       }
-      const completed = completedTaskOutcomes.get(taskId);
-      if (completed) return Promise.resolve(completed);
+      const completed = completedTaskOutcomes.get(token);
+      if (completed) {
+        completedTaskOutcomes.delete(token);
+        taskIdsByCapability.delete(token);
+        return Promise.resolve(completed);
+      }
       if (!task) {
         return Promise.resolve({
           kind: "failed",
-          error: new Error(`unknown task ${taskId}`),
+          error: new Error("task capability is stale"),
         });
-      }
-      const existing = taskObservers.get(taskId);
-      if (existing) {
-        return existing.promise;
       }
       let resolveObserver: ((outcome: RunOutcome<unknown>) => void) | undefined;
       const promise = new Promise<RunOutcome<unknown>>((resolve) => {
@@ -2812,7 +2989,7 @@ export const createVoydHost = async ({
       if (!resolveObserver) {
         throw new Error("failed to initialize task observer promise");
       }
-      taskObservers.set(taskId, { promise, resolve: resolveObserver });
+      taskObservers.set(token, { promise, resolve: resolveObserver });
       return promise;
     };
 
@@ -2843,7 +3020,7 @@ export const createVoydHost = async ({
           }
           if (state) {
             Array.from(state.tasks.keys()).forEach((taskId) => {
-              state.cancelTask(taskId);
+              state.cancelTaskById(taskId);
             });
           }
         }
@@ -2878,6 +3055,11 @@ export const createVoydHost = async ({
       name: starterExportName,
     });
     const taskId = nextStandaloneTaskId++;
+    const capability = encodeTaskCapability({
+      session: standaloneTaskCapabilitySession,
+      generation: 1,
+      slot: nextStandaloneTaskSlot++,
+    });
     const run = runEffectfulManaged<unknown>(
       starterExportName,
       [],
@@ -2890,16 +3072,16 @@ export const createVoydHost = async ({
       },
     );
     const entry: StandaloneTaskEntry = { outcome: run.outcome };
-    standaloneTaskRuns.set(taskId, entry);
+    standaloneTaskRuns.set(capability, entry);
     void run.outcome.finally(() => {
-      if (standaloneTaskRuns.get(taskId) !== entry) return;
+      if (standaloneTaskRuns.get(capability) !== entry) return;
       const cleanupTimer = setTimeout(() => {
-        standaloneTaskRuns.delete(taskId);
+        standaloneTaskRuns.delete(capability);
       }, 60_000);
       (cleanupTimer as { unref?: () => void }).unref?.();
       entry.cleanupTimer = cleanupTimer;
     });
-    return taskId;
+    return capability;
   };
 
   runEffectfulRetainedCallback = async ({

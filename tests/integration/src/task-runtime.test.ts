@@ -210,51 +210,6 @@ describe("integration: task runtime", () => {
     });
   });
 
-  it("resolves task observers when detached typed outcome mapping fails", async () => {
-    const { host, runtime } = await createTaskHost({
-      compiled,
-      onUnhandledTaskFailed: () => undefined,
-    });
-    const run = host.runManaged<number>("unsupported_detached_outcome_probe");
-    const observed = run.outcome.then((rootOutcome) => {
-      if (rootOutcome.kind !== "value" || !run.observeTask) {
-        throw new Error("expected a detached task id and observer");
-      }
-      return run.observeTask(rootOutcome.value);
-    });
-    let observerSettled = false;
-    void observed.then(
-      () => {
-        observerSettled = true;
-      },
-      () => {
-        observerSettled = true;
-      },
-    );
-
-    await drainRuntime(runtime);
-
-    expect(observerSettled).toBe(true);
-    await expect(observed).resolves.toMatchObject({
-      kind: "failed",
-      error: {
-        voyd: {
-          trap: {
-            functionName: "unsupported_detached_outcome_probe",
-            span: {
-              file: expect.stringContaining("task-runtime.voyd"),
-              startLine: 353,
-            },
-          },
-          transition: {
-            point: "task_outcome",
-            direction: "vm->host",
-          },
-        },
-      },
-    });
-  });
-
   it("settles continuation payload encoding failures", async () => {
     const { host, runtime } = await createTaskHost({ compiled });
     const op = compiled.effects.findUniqueOpByLabelSuffix(

@@ -628,7 +628,25 @@ pub fn multi_document() -> String
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const app = createVoydVxAppRuntime({ host });
+    const baseApp = createVoydVxAppRuntime({ host });
+    let observedTaskCapability: number | undefined;
+    let observeTask:
+      | ((capability: number) => Promise<{ kind: string; error?: Error }>)
+      | undefined;
+    const app = {
+      ...baseApp,
+      dispatch: async (message: Parameters<typeof baseApp.dispatch>[0]) => {
+        const step = await baseApp.dispatch(message);
+        const command = step.commands as
+          | (Record<PropertyKey, unknown> & { kind?: string; taskId?: number })
+          | undefined;
+        if (command?.kind === "task" && typeof command.taskId === "number") {
+          observedTaskCapability = command.taskId;
+          observeTask = command[Symbol.for("voyd.taskObserver")] as typeof observeTask;
+        }
+        return step;
+      },
+    };
 
     const container = document.createElement("div");
     const onError = vi.fn();
@@ -641,6 +659,22 @@ pub fn multi_document() -> String
 
     expect(onError).not.toHaveBeenCalled();
     expect(container.querySelector("button")?.textContent).toBe("Saved: 41");
+    expect(observedTaskCapability).toBeDefined();
+    expect(observeTask).toBeTypeOf("function");
+    await expect(observeTask!(observedTaskCapability!)).resolves.toMatchObject({
+      kind: "failed",
+      error: expect.objectContaining({
+        message: expect.stringMatching(/stale|already completed|already been observed/u),
+      }),
+    });
+    await expect(
+      observeTask!(observedTaskCapability! + 2 ** 21),
+    ).resolves.toMatchObject({
+      kind: "failed",
+      error: expect.objectContaining({
+        message: "task belongs to a different runtime session",
+      }),
+    });
 
     container
       .querySelector<HTMLButtonElement>('[data-testid="ignored-result"]')
