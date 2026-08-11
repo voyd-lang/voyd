@@ -29,10 +29,41 @@ const expectCompileSuccess = (
   return result;
 };
 
-const measure = async (run: () => Promise<unknown>): Promise<number> => {
+type Measurement = {
+  elapsedMs: number;
+  peakHeapGrowthBytes: number;
+  wasmMemoryGrowthBytes: number;
+};
+
+const measure = async ({
+  host,
+  run,
+}: {
+  host: VoydHost;
+  run: () => Promise<unknown>;
+}): Promise<Measurement> => {
+  const memory = host.instance.exports.memory;
+  const wasmBytesBefore =
+    memory instanceof WebAssembly.Memory ? memory.buffer.byteLength : 0;
+  const heapBefore = process.memoryUsage().heapUsed;
+  let peakHeapBytes = heapBefore;
+  const sampler = setInterval(() => {
+    peakHeapBytes = Math.max(peakHeapBytes, process.memoryUsage().heapUsed);
+  }, 1);
   const startedAt = performance.now();
-  await run();
-  return performance.now() - startedAt;
+  try {
+    await run();
+  } finally {
+    clearInterval(sampler);
+  }
+  peakHeapBytes = Math.max(peakHeapBytes, process.memoryUsage().heapUsed);
+  const wasmBytesAfter =
+    memory instanceof WebAssembly.Memory ? memory.buffer.byteLength : 0;
+  return {
+    elapsedMs: performance.now() - startedAt,
+    peakHeapGrowthBytes: Math.max(0, peakHeapBytes - heapBefore),
+    wasmMemoryGrowthBytes: Math.max(0, wasmBytesAfter - wasmBytesBefore),
+  };
 };
 
 perfDescribe("performance: V-499 DTO and host-boundary acceptance gates", () => {
@@ -59,44 +90,69 @@ perfDescribe("performance: V-499 DTO and host-boundary acceptance gates", () => 
   }, 300_000);
 
   it("keeps large array, byte, deep-record, and variant host frames bounded", async () => {
-    const elapsed = await measure(async () => {
-      const result = await host.runPure<typeof payload>("echo_payload", [payload]);
-      expect(result.bytes).toBeInstanceOf(Uint8Array);
-      expect(result.bytes.byteLength).toBe(payload.bytes.byteLength);
-      expect(result.values.length).toBe(payload.values.length);
-      expect(result.nested.next.next.leaf.value).toBe(42);
+    const measurement = await measure({
+      host,
+      run: async () => {
+        const result = await host.runPure<typeof payload>("echo_payload", [payload]);
+        expect(result.bytes).toBeInstanceOf(Uint8Array);
+        expect(result.bytes.byteLength).toBe(payload.bytes.byteLength);
+        expect(result.values.length).toBe(payload.values.length);
+        expect(result.nested.next.next.leaf.value).toBe(42);
+      },
     });
-    expect(elapsed).toBeLessThan(gate(750));
+    expect(measurement.elapsedMs).toBeLessThan(gate(750));
+    expect(measurement.peakHeapGrowthBytes).toBeLessThan(32 * 1024 * 1024);
+    expect(measurement.wasmMemoryGrowthBytes).toBeLessThan(4 * 1024 * 1024);
   });
 
   it("keeps typed JSON and MessagePack streaming throughput bounded", async () => {
     const expectedSize = payload.bytes.length + payload.values.length;
-    const jsonElapsed = await measure(async () => {
-      await expect(
-        host.runPure<number>("json_roundtrip_size", [payload.values]),
-      ).resolves.toBe(payload.values.length);
+    const json = await measure({
+      host,
+      run: async () => {
+        await expect(
+          host.runPure<number>("json_roundtrip_size", [payload.values]),
+        ).resolves.toBe(payload.values.length);
+      },
     });
-    const msgpackElapsed = await measure(async () => {
-      await expect(
-        host.runPure<number>("msgpack_roundtrip_size", [payload]),
-      ).resolves.toBe(expectedSize);
+    const msgpack = await measure({
+      host,
+      run: async () => {
+        await expect(
+          host.runPure<number>("msgpack_roundtrip_size", [payload]),
+        ).resolves.toBe(expectedSize);
+      },
     });
-    expect(jsonElapsed).toBeLessThan(gate(2_500));
-    expect(msgpackElapsed).toBeLessThan(gate(1_500));
+    expect(json.elapsedMs).toBeLessThan(gate(2_500));
+    expect(msgpack.elapsedMs).toBeLessThan(gate(1_500));
+    expect(json.peakHeapGrowthBytes).toBeLessThan(32 * 1024 * 1024);
+    expect(msgpack.peakHeapGrowthBytes).toBeLessThan(32 * 1024 * 1024);
+    expect(json.wasmMemoryGrowthBytes).toBeLessThan(4 * 64 * 1024);
+    expect(msgpack.wasmMemoryGrowthBytes).toBeLessThan(4 * 64 * 1024);
   });
 
   it("keeps VX command batches and frequent event messages bounded", async () => {
-    const batchElapsed = await measure(async () => {
-      const encoded = await host.runPure<unknown>("command_batch", [1_000]);
-      expect(encoded).toBeDefined();
-    });
-    const eventsElapsed = await measure(async () => {
-      for (let index = 0; index < 100; index += 1) {
-        const encoded = await host.runPure<unknown>("event_frame", [index]);
+    const batch = await measure({
+      host,
+      run: async () => {
+        const encoded = await host.runPure<unknown>("command_batch", [1_000]);
         expect(encoded).toBeDefined();
-      }
+      },
     });
-    expect(batchElapsed).toBeLessThan(gate(1_500));
-    expect(eventsElapsed).toBeLessThan(gate(2_000));
+    const events = await measure({
+      host,
+      run: async () => {
+        for (let index = 0; index < 100; index += 1) {
+          const encoded = await host.runPure<unknown>("event_frame", [index]);
+          expect(encoded).toBeDefined();
+        }
+      },
+    });
+    expect(batch.elapsedMs).toBeLessThan(gate(1_500));
+    expect(events.elapsedMs).toBeLessThan(gate(2_000));
+    expect(batch.peakHeapGrowthBytes).toBeLessThan(16 * 1024 * 1024);
+    expect(events.peakHeapGrowthBytes).toBeLessThan(64 * 1024 * 1024);
+    expect(batch.wasmMemoryGrowthBytes).toBeLessThan(8 * 64 * 1024);
+    expect(events.wasmMemoryGrowthBytes).toBeLessThan(8 * 64 * 1024);
   });
 });

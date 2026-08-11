@@ -8,8 +8,10 @@ as part of the default test suite.
 `npm run test:perf --workspace @voyd-lang/performance-tests` includes explicit
 budgets for large arrays and byte buffers, nested records, variants, typed JSON
 and MessagePack throughput, VX command batches, frequent event frames, and the
-compiled artifact size. The fixture deliberately compiles without optimizer
-fusion so a mandatory intermediate tree cannot hide behind optimization.
+compiled artifact size. Each runtime budget also gates peak JavaScript heap
+growth and WebAssembly linear-memory growth. The fixture deliberately compiles
+without optimizer fusion so a mandatory intermediate tree cannot hide behind
+optimization.
 Set `VOYD_V499_PERF_GATE_MULTIPLIER` only when calibrating a materially slower
 CI runner; the default multiplier is `1`.
 
