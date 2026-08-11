@@ -112,7 +112,7 @@ import {
 } from "./boundary/custom-dto-reachability.js";
 import {
   enqueueSelectedHostTransportProviderReachability,
-  ensureSelectedHostTransportProvider,
+  linkedSelectedHostTransportIdentity,
 } from "./host-transport/selected-provider.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
@@ -1770,11 +1770,7 @@ export const emitModuleExports = (
   );
   emitExportAbiSection({
     mod: ctx.mod,
-    transport:
-      ctx.options.effectsHostBoundary !== "off" ||
-      ctx.options.boundaryExports !== false
-        ? ensureSelectedHostTransportProvider(ctx).identity
-        : undefined,
+    transport: linkedSelectedHostTransportIdentity(ctx),
     entries: exportAbiEntries,
     taskCompletions,
     callbacks: Array.from(

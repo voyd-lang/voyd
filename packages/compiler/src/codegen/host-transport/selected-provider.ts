@@ -25,6 +25,17 @@ export const ensureSelectedHostTransportProvider = (
   ...BUILD_SELECTED_HOST_TRANSPORT_PROVIDER.ensureFunctions(ctx),
 });
 
+export const linkedSelectedHostTransportIdentity = (
+  ctx: CodegenContext,
+): HostTransportIdentity | undefined => {
+  const expected = BUILD_SELECTED_HOST_TRANSPORT_PROVIDER.identity;
+  const linked = ctx.program.symbols.hostTransportDeclarations().some(
+    ({ declaration }) =>
+      declaration.id === expected.id && declaration.version === expected.version,
+  );
+  return linked ? selectedProviderIdentity(ctx) : undefined;
+};
+
 export const enqueueSelectedHostTransportProviderReachability = ({
   ctx,
   enqueue,
