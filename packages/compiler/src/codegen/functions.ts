@@ -1557,10 +1557,6 @@ export const emitModuleExports = (
       }
       if (meta.effectful) {
         emitEffectfulWasmExportWrapper({ ctx: exportCtx, meta, exportName });
-
-        if (meta.paramTypes.length > firstUserParamIndexFor(meta)) {
-          return;
-        }
         let schemas: { params: BoundarySchema[]; result: BoundarySchema };
         try {
           schemas = boundarySchemasForExport({
@@ -1586,7 +1582,7 @@ export const emitModuleExports = (
         exportAbiEntries.push({
           id: hostExportId(exportName),
           name: exportName,
-          abi: "direct",
+          abi: "serialized",
           params: schemas.params,
           result: schemas.result,
         });

@@ -7,6 +7,7 @@ import { toBase64 } from "./base64.js";
 const TABLE_VERSION_V2 = 2;
 const TABLE_VERSION = 3;
 export const EFFECT_TABLE_EXPORT = "__voyd_effect_table";
+export const EFFECT_ABI_SECTION = "voyd.effect_abi";
 
 const TABLE_HEADER_SIZE = 8; // version + opCount (u32 each)
 const OP_ENTRY_SIZE_V2 = 28; // effectIdLo, effectIdHi, effectIdName, opId, resumeKind, signatureHash, label (u32 each)
@@ -117,6 +118,25 @@ export const emitEffectTableSection = ({
   new Uint8Array(buffer, namesStart).set(namesBlob);
   const sectionBytes = new Uint8Array(buffer);
   mod.addCustomSection(exportName, sectionBytes);
+  const boundaryOps = effectRegistry.entries.flatMap((entry) =>
+    entry.boundary
+      ? [
+          {
+            opIndex: entry.opIndex,
+            params: entry.boundary.params,
+            result: entry.boundary.result,
+          },
+        ]
+      : [],
+  );
+  if (boundaryOps.length > 0) {
+    mod.addCustomSection(
+      EFFECT_ABI_SECTION,
+      new TextEncoder().encode(
+        JSON.stringify({ version: 1, ops: boundaryOps }),
+      ),
+    );
+  }
 
   return {
     version,

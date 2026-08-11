@@ -5,6 +5,7 @@ import { createVoydHost } from "@voyd-lang/js-host";
 import { createEffectsImports } from "./support/wasm-imports.js";
 import { compileEffectFixture } from "./support/effects-harness.js";
 import { wasmBufferSource } from "./support/wasm-utils.js";
+import { hostExportId } from "../exports/export-abi.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -201,7 +202,16 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
 
     const bufferPtr = 64;
     const bufferCap = 1024;
-    const first = mainEffectful(bufferPtr, bufferCap);
+    const invocation = encode([2, 0, hostExportId("main"), []], {
+      useBigInt64: true,
+    }) as Uint8Array;
+    new Uint8Array(memory.buffer, bufferPtr, invocation.length).set(invocation);
+    const first = mainEffectful(
+      bufferPtr,
+      invocation.length,
+      bufferPtr,
+      bufferCap,
+    );
     expect(effectStatus(first)).toBe(1);
     const continuation = effectCont(first);
     const requestLength = effectLen(first) as number;

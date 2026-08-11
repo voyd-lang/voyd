@@ -18,12 +18,67 @@ import type {
   VoydRuntimeTransitionContext,
 } from "./trap-diagnostics.js";
 import type { HostTransportAdapter } from "../protocol/host-transport.js";
+import type { BoundarySchema } from "../protocol/export-abi.js";
+import {
+  decodeBoundaryArgs,
+  decodeBoundaryResult,
+  encodeBoundaryArgs,
+} from "../boundary-values.js";
+
+export type EffectBoundarySchemas = {
+  params: readonly BoundarySchema[];
+  result: BoundarySchema;
+};
+
+export const decodeEffectBoundaryArgs = ({
+  label,
+  payloads,
+  schemas,
+}: {
+  label: string;
+  payloads: readonly { fingerprint: string; value: unknown }[];
+  schemas?: EffectBoundarySchemas;
+}): unknown[] => {
+  if (!schemas) return payloads.map((payload) => payload.value);
+  if (payloads.length !== schemas.params.length) {
+    throw new Error(
+      `effect ${label} expected ${schemas.params.length} arguments, got ${payloads.length}`,
+    );
+  }
+  payloads.forEach((payload, index) => {
+    if (payload.fingerprint !== schemas.params[index]?.fingerprint) {
+      throw new Error(`effect ${label} argument ${index} fingerprint mismatch`);
+    }
+  });
+  return decodeBoundaryArgs({
+    exportName: `effect ${label}`,
+    schemas: schemas.params,
+    args: payloads.map((payload) => payload.value),
+  });
+};
+
+export const encodeEffectBoundaryResult = ({
+  label,
+  value,
+  schemas,
+}: {
+  label: string;
+  value: unknown;
+  schemas?: EffectBoundarySchemas;
+}): unknown =>
+  schemas
+    ? encodeBoundaryArgs({
+        exportName: `effect ${label}`,
+        schemas: [schemas.result],
+        args: [value],
+      })[0]
+    : value;
 
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
 export type HostCompletionIdentity =
-  | { kind: "export"; id: number }
+  | { kind: "export"; id: number; name?: string; schema?: BoundarySchema }
   | { kind: "callback"; id: number };
 
 export const decodeHostCompletion = ({
@@ -62,7 +117,19 @@ export const decodeHostCompletion = ({
   if (outcome.kind === "failure") {
     throw new Error(outcome.failure.message);
   }
-  return outcome.value.value;
+  if (completion.kind !== "export" || !completion.schema) {
+    return outcome.value.value;
+  }
+  if (outcome.value.fingerprint !== completion.schema.fingerprint) {
+    throw new Error(
+      `effectful export ${completion.name ?? completion.id} result fingerprint mismatch`,
+    );
+  }
+  return decodeBoundaryResult({
+    exportName: completion.name ?? String(completion.id),
+    schema: completion.schema,
+    value: outcome.value.value,
+  });
 };
 
 const invalidPayloadLengthMessage = ({
@@ -144,6 +211,7 @@ export const continueEffectLoopStep = async <T = unknown>({
   fallbackFunctionName,
   transport,
   completion,
+  effectSchemasByOpIndex,
 }: {
   result: unknown;
   effectStatus: CallableFunction;
@@ -168,6 +236,7 @@ export const continueEffectLoopStep = async <T = unknown>({
   fallbackFunctionName?: string;
   transport: HostTransportAdapter;
   completion: HostCompletionIdentity;
+  effectSchemasByOpIndex?: readonly (EffectBoundarySchemas | undefined)[];
 }): Promise<EffectLoopStepResult<T>> => {
   const withTrapContext = ({
     error,
@@ -245,7 +314,11 @@ export const continueEffectLoopStep = async <T = unknown>({
       opIndex: framedOp.opIndex,
       resumeKind: framedOp.resumeKind,
       handle: framedOp.opIndex,
-      args: frame.args.map((payload) => payload.value),
+      args: decodeEffectBoundaryArgs({
+        label: framedOp.label,
+        payloads: frame.args,
+        schemas: effectSchemasByOpIndex?.[framedOp.opIndex],
+      }),
     };
     const opEntry = resolveParsedEffectOp({
       table,
@@ -294,7 +367,11 @@ export const continueEffectLoopStep = async <T = unknown>({
         kind: "success",
         value: {
           fingerprint: frame.resultFingerprint,
-          value: handlerResult.value,
+          value: encodeEffectBoundaryResult({
+            label: opEntry.label,
+            value: handlerResult.value,
+            schemas: effectSchemasByOpIndex?.[opEntry.opIndex],
+          }),
         },
       },
     });
@@ -349,6 +426,7 @@ export const runEffectLoop = async <T = unknown>({
   bufferSize,
   transport,
   completion,
+  effectSchemasByOpIndex,
 }: {
   entry: CallableFunction;
   effectStatus: CallableFunction;
@@ -362,6 +440,7 @@ export const runEffectLoop = async <T = unknown>({
   bufferSize: number;
   transport: HostTransportAdapter;
   completion: HostCompletionIdentity;
+  effectSchemasByOpIndex?: readonly (EffectBoundarySchemas | undefined)[];
 }): Promise<T> => {
   let result = entry(bufferPtr, bufferSize);
 
@@ -380,6 +459,7 @@ export const runEffectLoop = async <T = unknown>({
       bufferSize,
       transport,
       completion,
+      effectSchemasByOpIndex,
     });
     if (stepResult.kind === "value") {
       return stepResult.value;

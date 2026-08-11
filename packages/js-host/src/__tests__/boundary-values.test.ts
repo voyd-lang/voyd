@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { decodeBoundaryArgs } from "../boundary-values.js";
+import {
+  decodeBoundaryArgs,
+  decodeBoundaryResult,
+  encodeBoundaryArgs,
+} from "../boundary-values.js";
 import { resolveHostTransport } from "../protocol/host-transport.js";
 import type { HostFrame } from "../protocol/host-frame.js";
 import { msgPackHostTransport } from "../transports/msgpack.js";
@@ -55,6 +59,41 @@ describe("boundary DTO decoding", () => {
 
     expect(union).toEqual({ tag: "Some", value: 3 });
     expect(variant).toEqual({ tag: "Some", value: 4 });
+  });
+
+  it("rejects unknown record fields and validates explicit null values", () => {
+    const schema = {
+      kind: "record" as const,
+      fields: [
+        {
+          name: "name",
+          optional: true,
+          schema: { kind: "string" as const },
+        },
+      ],
+    };
+
+    expect(() =>
+      encodeBoundaryArgs({
+        exportName: "profile",
+        schemas: [schema],
+        args: [{ name: "Ada", typo: true }],
+      }),
+    ).toThrow("arg0 has unknown field typo");
+    expect(() =>
+      encodeBoundaryArgs({
+        exportName: "profile",
+        schemas: [schema],
+        args: [{ name: null }],
+      }),
+    ).toThrow("arg0.name expected String, got null");
+    expect(() =>
+      decodeBoundaryResult({
+        exportName: "profile",
+        schema,
+        value: { extra: 1 },
+      }),
+    ).toThrow("result has unknown field extra");
   });
 });
 

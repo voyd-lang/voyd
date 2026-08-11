@@ -44,6 +44,9 @@ import {
 import {
   continueEffectLoopStep,
   decodeHostCompletion,
+  decodeEffectBoundaryArgs,
+  encodeEffectBoundaryResult,
+  type EffectBoundarySchemas,
   type HostCompletionIdentity,
 } from "./runtime/dispatch.js";
 import {
@@ -879,6 +882,26 @@ export const createVoydHost = async ({
     adapters: transportAdapters,
   });
   const externalRequirements = parseExternalRequirements(module);
+  const effectSchemasByOpIndex: Array<EffectBoundarySchemas | undefined> =
+    parsedTable.ops.map((op) => op.boundary);
+  externalRequirements.functions.forEach((requirement) => {
+    if (!requirement.effect) return;
+    const signatureHash = Number.parseInt(
+      requirement.effect.signatureHash.replace(/^0x/u, ""),
+      16,
+    ) >>> 0;
+    const op = parsedTable.ops.find(
+      (candidate) =>
+        candidate.effectId === requirement.interfaceId &&
+        candidate.opId === requirement.effect?.opId &&
+        candidate.signatureHash === signatureHash,
+    );
+    if (!op) return;
+    effectSchemasByOpIndex[op.opIndex] = {
+      params: requirement.params,
+      result: requirement.result,
+    };
+  });
   const exportAbiByName = new Map(
     exportAbi.exports.map((entry) => [entry.name, entry] as const),
   );
@@ -1238,26 +1261,53 @@ export const createVoydHost = async ({
     const callbackScopeRunId = detachedRunCounter++;
     const callbackScopeOwnerForTask = (taskId: number): string =>
       `${callbackScopeRunId}:${taskId}`;
-    if (args.length > 0 && !startRaw) {
-      throw new Error("effectful exports do not accept arguments yet");
-    }
     if (!initialized) {
       initEffects();
+    }
+    const abiName = entryName.endsWith("_effectful")
+      ? entryName.slice(0, -"_effectful".length)
+      : entryName;
+    const exportAbi = startRaw ? undefined : exportAbiByName.get(abiName);
+    if (!startRaw && !exportAbi) {
+      throw new Error(`effectful export ${entryName} is missing ABI metadata`);
     }
     const rootCompletion =
       completionOverride ??
       (() => {
-        const abiName = entryName.endsWith("_effectful")
-          ? entryName.slice(0, -"_effectful".length)
-          : entryName;
-        const abi = exportAbiByName.get(abiName);
-        if (!abi) {
-          throw new Error(
-            `effectful export ${entryName} is missing ABI metadata`,
-          );
+        if (!exportAbi) {
+          throw new Error(`effectful export ${entryName} is missing ABI metadata`);
         }
-        return { kind: "export", id: abi.id } as const;
+        return {
+          kind: "export",
+          id: exportAbi.id,
+          name: abiName,
+          schema: exportAbi.result,
+        } as const;
       })();
+
+    const encodedInvocation = exportAbi
+      ? (() => {
+          const schemas = exportAbi.params ?? [];
+          const boundaryArgs = encodeBoundaryArgs({
+            exportName: abiName,
+            schemas,
+            args,
+          });
+          return transport.encodeFrame({
+            kind: "export-invocation",
+            exportId: exportAbi.id,
+            args: boundaryArgs.map((value, index) => {
+              const fingerprint = schemas[index]?.fingerprint;
+              if (!fingerprint) {
+                throw new Error(
+                  `effectful export ${abiName} argument ${index} is missing a DTO fingerprint`,
+                );
+              }
+              return { fingerprint, value };
+            }),
+          });
+        })()
+      : undefined;
 
     const transportMemory = requireExportedMemory({
       instance,
@@ -1269,6 +1319,16 @@ export const createVoydHost = async ({
       requiredBytes: bufferPtr + bufferSize,
       label: LINEAR_MEMORY_EXPORT,
     });
+    if (encodedInvocation) {
+      if (encodedInvocation.length > bufferSize) {
+        throw new Error("effectful export invocation exceeds buffer size");
+      }
+      new Uint8Array(
+        transportMemory.buffer,
+        bufferPtr,
+        encodedInvocation.length,
+      ).set(encodedInvocation);
+    }
     const runResourceCleanups = new Set<EffectResourceCleanup>();
     let runResourceCleanupPromise: Promise<void> | undefined;
     let runResourceScopeClosed = false;
@@ -1362,7 +1422,12 @@ export const createVoydHost = async ({
           try {
             result = startRaw
               ? startRaw({ bufferPtr, bufferSize })
-              : entry!(bufferPtr, bufferSize);
+              : entry!(
+                  bufferPtr,
+                  encodedInvocation?.length ?? 0,
+                  bufferPtr,
+                  bufferSize,
+                );
           } catch (error) {
             throw annotateTrap(error, {
               transition: {
@@ -1395,6 +1460,7 @@ export const createVoydHost = async ({
                 ? entryName
                 : effectfulExportNameFor(entryName),
               completion: rootCompletion,
+              effectSchemasByOpIndex,
             });
             if (stepResult.kind === "value") {
               return { kind: "value", value: stepResult.value };
@@ -1508,7 +1574,12 @@ export const createVoydHost = async ({
 
     const effectFramesByRequest = new Map<
       unknown,
-      { requestId: number; resultFingerprint: string }
+      {
+        requestId: number;
+        resultFingerprint: string;
+        label: string;
+        schemas?: EffectBoundarySchemas;
+      }
     >();
 
     const encodeToBuffer = (request: unknown, value: unknown): number => {
@@ -1521,7 +1592,14 @@ export const createVoydHost = async ({
         requestId: frame.requestId,
         outcome: {
           kind: "success",
-          value: { fingerprint: frame.resultFingerprint, value },
+          value: {
+            fingerprint: frame.resultFingerprint,
+            value: encodeEffectBoundaryResult({
+              label: frame.label,
+              value,
+              schemas: frame.schemas,
+            }),
+          },
         },
       });
       if (encoded.length > bufferSize) {
@@ -1896,7 +1974,12 @@ export const createVoydHost = async ({
                 try {
                   return startRaw
                     ? startRaw({ bufferPtr, bufferSize })
-                    : rawEntry!(bufferPtr, bufferSize);
+                    : rawEntry!(
+                        bufferPtr,
+                        encodedInvocation?.length ?? 0,
+                        bufferPtr,
+                        bufferSize,
+                      );
                 } catch (error) {
                   throw annotateTrap(error, {
                     transition: {
@@ -2397,6 +2480,8 @@ export const createVoydHost = async ({
             effectFramesByRequest.set(request, {
               requestId: frame.requestId,
               resultFingerprint: frame.resultFingerprint,
+              label: framedOp.label,
+              schemas: effectSchemasByOpIndex[framedOp.opIndex],
             });
             const decodedEffect: EffectOpRequest = {
               effectId: framedOp.effectIdHash.value,
@@ -2404,7 +2489,11 @@ export const createVoydHost = async ({
               opIndex: framedOp.opIndex,
               resumeKind: framedOp.resumeKind,
               handle: framedOp.opIndex,
-              args: frame.args.map((payload) => payload.value),
+              args: decodeEffectBoundaryArgs({
+                label: framedOp.label,
+                payloads: frame.args,
+                schemas: effectSchemasByOpIndex[framedOp.opIndex],
+              }),
             };
             const opEntry = resolveParsedEffectOp({
               table: parsedTable,

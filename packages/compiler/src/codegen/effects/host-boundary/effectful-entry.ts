@@ -13,6 +13,10 @@ import { ensureSelectedHostTransportProvider } from "../../host-transport/select
 import { readProviderValueForType } from "./provider-values.js";
 import { HOST_COMPLETION_KIND } from "./handle-outcome.js";
 import { hostExportId } from "../../exports/export-abi.js";
+import {
+  SELECTED_HOST_FRAME_TAG,
+  SELECTED_HOST_FRAME_VERSION,
+} from "../../host-transport/frame-codec.js";
 
 export const createEffectfulEntry = ({
   ctx,
@@ -27,12 +31,6 @@ export const createEffectfulEntry = ({
   handleOutcome: string;
   exportName: string;
 }): string => {
-  if (meta.paramTypes.length > 1) {
-    throw new Error(
-      `effectful exports with parameters are not supported yet (${exportName})`,
-    );
-  }
-
   const name = `${ctx.moduleLabel}__${exportName}`;
   const entry = buildEffectfulEntryBody({
     ctx,
@@ -78,12 +76,6 @@ export const createEffectfulEntryRaw = ({
   meta: FunctionMetadata;
   exportName: string;
 }): string => {
-  if (meta.paramTypes.length > 1) {
-    throw new Error(
-      `effectful exports with parameters are not supported yet (${exportName})`,
-    );
-  }
-
   const name = `${ctx.moduleLabel}__${exportName}`;
   const entry = buildEffectfulEntryBody({
     ctx,
@@ -122,32 +114,29 @@ const buildEffectfulEntryBody = ({
   outPtrLocal: number;
   outLenLocal: number;
 } => {
-  const hasUserParams = meta.paramTypeIds.length > 0;
-  const paramCount = hasUserParams ? 4 : 2;
+  const paramCount = 4;
   const inputPtrLocal = 0;
   const inputLenLocal = 1;
-  const outPtrLocal = hasUserParams ? 2 : 0;
-  const outLenLocal = hasUserParams ? 3 : 1;
-
-  if (!hasUserParams) {
-    return {
-      params: binaryen.createType([binaryen.i32, binaryen.i32]),
-      locals: [],
-      result: effectfulCall({ ctx, runtime, meta, args: [] }),
-      outPtrLocal,
-      outLenLocal,
-    };
-  }
+  const outPtrLocal = 2;
+  const outLenLocal = 3;
 
   const provider = ensureSelectedHostTransportProvider(ctx);
   const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
   const arrayType = provider.unpackArray.resultType;
   const storageType = provider.arrayRawStorage.resultType;
 
-  const argsArrayLocal = paramCount;
-  const storageLocal = paramCount + 1;
-  const argsCountLocal = paramCount + 2;
-  const locals: binaryen.Type[] = [arrayType, storageType, binaryen.i32];
+  const frameArrayLocal = paramCount;
+  const frameStorageLocal = paramCount + 1;
+  const argsArrayLocal = paramCount + 2;
+  const argsStorageLocal = paramCount + 3;
+  const argsCountLocal = paramCount + 4;
+  const locals: binaryen.Type[] = [
+    arrayType,
+    storageType,
+    arrayType,
+    storageType,
+    binaryen.i32,
+  ];
   const fnCtx: FunctionContext = {
     bindings: new Map(),
     tempLocals: new Map(),
@@ -174,9 +163,27 @@ const buildEffectfulEntryBody = ({
     ctx,
     fnCtx,
   });
-  const argsArray = ctx.mod.call(
+  const frameArray = ctx.mod.call(
     provider.unpackArray.wasmName,
     [decodedValue],
+    arrayType,
+  );
+  const frameStorage = ctx.mod.call(
+    provider.arrayRawStorage.wasmName,
+    [ctx.mod.local.get(frameArrayLocal, arrayType)],
+    storageType,
+  );
+  const frameField = (index: number): binaryen.ExpressionRef =>
+    arrayGet(
+      ctx.mod,
+      ctx.mod.local.get(frameStorageLocal, storageType),
+      ctx.mod.i32.const(index),
+      providerValueType,
+      false,
+    );
+  const argsArray = ctx.mod.call(
+    provider.unpackArray.wasmName,
+    [frameField(3)],
     arrayType,
   );
   const argsCount = ctx.mod.call(
@@ -184,13 +191,46 @@ const buildEffectfulEntryBody = ({
     [ctx.mod.local.get(argsArrayLocal, arrayType)],
     binaryen.i32,
   );
-  const storage = ctx.mod.call(
+  const argsStorage = ctx.mod.call(
     provider.arrayRawStorage.wasmName,
     [ctx.mod.local.get(argsArrayLocal, arrayType)],
     storageType,
   );
+  const baseExportName = exportName.replace(/_effectful(?:_raw)?$/, "");
+  const checkFrame = ctx.mod.if(
+    ctx.mod.i32.or(
+      ctx.mod.i32.or(
+        ctx.mod.i32.ne(
+          ctx.mod.call(
+            provider.unpackI32.wasmName,
+            [frameField(0)],
+            binaryen.i32,
+          ),
+          ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+        ),
+        ctx.mod.i32.ne(
+          ctx.mod.call(
+            provider.unpackI32.wasmName,
+            [frameField(1)],
+            binaryen.i32,
+          ),
+          ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportInvocation),
+        ),
+      ),
+      ctx.mod.i32.ne(
+        ctx.mod.call(
+          provider.unpackI32.wasmName,
+          [frameField(2)],
+          binaryen.i32,
+        ),
+        ctx.mod.i32.const(hostExportId(baseExportName)),
+      ),
+    ),
+    ctx.mod.unreachable(),
+    ctx.mod.nop(),
+  );
   const checkArgs = ctx.mod.if(
-    ctx.mod.i32.lt_s(
+    ctx.mod.i32.ne(
       ctx.mod.local.get(argsCountLocal, binaryen.i32),
       ctx.mod.i32.const(meta.paramTypeIds.length),
     ),
@@ -200,15 +240,32 @@ const buildEffectfulEntryBody = ({
   const userArgs = meta.paramTypeIds.map((typeId, index) => {
     const element = arrayGet(
       ctx.mod,
-      ctx.mod.local.get(storageLocal, storageType),
+      ctx.mod.local.get(argsStorageLocal, storageType),
       ctx.mod.i32.const(index),
+      providerValueType,
+      false,
+    );
+    const typedPayload = ctx.mod.call(
+      provider.unpackArray.wasmName,
+      [element],
+      arrayType,
+    );
+    const typedPayloadStorage = ctx.mod.call(
+      provider.arrayRawStorage.wasmName,
+      [typedPayload],
+      storageType,
+    );
+    const payload = arrayGet(
+      ctx.mod,
+      typedPayloadStorage,
+      ctx.mod.i32.const(1),
       providerValueType,
       false,
     );
     return readProviderValueForType({
       ctx,
       provider: provider,
-      value: element,
+      value: payload,
       typeId,
       fnCtx,
       label: `${exportName} arg${index}`,
@@ -230,8 +287,11 @@ const buildEffectfulEntryBody = ({
     result: ctx.mod.block(
       null,
       [
+        ctx.mod.local.set(frameArrayLocal, frameArray),
+        ctx.mod.local.set(frameStorageLocal, frameStorage),
+        checkFrame,
         ctx.mod.local.set(argsArrayLocal, argsArray),
-        ctx.mod.local.set(storageLocal, storage),
+        ctx.mod.local.set(argsStorageLocal, argsStorage),
         ctx.mod.local.set(argsCountLocal, argsCount),
         checkArgs,
         dispatched,

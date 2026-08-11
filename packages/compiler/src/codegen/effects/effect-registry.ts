@@ -50,6 +50,10 @@ export type EffectOpEntry = {
   effectName: string;
   opName: string;
   operationId?: string;
+  boundary?: {
+    params: readonly BoundarySchema[];
+    result: BoundarySchema;
+  };
   external?: {
     params: readonly BoundarySchema[];
     result: BoundarySchema;
@@ -99,6 +103,46 @@ const mergeExternalMetadata = ({
   if (entry.external.declaredOnly && !candidate.declaredOnly) {
     entry.external = candidate;
   }
+};
+
+const boundaryMetadataFor = ({
+  ctx,
+  label,
+  params,
+  result,
+}: {
+  ctx: CodegenContext;
+  label: string;
+  params: readonly TypeId[];
+  result: TypeId;
+}): EffectOpEntry["boundary"] => {
+  if (
+    ![...params, result].every((typeId) =>
+      ctx.program.dtoPlans.isEligible({ typeId, moduleId: ctx.moduleId }),
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    params: params.map((typeId, index) =>
+      withDtoFingerprint(
+        deriveBoundarySchema({
+          typeId,
+          ctx,
+          label: `${label} arg${index}`,
+          options: { tagStandaloneVariants: true },
+        }),
+      ),
+    ),
+    result: withDtoFingerprint(
+      deriveBoundarySchema({
+        typeId: result,
+        ctx,
+        label: `${label} result`,
+        options: { tagStandaloneVariants: true },
+      }),
+    ),
+  };
 };
 
 const toEffectOpKey = (
@@ -588,32 +632,23 @@ export const buildEffectRegistry = (
           ctx,
         });
         const key = toEffectOpKey(effectId.hash, info.opIndex, signatureHash);
-        const external = effectMeta?.external
-          ? {
-              params: signature.params.map((typeId, index) =>
-                withDtoFingerprint(
-                  deriveBoundarySchema({
-                    typeId,
-                    ctx,
-                    label: `${effectId.id}::${opName} arg${index}`,
-                    options: { tagStandaloneVariants: true },
-                  }),
-                ),
-              ),
-              result: withDtoFingerprint(
-                deriveBoundarySchema({
-                  typeId: signature.returnType,
-                  ctx,
-                  label: `${effectId.id}::${opName} result`,
-                  options: { tagStandaloneVariants: true },
-                }),
-              ),
-              ...(!siteReachable ? { declaredOnly: true } : {}),
-            }
-          : undefined;
+        const boundary = boundaryMetadataFor({
+          ctx,
+          label: `${effectId.id}::${opName}`,
+          params: signature.params,
+          result: signature.returnType,
+        });
+        const external =
+          effectMeta?.external && boundary
+            ? {
+                ...boundary,
+                ...(!siteReachable ? { declaredOnly: true } : {}),
+              }
+            : undefined;
         const existing = entriesByKey.get(key);
         if (existing) {
           mergeExternalMetadata({ entry: existing, candidate: external });
+          existing.boundary ??= boundary;
           return;
         }
         entriesByKey.set(key, {
@@ -626,6 +661,7 @@ export const buildEffectRegistry = (
           effectName,
           opName,
           operationId: effectMeta?.operations[info.opIndex]?.operationId,
+          ...(boundary ? { boundary } : {}),
           ...(external ? { external } : {}),
         });
       });
@@ -684,7 +720,15 @@ export const buildEffectRegistry = (
             ctx,
           });
           const key = toEffectOpKey(effectId.hash, info.opIndex, signatureHash);
+          const boundary = boundaryMetadataFor({
+            ctx,
+            label: `${effectId.id}::${opName}`,
+            params: signature.params,
+            result: signature.returnType,
+          });
           if (entriesByKey.has(key)) {
+            const existing = entriesByKey.get(key)!;
+            existing.boundary ??= boundary;
             return;
           }
           entriesByKey.set(key, {
@@ -697,6 +741,7 @@ export const buildEffectRegistry = (
             effectName,
             opName,
             operationId: effectMeta?.operations[info.opIndex]?.operationId,
+            ...(boundary ? { boundary } : {}),
           });
         });
       });
@@ -766,6 +811,7 @@ export const buildEffectRegistry = (
           const existing = entriesByKey.get(key);
           if (existing) {
             existing.external ??= external;
+            existing.boundary ??= external;
             return;
           }
           entriesByKey.set(key, {
@@ -779,6 +825,7 @@ export const buildEffectRegistry = (
             effectName,
             opName,
             operationId: op.operationId,
+            boundary: external,
             external,
           });
         });

@@ -326,6 +326,7 @@ const encodeRecord = ({
   path,
   registry,
   ancestors,
+  allowVariantTag = false,
 }: {
   exportName: string;
   fields: readonly BoundaryFieldSchema[];
@@ -334,11 +335,19 @@ const encodeRecord = ({
   path: string;
   registry: ReadonlyMap<number, BoundarySchema>;
   ancestors: WeakSet<object>;
+  allowVariantTag?: boolean;
 }): Record<string, unknown> => {
   return withCycleCheck(
     { exportName, path, value: toCycleObject(value), ancestors },
     () => {
       const record = toRecord({ exportName, path, value });
+      rejectUnknownRecordFields({
+        exportName,
+        path,
+        record,
+        fields,
+        allowVariantTag: tag !== undefined || allowVariantTag,
+      });
       if (tag) {
         const actualTag = record.tag ?? record.$variant;
         if (actualTag !== tag) {
@@ -350,10 +359,7 @@ const encodeRecord = ({
       return Object.fromEntries(
         fields.flatMap((field) => {
           const fieldValue = record[field.name];
-          if (
-            field.optional &&
-            (fieldValue === undefined || fieldValue === null)
-          ) {
+          if (field.optional && fieldValue === undefined) {
             return [];
           }
           return [
@@ -382,6 +388,7 @@ const decodeRecord = ({
   value,
   path,
   registry,
+  allowVariantTag = false,
 }: {
   exportName: string;
   fields: readonly BoundaryFieldSchema[];
@@ -389,8 +396,16 @@ const decodeRecord = ({
   value: unknown;
   path: string;
   registry: ReadonlyMap<number, BoundarySchema>;
+  allowVariantTag?: boolean;
 }): Record<string, unknown> => {
   const record = toRecord({ exportName, path, value });
+  rejectUnknownRecordFields({
+    exportName,
+    path,
+    record,
+    fields,
+    allowVariantTag: tag !== undefined || allowVariantTag,
+  });
   return {
     ...Object.fromEntries(
       fields.flatMap((field) => {
@@ -447,6 +462,7 @@ const encodeUnion = ({
       path,
       registry,
       ancestors,
+      allowVariantTag: true,
     }),
     $variant: tag,
   };
@@ -481,6 +497,7 @@ const decodeUnion = ({
       value: record,
       path,
       registry,
+      allowVariantTag: true,
     }),
     tag,
   };
@@ -687,6 +704,32 @@ const toCycleObject = (value: unknown): object => {
   if (value instanceof Map) return value;
   if (typeof value === "object" && value !== null) return value;
   return {};
+};
+
+const rejectUnknownRecordFields = ({
+  exportName,
+  path,
+  record,
+  fields,
+  allowVariantTag = false,
+}: {
+  exportName: string;
+  path: string;
+  record: Record<string, unknown>;
+  fields: readonly BoundaryFieldSchema[];
+  allowVariantTag?: boolean;
+}): void => {
+  const allowed = new Set(fields.map((field) => field.name));
+  if (allowVariantTag) {
+    allowed.add("tag");
+    allowed.add("$variant");
+  }
+  const unknown = Object.keys(record).find((name) => !allowed.has(name));
+  if (unknown) {
+    throw new Error(
+      `typed export ${exportName} ${path} has unknown field ${unknown}`,
+    );
+  }
 };
 
 const variantTagError = ({

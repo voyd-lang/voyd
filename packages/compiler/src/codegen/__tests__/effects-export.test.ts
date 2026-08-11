@@ -172,4 +172,51 @@ describe("effectful exports & host boundary", () => {
     });
     expect(result.value).toEqual(expectedResponse);
   });
+
+  it("accepts typed DTO arguments on effectful exports", async () => {
+    const { module } = await buildDtoModule();
+    const parsed = parseEffectTable(module);
+    const roundtrip = parsed.ops.find((op) => op.label.endsWith(".roundtrip"));
+    if (!roundtrip) {
+      throw new Error("missing Exchange roundtrip op");
+    }
+    const input = { code: 7, label: "input", nested: [8, 9] };
+    const output = { code: 10, label: "output", nested: [11] };
+    const result = await runEffectfulExport({
+      wasm: module,
+      entryName: "from_host",
+      args: [input],
+      handlers: {
+        [`${roundtrip.opIndex}`]: (_req, value: unknown) => {
+          expect(value).toEqual(input);
+          return output;
+        },
+      },
+    });
+    expect(result.value).toEqual(output);
+  });
+
+  it("normalizes union DTOs for effect adapters and effectful results", async () => {
+    const { module } = await buildDtoModule();
+    const parsed = parseEffectTable(module);
+    const decide = parsed.ops.find((op) => op.label.endsWith(".decide"));
+    if (!decide) throw new Error("missing Exchange decide op");
+    const input = {
+      tag: "Accepted",
+      value: { code: 1, label: "ok", nested: [2] },
+    };
+    const output = { tag: "Rejected", reason: "no" };
+    const result = await runEffectfulExport({
+      wasm: module,
+      entryName: "decide_from_host",
+      args: [input],
+      handlers: {
+        [`${decide.opIndex}`]: (_req, value: unknown) => {
+          expect(value).toEqual(input);
+          return output;
+        },
+      },
+    });
+    expect(result.value).toEqual(output);
+  });
 });
