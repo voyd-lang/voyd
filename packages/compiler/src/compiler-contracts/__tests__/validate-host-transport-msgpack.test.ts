@@ -245,11 +245,6 @@ describe("MessagePack host transport compiler contract signature validation", ()
     expect(
       validateMsgpackHostTransportFunctionContracts(makeProgram()),
     ).toEqual({
-      msgpack: shared.msgpack,
-      string: shared.string,
-      bytes: shared.bytes,
-      array: shared.array,
-      map: shared.map,
       reader: shared.reader,
       writer: shared.writer,
     });
@@ -257,7 +252,7 @@ describe("MessagePack host transport compiler contract signature validation", ()
 
   it("rejects wrong parameter and result types with the contract and signatures", () => {
     const wrongParameter = makeProgram((signatures) => {
-      const id = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.encodeValue;
+      const id = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader;
       const signature = signatures.get(id)!;
       replace(signatures, id, {
         parameters: signature.parameters.map((parameter, index) =>
@@ -268,48 +263,50 @@ describe("MessagePack host transport compiler contract signature validation", ()
     expect(() =>
       validateMsgpackHostTransportFunctionContracts(wrongParameter),
     ).toThrow(
-      /encode-value.*expected \(MsgPack, i32, i32\).*parameter 2 expected i32, got bool/,
+      /create-reader.*expected \(i32, i32\).*parameter 2 expected i32, got bool/,
     );
 
     const wrongResult = makeProgram((signatures) =>
-      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull, {
+      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.finishWriter, {
         returnType: ids.bool,
       }),
     );
     expect(() =>
       validateMsgpackHostTransportFunctionContracts(wrongResult),
-    ).toThrow(/make-null.*result expected MsgPack, got bool/);
+    ).toThrow(/finish-writer.*result expected i32, got bool/);
   });
 
   it("rejects generic, optional, and effectful providers", () => {
     const generic = makeProgram((signatures) =>
-      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull, {
+      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader, {
         typeParams: [{ symbol: 1, typeParam: 1, typeRef: 1 }],
       }),
     );
     expect(() =>
       validateMsgpackHostTransportFunctionContracts(generic),
-    ).toThrow(/make-null.*expected no type parameters, got 1/);
+    ).toThrow(/create-reader.*expected no type parameters, got 1/);
 
     const optional = makeProgram((signatures) => {
-      const id = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeBool;
+      const id = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader;
       const signature = signatures.get(id)!;
       replace(signatures, id, {
-        parameters: [{ ...signature.parameters[0]!, optional: true }],
+        parameters: signature.parameters.map((parameter, index) =>
+          index === 0 ? { ...parameter, optional: true } : parameter,
+        ),
       });
     });
     expect(() =>
       validateMsgpackHostTransportFunctionContracts(optional),
-    ).toThrow(/make-bool.*parameter 1 must not be optional/);
+    ).toThrow(/create-reader.*parameter 1 must not be optional/);
 
     const effectful = makeProgram((signatures) =>
-      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull, {
+      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader, {
         effectRow: 1,
       }),
     );
     expect(() =>
       validateMsgpackHostTransportFunctionContracts(effectful),
-    ).toThrow(/make-null.*expected a pure effect row/);
+    ).toThrow(/create-reader.*expected a pure effect row/);
   });
 });
 

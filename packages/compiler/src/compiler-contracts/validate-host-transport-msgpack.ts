@@ -21,11 +21,6 @@ type ResolvedContract = {
 };
 
 export type MsgpackHostTransportContractTypes = {
-  readonly msgpack: TypeId;
-  readonly string: TypeId;
-  readonly bytes: TypeId;
-  readonly array: TypeId;
-  readonly map: TypeId;
   readonly reader: TypeId;
   readonly writer: TypeId;
 };
@@ -65,31 +60,6 @@ export const validateMsgpackHostTransportFunctionContracts = (
   });
 
   const types: MsgpackHostTransportContractTypes = {
-    msgpack: parameterType(
-      resolved,
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.encodeValue,
-      0,
-    ),
-    string: parameterType(
-      resolved,
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeString,
-      0,
-    ),
-    bytes: parameterType(
-      resolved,
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeBytes,
-      0,
-    ),
-    array: parameterType(
-      resolved,
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeArray,
-      0,
-    ),
-    map: parameterType(
-      resolved,
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeMap,
-      0,
-    ),
     reader: resultType(
       resolved,
       MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader,
@@ -100,16 +70,10 @@ export const validateMsgpackHostTransportFunctionContracts = (
     ),
   };
   const sharedTypes: ContractTypes = {
-    msgpack: types.msgpack,
-    string: types.string,
-    bytes: types.bytes,
-    "msgpack-array": types.array,
-    "msgpack-map": types.map,
     "msgpack-reader": types.reader,
     "msgpack-writer": types.writer,
   };
 
-  validateSharedDomainTypes(program, types);
   resolved.forEach(({ spec, signature }) =>
     validateSignature({ program, spec, signature, types: sharedTypes }),
   );
@@ -196,79 +160,6 @@ const parameterType = (
     );
   }
   return value;
-};
-
-const validateSharedDomainTypes = (
-  program: ProgramCodegenView,
-  types: MsgpackHostTransportContractTypes,
-): void => {
-  if (
-    !isStdIntrinsicNominalType({
-      program,
-      typeId: types.string,
-      intrinsicType: STD_INTRINSIC_TYPE.string,
-    })
-  ) {
-    throwDomainTypeError(
-      program,
-      "string",
-      "the std String nominal type",
-      types.string,
-    );
-  }
-  if (
-    !isStdIntrinsicNominalType({
-      program,
-      typeId: types.bytes,
-      intrinsicType: STD_INTRINSIC_TYPE.bytes,
-    })
-  ) {
-    throwDomainTypeError(
-      program,
-      "bytes",
-      "the std Bytes nominal type",
-      types.bytes,
-    );
-  }
-  if (
-    !isStdIntrinsicNominalType({
-      program,
-      typeId: types.array,
-      intrinsicType: STD_INTRINSIC_TYPE.array,
-    })
-  ) {
-    throwDomainTypeError(
-      program,
-      "msgpack-array",
-      "the std Array nominal type",
-      types.array,
-    );
-  }
-  const arrayArgs = nominalTypeArgs(program, types.array);
-  if (
-    arrayArgs.length !== 1 ||
-    !sameContractType(program, arrayArgs[0]!, types.msgpack)
-  ) {
-    throwDomainTypeError(
-      program,
-      "msgpack-array",
-      "Array<MsgPack>",
-      types.array,
-    );
-  }
-  const mapArgs = nominalTypeArgs(program, types.map);
-  if (
-    mapArgs.length !== 2 ||
-    !sameContractType(program, mapArgs[0]!, types.string) ||
-    !sameContractType(program, mapArgs[1]!, types.msgpack)
-  ) {
-    throwDomainTypeError(
-      program,
-      "msgpack-map",
-      "Map<String, MsgPack>",
-      types.map,
-    );
-  }
 };
 
 const validateDtoDataSharedDomainTypes = (

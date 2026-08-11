@@ -55,7 +55,6 @@ export const createHandleOutcomeDynamic = ({
 }): string =>
   stateFor(ctx, HANDLE_OUTCOME_DYNAMIC_KEY, () => {
     const provider = ensureSelectedHostTransportProvider(ctx);
-    const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
     const writerType = wasmTypeFor(provider.writerTypeId, ctx);
 
     const name = `${ctx.moduleLabel}__handle_outcome_dynamic`;
@@ -112,8 +111,7 @@ export const createHandleOutcomeDynamic = ({
         (valueType === binaryen.i32 ||
           valueType === binaryen.i64 ||
           valueType === binaryen.f32 ||
-          valueType === binaryen.f64 ||
-          valueType === providerValueType)) ||
+          valueType === binaryen.f64)) ||
       (typeId === ctx.program.primitives.bool && valueType === binaryen.i32);
 
     const matchesMarkedBox = ({

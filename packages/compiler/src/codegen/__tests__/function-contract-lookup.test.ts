@@ -11,7 +11,7 @@ import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { gcTrampolineAbiStrategy } from "../effects/gc-trampoline-abi-strategy.js";
 import { requireFunctionMetaByCompilerContract } from "../function-lookup.js";
 
-const CONTRACT_ID = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.encodeValue;
+const CONTRACT_ID = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader;
 const CODEGEN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const sourceFilesUnder = (root: string): string[] =>

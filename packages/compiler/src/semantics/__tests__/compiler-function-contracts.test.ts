@@ -34,11 +34,11 @@ const analyze = ({ source, path }: { source: string; path: ModulePath }) => {
 
 describe("compiler function contracts", () => {
   it("binds typed metadata without making an ordinary function intrinsic", () => {
-    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull;
+    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.readerComplete;
     const semantics = analyze({
       source: `@compiler_contract(id: "${contractId}")
-fn contract_target() -> i32
-  0`,
+fn contract_target(value: i32) -> i32
+  value`,
       path: { namespace: "std", segments: ["contract_test"] },
     });
     const symbolTable = getSymbolTable(semantics);
@@ -73,12 +73,12 @@ fn contract_target() -> i32
   });
 
   it("rejects contracts outside std, unknown ids, and wrong arity", () => {
-    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull;
+    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.readerComplete;
     expect(() =>
       analyze({
         source: `@compiler_contract(id: "${contractId}")
-fn contract_target() -> i32
-  0`,
+fn contract_target(value: i32) -> i32
+  value`,
         path: { namespace: "src", segments: ["contract_test"] },
       }),
     ).toThrow(/restricted to the std namespace/);
@@ -95,10 +95,10 @@ fn contract_target() -> i32
     expect(() =>
       analyze({
         source: `@compiler_contract(id: "${contractId}")
-fn contract_target(value: i32) -> i32
-  value`,
+fn contract_target() -> i32
+  0`,
         path: { namespace: "std", segments: ["arity_contract_test"] },
       }),
-    ).toThrow(/expects 0 parameter\(s\).*declares 1/);
+    ).toThrow(/expects 1 parameter\(s\).*declares 0/);
   });
 });

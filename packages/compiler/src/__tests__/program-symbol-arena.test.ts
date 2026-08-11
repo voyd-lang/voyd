@@ -27,8 +27,8 @@ const analyzeContractModule = ({
   const path: ModulePath = { namespace: "std", segments: [name] };
   const moduleId = `std::${name}`;
   const source = `@compiler_contract(id: "${contractId}")
-fn contract_target() -> i32
-  0`;
+fn contract_target(value: i32) -> i32
+  value`;
   const ast = parse(source, `${moduleId}.voyd`);
   const module: ModuleNode = {
     id: moduleId,
@@ -125,7 +125,7 @@ pub fn main() -> i32
   });
 
   it("rejects duplicate contract declarations deterministically", () => {
-    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull;
+    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.readerComplete;
     const left = analyzeContractModule({ name: "left", contractId });
     const right = analyzeContractModule({ name: "right", contractId });
 
@@ -142,7 +142,7 @@ pub fn main() -> i32
     const reverse = captureError([right, left]);
     expect(forward).toBe(reverse);
     expect(forward).toMatch(
-      /duplicate compiler function contract 'voyd\.std\.host-transport\.msgpack\.make-null'/,
+      /duplicate compiler function contract 'voyd\.std\.host-transport\.msgpack\.reader-complete'/,
     );
     expect(forward).toMatch(/std::left.*std::right/);
   });
@@ -180,16 +180,16 @@ pub fn main() -> i32
   it("does not expose compiler contracts on imported aliases", async () => {
     const srcRoot = resolve("/contract-alias/src");
     const stdRoot = resolve("/contract-alias/std");
-    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull;
+    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.readerComplete;
     const host = createMemoryHost({
       [`${srcRoot}${sep}main.voyd`]: `use std::{ contract_target }
 
 pub fn main() -> i32
-  contract_target()`,
+  contract_target(0)`,
       [`${stdRoot}${sep}pkg.voyd`]: `pub use self::contracts::{ contract_target }`,
       [`${stdRoot}${sep}contracts.voyd`]: `@compiler_contract(id: "${contractId}")
-pub fn contract_target() -> i32
-  0`,
+pub fn contract_target(value: i32) -> i32
+  value`,
     });
     const graph = await loadModuleGraph({
       entryPath: `${srcRoot}${sep}main.voyd`,

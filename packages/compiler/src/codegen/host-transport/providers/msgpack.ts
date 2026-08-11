@@ -9,43 +9,12 @@ import { requireFunctionMetaByCompilerContract } from "../../function-lookup.js"
 import { stateFor } from "../../effects/host-boundary/state.js";
 
 export type MsgPackProviderFunctions = {
-  valueTypeId: TypeId;
   readerTypeId: TypeId;
   writerTypeId: TypeId;
   createReader: FunctionMetadata;
   readerComplete: FunctionMetadata;
   createWriter: FunctionMetadata;
   finishWriter: FunctionMetadata;
-  encodeValue: FunctionMetadata;
-  decodeValue: FunctionMetadata;
-  makeNull: FunctionMetadata;
-  makeBool: FunctionMetadata;
-  makeString: FunctionMetadata;
-  makeBytes: FunctionMetadata;
-  makeArray: FunctionMetadata;
-  makeI32: FunctionMetadata;
-  makeI64: FunctionMetadata;
-  makeF32: FunctionMetadata;
-  makeF64: FunctionMetadata;
-  makeMap: FunctionMetadata;
-  unpackBool: FunctionMetadata;
-  unpackString: FunctionMetadata;
-  unpackBytes: FunctionMetadata;
-  unpackArray: FunctionMetadata;
-  unpackI32: FunctionMetadata;
-  unpackI64: FunctionMetadata;
-  unpackF32: FunctionMetadata;
-  unpackF64: FunctionMetadata;
-  unpackMap: FunctionMetadata;
-  arrayWithCapacity: FunctionMetadata;
-  arrayPush: FunctionMetadata;
-  arrayLength: FunctionMetadata;
-  arrayRawStorage: FunctionMetadata;
-  mapNew: FunctionMetadata;
-  mapSet: FunctionMetadata;
-  mapGet: FunctionMetadata;
-  mapHas: FunctionMetadata;
-  mapTagIs: FunctionMetadata;
 };
 
 const MSGPACK_PROVIDER_FUNCS_KEY = Symbol(
@@ -69,42 +38,48 @@ export const enqueueMsgPackProviderReachability = ({
       ctx.program.symbols.resolveCompilerFunctionContract(contractId);
     if (typeof symbol === "number") enqueue(symbol);
   });
-  const contractResultType = (
-    contractId: CompilerFunctionContractId,
-  ): TypeId => {
-    const symbol =
-      ctx.program.symbols.resolveCompilerFunctionContract(contractId);
-    if (typeof symbol !== "number") {
-      throw new Error(`missing compiler function contract '${contractId}'`);
-    }
-    const ref = ctx.program.symbols.refOf(symbol);
-    const typeId = ctx.program.functions.getSignature(
-      ref.moduleId,
-      ref.symbol,
-    )?.returnType;
-    if (typeof typeId !== "number") {
-      throw new Error(
-        `compiler function contract '${contractId}' has no result type`,
-      );
-    }
-    return typeId;
-  };
   enqueueTraitImplementation({
     ctx,
-    typeId: contractResultType(
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader,
-    ),
+    typeId: contractResultType({
+      ctx,
+      contractId: MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader,
+    }),
     traitName: "DataReader",
     enqueue,
   });
   enqueueTraitImplementation({
     ctx,
-    typeId: contractResultType(
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createWriter,
-    ),
+    typeId: contractResultType({
+      ctx,
+      contractId: MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createWriter,
+    }),
     traitName: "DataWriter",
     enqueue,
   });
+};
+
+const contractResultType = ({
+  ctx,
+  contractId,
+}: {
+  ctx: CodegenContext;
+  contractId: CompilerFunctionContractId;
+}): TypeId => {
+  const symbol = ctx.program.symbols.resolveCompilerFunctionContract(contractId);
+  if (typeof symbol !== "number") {
+    throw new Error(`missing compiler function contract '${contractId}'`);
+  }
+  const ref = ctx.program.symbols.refOf(symbol);
+  const typeId = ctx.program.functions.getSignature(
+    ref.moduleId,
+    ref.symbol,
+  )?.returnType;
+  if (typeof typeId !== "number") {
+    throw new Error(
+      `compiler function contract '${contractId}' has no result type`,
+    );
+  }
+  return typeId;
 };
 
 const enqueueTraitImplementation = ({
@@ -118,6 +93,19 @@ const enqueueTraitImplementation = ({
   traitName: string;
   enqueue: (symbol: ProgramSymbolId) => void;
 }): void => {
+  const impl = requireTraitImplementation({ ctx, typeId, traitName });
+  impl.methods.forEach(({ implMethod }) => enqueue(implMethod));
+};
+
+const requireTraitImplementation = ({
+  ctx,
+  typeId,
+  traitName,
+}: {
+  ctx: CodegenContext;
+  typeId: TypeId;
+  traitName: string;
+}) => {
   const desc = ctx.program.types.getTypeDesc(typeId);
   const nominal =
     desc.kind === "intersection" && desc.nominal !== undefined
@@ -134,17 +122,15 @@ const enqueueTraitImplementation = ({
       `MessagePack host transport requires ${traitName} for type ${typeId}`,
     );
   }
-  impl.methods.forEach(({ implMethod }) => enqueue(implMethod));
+  return impl;
 };
 
 const markReachable = ({
   ctx,
-  moduleId,
-  symbol,
+  meta,
 }: {
   ctx: CodegenContext;
-  moduleId: string;
-  symbol: number;
+  meta: FunctionMetadata;
 }): void => {
   const state = ctx.programHelpers.getHelperState<ReachabilityState>(
     REACHABILITY_STATE,
@@ -153,7 +139,10 @@ const markReachable = ({
   const symbols = state.symbols ?? new Set<ProgramSymbolId>();
   state.symbols = symbols;
   symbols.add(
-    ctx.program.symbols.canonicalIdOf(moduleId, symbol) as ProgramSymbolId,
+    ctx.program.symbols.canonicalIdOf(
+      meta.moduleId,
+      meta.symbol,
+    ) as ProgramSymbolId,
   );
 };
 
@@ -172,37 +161,26 @@ const markTraitImplementationReachable = ({
   typeId: TypeId;
   traitName: string;
 }): void => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  const nominal =
-    desc.kind === "intersection" && desc.nominal !== undefined
-      ? desc.nominal
-      : (ctx.program.types.getNominalOwner(typeId) ?? typeId);
-  const impl = ctx.program.traits
-    .getImplsByNominal(nominal)
-    .find(
-      (candidate) =>
-        ctx.program.symbols.getName(candidate.traitSymbol) === traitName,
-    );
-  if (!impl) {
-    throw new Error(
-      `MessagePack host transport requires ${traitName} for type ${typeId}`,
-    );
-  }
-  impl.methods.forEach(({ implMethod }) => {
-    const ref = ctx.program.symbols.refOf(implMethod);
-    markReachable({ ctx, moduleId: ref.moduleId, symbol: ref.symbol });
-  });
+  requireTraitImplementation({ ctx, typeId, traitName }).methods.forEach(
+    ({ implMethod }) => {
+      const ref = ctx.program.symbols.refOf(implMethod);
+      markReachable({
+        ctx,
+        meta: {
+          moduleId: ref.moduleId,
+          symbol: ref.symbol,
+        } as FunctionMetadata,
+      });
+    },
+  );
 };
 
 export const ensureMsgPackProviderFunctions = (
   ctx: CodegenContext,
 ): MsgPackProviderFunctions =>
   stateFor(ctx, MSGPACK_PROVIDER_FUNCS_KEY, () => {
-    const {
-      msgpack: valueTypeId,
-      reader: readerTypeId,
-      writer: writerTypeId,
-    } = validateMsgpackHostTransportFunctionContracts(ctx.program);
+    const { reader: readerTypeId, writer: writerTypeId } =
+      validateMsgpackHostTransportFunctionContracts(ctx.program);
     const functions = {
       createReader: requireContract(
         ctx,
@@ -220,138 +198,8 @@ export const ensureMsgPackProviderFunctions = (
         ctx,
         MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.finishWriter,
       ),
-      encodeValue: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.encodeValue,
-      ),
-      decodeValue: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.decodeValue,
-      ),
-      makeNull: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull,
-      ),
-      makeBool: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeBool,
-      ),
-      makeString: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeString,
-      ),
-      makeBytes: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeBytes,
-      ),
-      makeArray: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeArray,
-      ),
-      makeI32: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeI32,
-      ),
-      makeI64: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeI64,
-      ),
-      makeF32: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeF32,
-      ),
-      makeF64: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeF64,
-      ),
-      makeMap: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeMap,
-      ),
-      unpackBool: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackBool,
-      ),
-      unpackString: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackString,
-      ),
-      unpackBytes: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackBytes,
-      ),
-      unpackArray: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackArray,
-      ),
-      unpackI32: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackI32,
-      ),
-      unpackI64: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackI64,
-      ),
-      unpackF32: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackF32,
-      ),
-      unpackF64: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackF64,
-      ),
-      unpackMap: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackMap,
-      ),
-      arrayWithCapacity: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayWithCapacity,
-      ),
-      arrayPush: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayPush,
-      ),
-      arrayLength: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayLength,
-      ),
-      arrayRawStorage: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayRawStorage,
-      ),
-      mapNew: requireContract(ctx, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapNew),
-      mapSet: requireContract(ctx, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapSet),
-      mapGet: requireContract(ctx, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapGet),
-      mapHas: requireContract(ctx, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapHas),
-      mapTagIs: requireContract(
-        ctx,
-        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapTagIs,
-      ),
     };
-    const msgpack: MsgPackProviderFunctions = {
-      valueTypeId,
-      readerTypeId,
-      writerTypeId,
-      ...functions,
-    };
-
-    Object.values(functions).forEach((meta) =>
-      markReachable({
-        ctx,
-        moduleId: meta.moduleId,
-        symbol: meta.symbol,
-      }),
-    );
-    const stringNew = requireContract(
-      ctx,
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.newString,
-    );
-    markReachable({
-      ctx,
-      moduleId: stringNew.moduleId,
-      symbol: stringNew.symbol,
-    });
+    Object.values(functions).forEach((meta) => markReachable({ ctx, meta }));
     markTraitImplementationReachable({
       ctx,
       typeId: readerTypeId,
@@ -362,6 +210,5 @@ export const ensureMsgPackProviderFunctions = (
       typeId: writerTypeId,
       traitName: "DataWriter",
     });
-
-    return msgpack;
+    return { readerTypeId, writerTypeId, ...functions };
   });

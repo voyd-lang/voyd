@@ -195,16 +195,6 @@ impl MsgPackWriter
       return msgpack_writer_failure<Bytes>("msgpack writer output exceeds configured byte limit")
     Ok<Bytes> { value: bytes }
 
-  /// Finalizes a host-memory session and returns its encoded byte count.
-  fn finish_host_memory(self) -> i32
-    if self.failed or self.encoder.ok == false:
-      return -1
-    if self.container_kinds.is_empty() == false or self.root_count != 1:
-      return -1
-    if self.encoder.pos > self.limits.max_bytes:
-      return -1
-    self.encoder.pos
-
   fn fail(~self, message: String) -> Result<Unit, MsgPackError>
     self.failed = true
     msgpack_writer_failure<Unit>(message)
@@ -935,7 +925,6 @@ pub fn encode_value_bytes(value: MsgPack): () -> Result<Bytes, MsgPackError>
     )
   }
 
-@compiler_contract(id: "voyd.std.host-transport.msgpack.encode-value")
 pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
   encode_value_raw(value, ptr, len)
 
@@ -991,7 +980,6 @@ pub fn decode_value_bytes(bytes: Bytes): () -> Result<MsgPack, MsgPackError>
     }
   Ok<MsgPack> { value: value }
 
-@compiler_contract(id: "voyd.std.host-transport.msgpack.decode-value")
 pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
   decode_value_raw(ptr, len)
 
@@ -1210,94 +1198,6 @@ pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
         index = index + 1
       out
     else:
-      empty_map()
-
-@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-i32")
-fn host_transport_unpack_i32(value: MsgPack): () -> i32
-  value.match(decoded)
-    I32:
-      decoded.value
-    I64:
-      cast::to_i32_wrapping(decoded.value)
-    else:
-      panic("msgpack host transport decode expected i32")
-      0
-
-@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-i64")
-fn host_transport_unpack_i64(value: MsgPack): () -> i64
-  value.match(decoded)
-    I64:
-      decoded.value
-    I32:
-      cast::to_i64(decoded.value)
-    else:
-      panic("msgpack host transport decode expected i64")
-      cast::to_i64(0)
-
-@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-f32")
-fn host_transport_unpack_f32(value: MsgPack): () -> f32
-  value.match(decoded)
-    F32:
-      decoded.value
-    F64:
-      cast::to_f32(decoded.value)
-    I32:
-      cast::to_f32(decoded.value)
-    I64:
-      cast::to_f32(decoded.value)
-    else:
-      panic("msgpack host transport decode expected f32")
-      cast::reinterpret_f32(0)
-
-@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-f64")
-fn host_transport_unpack_f64(value: MsgPack): () -> f64
-  value.match(decoded)
-    F64:
-      decoded.value
-    F32:
-      cast::to_f64(decoded.value)
-    I32:
-      cast::to_f64(decoded.value)
-    I64:
-      cast::to_f64(decoded.value)
-    else:
-      panic("msgpack host transport decode expected f64")
-      0.0
-
-@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-bool")
-fn host_transport_unpack_bool(value: MsgPack): () -> bool
-  value.match(decoded)
-    Bool:
-      decoded.value
-    else:
-      panic("msgpack host transport decode expected bool")
-      false
-
-@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-string")
-fn host_transport_unpack_string(value: MsgPack): () -> String
-  value.match(decoded)
-    String:
-      decoded
-    else:
-      panic("msgpack host transport decode expected string")
-      empty_text()
-
-@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-array")
-fn host_transport_unpack_array(value: MsgPack): () -> Array<MsgPack>
-  value.match(decoded)
-    Array<MsgPack>:
-      decoded
-    else:
-      panic("msgpack host transport decode expected array")
-      empty_array()
-
-@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-map")
-fn host_transport_unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
-  value.match(decoded)
-    MsgPackMap:
-      unpack_map(value)
-    else:
-      panic("msgpack host transport decode expected map")
       empty_map()
 
 pub fn unpack_map_result(value: MsgPack): () -> Result<Dict<String, MsgPack>, MsgPackError>
