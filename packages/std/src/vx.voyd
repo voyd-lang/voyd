@@ -32,18 +32,14 @@ pub obj HtmlAttr { thunk: FixedArray<VxLower> }
 pub type Attr<Msg> = HtmlAttr
 pub type RenderKey = String
 
-pub obj ProgramPlan { thunk: FixedArray<VxLower> }
+pub obj Program<Model, Msg> { thunk: FixedArray<VxLower> }
 
-pub type Program<Model, Msg> = ProgramPlan
+pub obj Sub<Msg> { thunk: FixedArray<VxLower> }
 
-pub obj SubPlan { thunk: FixedArray<VxLower> }
-
-pub type Sub<Msg> = SubPlan
-
-fn lower_program(value: ProgramPlan) -> MsgPack
+fn lower_program<Model, Msg>(value: Program<Model, Msg>) -> MsgPack
   lower_vx_thunk(value.thunk)
 
-fn lower_sub(value: SubPlan) -> MsgPack
+fn lower_sub<Msg>(value: Sub<Msg>) -> MsgPack
   lower_vx_thunk(value.thunk)
 
 fn lower_html_node(value: HtmlNode) -> MsgPack
@@ -70,28 +66,28 @@ fn html_plan(run: VxLower) -> HtmlNode
 fn attr_plan(run: VxLower) -> HtmlAttr
   HtmlAttr { thunk: vx_thunk(run) }
 
-fn program_plan(run: VxLower) -> ProgramPlan
-  ProgramPlan { thunk: vx_thunk(run) }
+fn program_plan<Model, Msg>(run: VxLower) -> Program<Model, Msg>
+  Program<Model, Msg> { thunk: vx_thunk(run) }
 
-fn subscription_plan(run: VxLower) -> SubPlan
-  SubPlan { thunk: vx_thunk(run) }
+fn subscription_plan<Msg>(run: VxLower) -> Sub<Msg>
+  Sub<Msg> { thunk: vx_thunk(run) }
 
-impl CustomDto<ProgramPlan, Bytes> for ProgramPlan
-  fn write(value: ProgramPlan) -> Bytes
+impl<Model, Msg> CustomDto<Program<Model, Msg>, Bytes> for Program<Model, Msg>
+  fn write(value: Program<Model, Msg>) -> Bytes
     encode_vx_wire(lower_program(value))
 
-  fn read(value: Bytes) -> Result<ProgramPlan, CustomDtoError>
-    Ok<ProgramPlan> {
-      value: program_plan(() -> MsgPack => decode_vx_wire(value))
+  fn read(value: Bytes) -> Result<Program<Model, Msg>, CustomDtoError>
+    Ok<Program<Model, Msg>> {
+      value: program_plan<Model, Msg>(() -> MsgPack => decode_vx_wire(value))
     }
 
-impl CustomDto<SubPlan, Bytes> for SubPlan
-  fn write(value: SubPlan) -> Bytes
+impl<Msg> CustomDto<Sub<Msg>, Bytes> for Sub<Msg>
+  fn write(value: Sub<Msg>) -> Bytes
     encode_vx_wire(lower_sub(value))
 
-  fn read(value: Bytes) -> Result<SubPlan, CustomDtoError>
-    Ok<SubPlan> {
-      value: subscription_plan(() -> MsgPack => decode_vx_wire(value))
+  fn read(value: Bytes) -> Result<Sub<Msg>, CustomDtoError>
+    Ok<Sub<Msg>> {
+      value: subscription_plan<Msg>(() -> MsgPack => decode_vx_wire(value))
     }
 
 impl<Msg> CustomDto<Cmd<Msg>, Bytes> for Cmd<Msg>
@@ -312,9 +308,9 @@ impl<T> StateHandle<T>
     Component::state_set(self.id, encode_vx_payload(value))
     StateHandle<T> { id: self.id, value: value }
 
-impl SubPlan
+impl<Msg> Sub<Msg>
   /// Lifts a child subscription through a retained typed message mapper.
-  api fn map<NextMsg, Msg>(
+  api fn map<NextMsg>(
     self,
     handler: fn(Msg) -> NextMsg,
     { handler_key: i32 = stable_callsite_id() }
@@ -325,7 +321,7 @@ impl SubPlan
       handler_id
     )
 
-impl<Msg> SubPlan
+impl<Msg> Sub<Msg>
   /// Creates an empty subscription set.
   api fn none() -> Sub<Msg>
     subscription_plan(() -> MsgPack => subscription_payload("none"))
@@ -1220,19 +1216,19 @@ pub fn program<Model, Msg>({
   )
 
 /// Creates the next program transition from an explicit model.
-pub fn next<Model>(model: Model) -> ProgramPlan
+pub fn next<Model>(model: Model) -> Program<Model, void>
   program<Model, void>(model: model)
 
 /// Creates the next program transition with one command.
-pub fn next<Model, Msg>({ model: Model, cmd: Cmd<Msg> }) -> ProgramPlan
+pub fn next<Model, Msg>({ model: Model, cmd: Cmd<Msg> }) -> Program<Model, Msg>
   program<Model, Msg>(model: model, commands: cmd)
 
-fn map_model_with_handler_ids({
-  program: ProgramPlan,
+fn map_model_with_handler_ids<Model, Msg, NextModel>({
+  program: Program<Model, Msg>,
   handler_id: i32,
   hydrate_handler_id?: i32
-}) -> ProgramPlan
-  program_plan(() -> MsgPack =>
+}) -> Program<NextModel, Msg>
+  program_plan<NextModel, Msg>(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("kind", "program_map_model")
     out.set("child", lower_program(program))
@@ -1243,33 +1239,33 @@ fn map_model_with_handler_ids({
   )
 
 /// Lifts a child program result through a typed model mapper.
-pub fn map_model<Model, NextModel>(
-  program: ProgramPlan,
+pub fn map_model<Model, NextModel, Msg>(
+  program: Program<Model, Msg>,
   handler: fn(Model) -> NextModel
-) -> ProgramPlan
-  map_model_with_handler_ids(
+) -> Program<NextModel, Msg>
+  map_model_with_handler_ids<Model, Msg, NextModel>(
     program: program,
     handler_id: retain_program_callback_id(handler)
   )
 
 /// Lifts a child program through model mappers in both runtime directions.
 /// The hydrate mapper is required when the mapped program adopts an SSR model.
-pub fn map_model<Model, NextModel>({
-  program: ProgramPlan,
+pub fn map_model<Model, NextModel, Msg>({
+  program: Program<Model, Msg>,
   map: fn(Model) -> NextModel,
   hydrate: fn(NextModel) -> Model
-}) -> ProgramPlan
-  map_model_with_handler_ids(
+}) -> Program<NextModel, Msg>
+  map_model_with_handler_ids<Model, Msg, NextModel>(
     program: program,
     handler_id: retain_program_callback_id(map),
     hydrate_handler_id: retain_program_callback_id(hydrate)
   )
 
-fn map_message_with_handler_id({
-  program: ProgramPlan,
+fn map_message_with_handler_id<Model, ChildMsg, ParentMsg>({
+  program: Program<Model, ChildMsg>,
   handler_id: i32
-}) -> ProgramPlan
-  program_plan(() -> MsgPack =>
+}) -> Program<Model, ParentMsg>
+  program_plan<Model, ParentMsg>(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("kind", "program_map_message")
     out.set("child", lower_program(program))
@@ -1278,11 +1274,11 @@ fn map_message_with_handler_id({
   )
 
 /// Lifts a child program result through a typed message mapper.
-pub fn map_message<ChildMsg, ParentMsg>(
-  program: ProgramPlan,
+pub fn map_message<Model, ChildMsg, ParentMsg>(
+  program: Program<Model, ChildMsg>,
   handler: fn(ChildMsg) -> ParentMsg
-) -> ProgramPlan
-  map_message_with_handler_id(
+) -> Program<Model, ParentMsg>
+  map_message_with_handler_id<Model, ChildMsg, ParentMsg>(
     program: program,
     handler_id: retain_program_callback_id(handler)
   )
@@ -1443,8 +1439,8 @@ fn set_bool_option(~out: Dict<String, MsgPack>, name: String, value: Optional<bo
     None:
       void
 
-fn mark_owned_subscription(sub: SubPlan, handler_id: i32) -> SubPlan
-  subscription_plan(() -> MsgPack =>
+fn mark_owned_subscription<Msg>(sub: Sub<Msg>, handler_id: i32) -> Sub<Msg>
+  subscription_plan<Msg>(() -> MsgPack =>
     match(msgpack::unpack_map(lower_sub(sub)))
       Ok<Dict<String, MsgPack>> { value }:
         msgpack::make_map(with_owned_handler(value, handler_id))
@@ -1452,11 +1448,11 @@ fn mark_owned_subscription(sub: SubPlan, handler_id: i32) -> SubPlan
         lower_sub(sub)
   )
 
-fn sub_map_with_handler_id(
-  sub: SubPlan,
+fn sub_map_with_handler_id<ChildMsg, ParentMsg>(
+  sub: Sub<ChildMsg>,
   { handler_id: i32, handler_key?: i32 }
-) -> SubPlan
-  subscription_plan(() -> MsgPack =>
+) -> Sub<ParentMsg>
+  subscription_plan<ParentMsg>(() -> MsgPack =>
     let ~out = subscription_map("map")
     out.set("child", lower_sub(sub))
     out.set("handlerId", msgpack::make_i32(handler_id))
