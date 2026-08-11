@@ -101,8 +101,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   been removed. Static HTML and attributes use the message-neutral `void`
   specialization. HTML, command,
   subscription, program, and canvas composition now retains typed semantic
-  plans and creates a private provider-neutral renderer wire only at the VX
-  host boundary.
+  plans and creates a provider-neutral renderer wire only at the VX host
+  boundary.
 - VX plans are lowered lazily when their DTO representation crosses a host or
   server-rendering boundary. Building and combining plans no longer performs
   an eager encode/decode cycle.
