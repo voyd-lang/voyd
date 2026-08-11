@@ -39,12 +39,14 @@ export const emitExportAbiSection = ({
   entries,
   taskCompletions = [],
   callbacks = [],
+  payloadFingerprints = [],
   transport,
 }: {
   mod: binaryen.Module;
   entries: readonly ExportAbiEntry[];
   taskCompletions?: readonly TaskCompletionAbiEntry[];
   callbacks?: readonly CallbackAbiEntry[];
+  payloadFingerprints?: readonly string[];
   transport?: HostTransportIdentity;
 }): void => {
   const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
@@ -62,6 +64,7 @@ export const emitExportAbiSection = ({
       a.name.localeCompare(b.name),
     ),
     callbacks: [...callbacks].sort((a, b) => a.name.localeCompare(b.name)),
+    payloadFingerprints: [...new Set(payloadFingerprints)].sort(),
   });
   const bytes = new TextEncoder().encode(payload);
   mod.addCustomSection(EXPORT_ABI_SECTION, bytes);

@@ -66,6 +66,7 @@ import {
 } from "./runtime/trap-diagnostics.js";
 import {
   createRetainedCallbackScopeManager,
+  createOpaqueCapabilityAllocator,
   createRetainedEventHandlerRegistry,
   type RetainedCallbackScopeManager,
   type RetainedCallbackScopeOwner,
@@ -81,6 +82,7 @@ import {
 import {
   HostFrameFailureError,
   type HostFrame,
+  type TypedHostPayload,
 } from "./protocol/host-frame.js";
 
 export type HostInitOptions = {
@@ -125,6 +127,7 @@ export type VoydHost = {
     args?: unknown[],
   ) => Promise<T>;
   run: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
+  decodePayload: (bytes: Uint8Array, fingerprint: string) => unknown;
   transportFrame: (frame: HostFrame) => HostFrame;
   retainedCallbacks: RetainedEventHandlerRegistry;
 };
@@ -133,72 +136,17 @@ const TASK_RUNTIME_IMPORT_MODULE = "voyd.task";
 const CALLBACK_IMPORT_MODULE = "voyd.callback";
 const BOUNDARY_CALLBACK_IMPORT_MODULE = "voyd.boundary.callback";
 const RENDER_CALLBACK_IMPORT_MODULE = "voyd.render.callback";
-const LEGACY_VX_CALLBACK_IMPORT_MODULE = "voyd.vx.callback";
 const CALLBACK_SCOPE_IMPORT_MODULE = "voyd.callback.scope";
 const TASK_RUNTIME_EFFECT_ID = "voyd.std.task.runtime";
 const TASK_RUNTIME_WAIT_OP_ID = 0;
 const TASK_RUNTIME_YIELD_OP_ID = 1;
 const TASK_RUNTIME_FAILURE_MESSAGE_OP_ID = 2;
-const TASK_CAPABILITY_SESSION_BITS = 10;
-const TASK_CAPABILITY_GENERATION_BITS = 8;
-const TASK_CAPABILITY_SLOT_BITS =
-  31 - TASK_CAPABILITY_SESSION_BITS - TASK_CAPABILITY_GENERATION_BITS;
-const TASK_CAPABILITY_SESSION_MASK = (1 << TASK_CAPABILITY_SESSION_BITS) - 1;
-const TASK_CAPABILITY_GENERATION_MASK =
-  (1 << TASK_CAPABILITY_GENERATION_BITS) - 1;
-const TASK_CAPABILITY_SLOT_MASK = (1 << TASK_CAPABILITY_SLOT_BITS) - 1;
 const RESUME_EFFECTFUL_RAW_EXPORT = "resume_effectful_raw";
 const END_REQUEST_RAW_EXPORT = "end_request_raw";
 const HANDLE_OUTCOME_EXPORT = "handle_outcome";
 const OUTCOME_TAG_EXPORT = "__voyd_outcome_tag";
 const TASK_OBSERVER_SYMBOL = Symbol.for("voyd.taskObserver");
 let detachedRunCounter = 1;
-let nextTaskCapabilitySession = 1;
-
-const allocateTaskCapabilitySession = (): number => {
-  if (nextTaskCapabilitySession > TASK_CAPABILITY_SESSION_MASK) {
-    throw new Error("task capability session capacity exhausted");
-  }
-  return nextTaskCapabilitySession++;
-};
-
-const encodeTaskCapability = ({
-  session,
-  slot,
-  generation,
-}: {
-  session: number;
-  slot: number;
-  generation: number;
-}): number => {
-  if (slot > TASK_CAPABILITY_SLOT_MASK) {
-    throw new Error("task capability slot capacity exhausted");
-  }
-  return (
-    (session <<
-      (TASK_CAPABILITY_GENERATION_BITS + TASK_CAPABILITY_SLOT_BITS)) |
-    (generation << TASK_CAPABILITY_SLOT_BITS) |
-    slot
-  );
-};
-
-const decodeTaskCapability = (
-  token: number,
-): { session: number; slot: number; generation: number } => {
-  if (!Number.isInteger(token) || token <= 0) {
-    throw new Error("invalid task capability token");
-  }
-  return {
-    session:
-      (token >>>
-        (TASK_CAPABILITY_GENERATION_BITS + TASK_CAPABILITY_SLOT_BITS)) &
-      TASK_CAPABILITY_SESSION_MASK,
-    generation:
-      (token >>> TASK_CAPABILITY_SLOT_BITS) &
-      TASK_CAPABILITY_GENERATION_MASK,
-    slot: token & TASK_CAPABILITY_SLOT_MASK,
-  };
-};
 
 type ActiveTaskImportContext = {
   spawnTask: (params: {
@@ -413,8 +361,7 @@ const buildRetainedCallbackImportModules = ({
       (descriptor) =>
         (descriptor.module === CALLBACK_IMPORT_MODULE ||
           descriptor.module === BOUNDARY_CALLBACK_IMPORT_MODULE ||
-          descriptor.module === RENDER_CALLBACK_IMPORT_MODULE ||
-          descriptor.module === LEGACY_VX_CALLBACK_IMPORT_MODULE) &&
+          descriptor.module === RENDER_CALLBACK_IMPORT_MODULE) &&
         descriptor.kind === "function",
     )
     .forEach((descriptor) => {
@@ -475,16 +422,11 @@ const buildRetainedCallbackImportModules = ({
             kind: "callback-invocation",
             invocationId,
             callbackId: 0,
-            args: [
-              {
-                fingerprint: `callback:${callbackExportName}`,
-                value: encodeRetainedCallbackPayload({
-                  callbackExportName,
-                  schemas: callbackAbi.params,
-                  payload,
-                }),
-              },
-            ],
+            args: encodeRetainedCallbackArgs({
+              callbackExportName,
+              schemas: callbackAbi.params,
+              payload,
+            }),
           });
           if (encodedPayload.length > bufferSize) {
             throw new Error("retained callback payload exceeds buffer size");
@@ -547,6 +489,15 @@ const buildRetainedCallbackImportModules = ({
           }
           if (completion.outcome.kind === "failure") {
             throw new HostFrameFailureError(completion.outcome.failure);
+          }
+          if (
+            callbackAbi.result &&
+            completion.outcome.value.fingerprint !==
+              callbackAbi.result.fingerprint
+          ) {
+            throw new Error(
+              `retained callback ${callbackExportName} returned an incompatible DTO fingerprint`,
+            );
           }
           const result = callbackAbi.result
             ? decodeBoundaryResult({
@@ -641,7 +592,7 @@ const retainedCallbackExportNameFrom = (
   return undefined;
 };
 
-const encodeRetainedCallbackPayload = ({
+const encodeRetainedCallbackArgs = ({
   callbackExportName,
   schemas,
   payload,
@@ -649,20 +600,27 @@ const encodeRetainedCallbackPayload = ({
   callbackExportName: string;
   schemas: readonly BoundarySchema[];
   payload: unknown;
-}): unknown => {
-  if (schemas.length === 0) return null;
+}): TypedHostPayload[] => {
+  if (schemas.length === 0) return [];
   const args =
     schemas.length === 1
       ? [payload]
       : Array.isArray(payload)
         ? payload
         : [payload];
-  const encoded = encodeBoundaryArgs({
+  return encodeBoundaryArgs({
     exportName: callbackExportName,
     schemas,
     args,
+  }).map((value, index) => {
+    const fingerprint = schemas[index]?.fingerprint;
+    if (!fingerprint) {
+      throw new Error(
+        `retained callback ${callbackExportName} argument ${index} is missing a DTO fingerprint`,
+      );
+    }
+    return { fingerprint, value };
   });
-  return encoded.length === 1 ? encoded[0] : encoded;
 };
 
 const isImportModuleRecord = (
@@ -1036,6 +994,7 @@ export const createVoydHost = async ({
   const callbackAbiByName = new Map(
     exportAbi.callbacks.map((entry) => [entry.name, entry] as const),
   );
+  const payloadFingerprints = new Set(exportAbi.payloadFingerprints);
   const taskRuntimeImports = buildTaskRuntimeImportModule({
     importDescriptors: WebAssembly.Module.imports(module),
     getContext: () => activeTaskImportContext,
@@ -1055,20 +1014,13 @@ export const createVoydHost = async ({
     cleanupTimer?: ReturnType<typeof setTimeout>;
   };
   const standaloneTaskRuns = new Map<number, StandaloneTaskEntry>();
-  const standaloneTaskCapabilitySession = allocateTaskCapabilitySession();
+  const standaloneTaskCapabilities = createOpaqueCapabilityAllocator();
   let nextStandaloneTaskId = 1_000_000;
-  let nextStandaloneTaskSlot = 1;
   let nextRetainedCallbackInvocationId = 1;
   const observeStandaloneTask = async (
     capability: number,
   ): Promise<RunOutcome<unknown>> => {
-    let decoded: ReturnType<typeof decodeTaskCapability>;
-    try {
-      decoded = decodeTaskCapability(capability);
-    } catch (error) {
-      return { kind: "failed", error: toError(error) };
-    }
-    if (decoded.session !== standaloneTaskCapabilitySession) {
+    if (!standaloneTaskCapabilities.owns(capability)) {
       return {
         kind: "failed",
         error: new Error("task belongs to a different runtime session"),
@@ -1407,7 +1359,7 @@ export const createVoydHost = async ({
     completionOverride?: HostCompletionIdentity,
   ): VoydRunHandle<T> => {
     const callbackScopeRunId = detachedRunCounter++;
-    const taskCapabilitySession = allocateTaskCapabilitySession();
+    const taskCapabilities = createOpaqueCapabilityAllocator();
     const callbackScopeOwnerForTask = (taskId: number): string =>
       `${callbackScopeRunId}:${taskId}`;
     if (!initialized) {
@@ -1801,8 +1753,7 @@ export const createVoydHost = async ({
     const taskIdsByCapability = new Map<number, number>();
 
     const resolveTaskCapability = (token: number): number => {
-      const decoded = decodeTaskCapability(token);
-      if (decoded.session !== taskCapabilitySession) {
+      if (!taskCapabilities.owns(token)) {
         throw new Error("task belongs to a different runtime session");
       }
       const taskId = taskIdsByCapability.get(token);
@@ -2092,11 +2043,7 @@ export const createVoydHost = async ({
           }): number => {
             const ownerId = currentActiveTaskId();
             const taskId = state.nextTaskId++;
-            const capability = encodeTaskCapability({
-              session: taskCapabilitySession,
-              generation: 1,
-              slot: taskId,
-            });
+            const capability = taskCapabilities.allocate();
             const sourceFunctionName =
               ownerId === null
                 ? starterExportName
@@ -3060,11 +3007,7 @@ export const createVoydHost = async ({
       name: starterExportName,
     });
     const taskId = nextStandaloneTaskId++;
-    const capability = encodeTaskCapability({
-      session: standaloneTaskCapabilitySession,
-      generation: 1,
-      slot: nextStandaloneTaskSlot++,
-    });
+    const capability = standaloneTaskCapabilities.allocate();
     const run = runEffectfulManaged<unknown>(
       starterExportName,
       [],
@@ -3114,16 +3057,11 @@ export const createVoydHost = async ({
       kind: "callback-invocation",
       invocationId,
       callbackId: 0,
-      args: [
-        {
-          fingerprint: `callback:${callbackExportName}`,
-          value: encodeRetainedCallbackPayload({
-            callbackExportName,
-            schemas: callbackAbi.params,
-            payload,
-          }),
-        },
-      ],
+      args: encodeRetainedCallbackArgs({
+        callbackExportName,
+        schemas: callbackAbi.params,
+        payload,
+      }),
     });
     if (encodedPayload.length > bufferSize) {
       throw new Error("retained callback payload exceeds buffer size");
@@ -3258,6 +3196,14 @@ export const createVoydHost = async ({
     runManaged,
     runEffectful,
     run,
+    decodePayload: (bytes, fingerprint) => {
+      if (!payloadFingerprints.has(fingerprint)) {
+        throw new Error(
+          `Voyd module does not declare encoded payload fingerprint ${fingerprint}`,
+        );
+      }
+      return requireTransport().decodePayload(bytes);
+    },
     transportFrame,
     retainedCallbacks: callbackRegistry,
   };

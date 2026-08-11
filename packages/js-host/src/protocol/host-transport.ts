@@ -16,6 +16,7 @@ export type HostTransportMetadata = {
 
 export type HostTransportAdapter = HostTransportIdentity & {
   encodedPayloadSize(value: unknown): number;
+  decodePayload(bytes: Uint8Array): unknown;
   encodeFrame(frame: HostFrame): Uint8Array;
   decodeFrame(bytes: Uint8Array): HostFrame;
 };

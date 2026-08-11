@@ -57,8 +57,9 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   loads and retains the build-selected transport provider only for host-facing
   code that needs it.
 - Custom JavaScript host transport adapters must provide `encodedPayloadSize`
-  together with frame encoding and decoding. Default adapters use this hook to
-  enforce transport buffer limits without depending on a concrete wire format.
+  and `decodePayload` together with frame encoding and decoding. Default
+  adapters use these hooks to enforce transport buffer limits and decode nested
+  typed VX payloads without depending on a concrete wire format.
 - Host failure frames now preserve direction, frame category, transport phase,
   failure category, provider error code, and structural path. Custom transport
   adapters must encode and decode the complete failure record.
@@ -83,6 +84,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   typed body route is no longer supported; use a typed request DTO.
 - Canvas wrapper payloads are private. Construct paths, draws, gradients, and
   frames through the typed canvas API.
+- Canvas frame version 1 has been removed. The VX DOM renderer accepts only
+  version 2 canvas frames.
 - Canvas paths, draws, gradients, and frames now use one typed custom DTO
   representation at host boundaries. `Point` and `Transform` are immutable
   objects so nested optional canvas fields have a stable DTO layout.
@@ -90,6 +93,9 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   accept caller-owned numeric handler IDs or raw MessagePack callbacks. Use
   typed message values and typed closures; the runtime owns callback
   capabilities and their lifetime.
+- Runtime-issued task and callback capabilities are opaque, scoped to their
+  issuing runtime, and never reused. Guessed, cross-runtime, released, or
+  completed capabilities are rejected.
 - `Html<Msg>`, `Attr<Msg>`, `Program<Model, Msg>`, and `Sub<Msg>` are opaque.
   The public `HtmlNode` and `HtmlAttr` names and their wire payload fields have
   been removed. Static HTML and attributes use the message-neutral `void`
@@ -104,7 +110,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   command, subscription, canvas, state, keyed-scope, and task-key leaves carry
   immutable encoded bytes together with their DTO fingerprint. The former
   public `DataValue`/MessagePack plan maps and `kind: "msgpack"` wrapper are
-  removed.
+  removed. Nested payloads are decoded by the module-selected transport and
+  rejected unless their fingerprint was emitted for that module.
 - Server rendering walks the typed HTML and attribute wire directly; it no
   longer materializes a `DataValue`, JSON, or MessagePack tree.
 - Component-local state, keyed scopes, and task keys use fingerprinted encoded
@@ -117,6 +124,9 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   `resolveMemory`, the direct Wasm `render` helper, or `renderMsgPackNode`.
   Mount, hydration, and server rendering accept a negotiated app runtime or a
   decoded VX frame. Use `renderVxNode` when rendering an already decoded tree.
+- Legacy VX callback imports and legacy `{ name, attributes }` HTML trees have
+  been removed. VX integrations must use the current typed callback and HTML
+  frame contracts.
 - Static `Html<void>` and `Attr<void>` values compose into message-bearing VX
   elements without erasing the element's inferred message union.
 - `Cmd::task(work:, handler:)` has been removed. Use

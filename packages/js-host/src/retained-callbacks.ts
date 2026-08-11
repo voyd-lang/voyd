@@ -24,114 +24,76 @@ export type RetainedCallbackScopeManager<Payload = unknown> = {
 
 export type RetainedCallbackScopeOwner = number | string | symbol;
 
-const SESSION_BITS = 10;
-const GENERATION_BITS = 8;
-const SLOT_BITS = 31 - SESSION_BITS - GENERATION_BITS;
-const SLOT_MASK = (1 << SLOT_BITS) - 1;
-const GENERATION_MASK = (1 << GENERATION_BITS) - 1;
-const SESSION_MASK = (1 << SESSION_BITS) - 1;
-let nextRegistrySession = 1;
+type OpaqueCapabilityAllocator = {
+  allocate(): number;
+  owns(token: number): boolean;
+};
 
-type RetainedHandlerSlot<Payload> = {
-  generation: number;
-  handler?: WasmEventHandlerRef<Payload>;
+const issuedOpaqueCapabilities = new Set<number>();
+
+export const createOpaqueCapabilityAllocator = (): OpaqueCapabilityAllocator => {
+  const owned = new Set<number>();
+  return {
+    allocate() {
+      for (let attempt = 0; attempt < 128; attempt += 1) {
+        const random = new Uint32Array(1);
+        globalThis.crypto.getRandomValues(random);
+        const token = random[0]! & 0x7fff_ffff;
+        if (token === 0 || issuedOpaqueCapabilities.has(token)) continue;
+        issuedOpaqueCapabilities.add(token);
+        owned.add(token);
+        return token;
+      }
+      throw new Error("opaque capability token allocation failed");
+    },
+    owns(token) {
+      return Number.isInteger(token) && token > 0 && owned.has(token);
+    },
+  };
 };
 
 export function createRetainedEventHandlerRegistry<Payload = unknown>(): RetainedEventHandlerRegistry<Payload> {
-  const session = allocateRegistrySession();
-  const slots: RetainedHandlerSlot<Payload>[] = [];
-  const freeSlots: number[] = [];
+  const capabilities = createOpaqueCapabilityAllocator();
+  const handlers = new Map<number, WasmEventHandlerRef<Payload>>();
 
-  const resolve = (token: number): RetainedHandlerSlot<Payload> => {
-    const decoded = decodeCapabilityToken(token);
-    if (decoded.session !== session) {
+  const resolve = (token: number): WasmEventHandlerRef<Payload> => {
+    if (!capabilities.owns(token)) {
       throw new Error("retained callback belongs to a different runtime session");
     }
-    const slot = slots[decoded.slot];
-    if (!slot || slot.generation !== decoded.generation || !slot.handler) {
+    const handler = handlers.get(token);
+    if (!handler) {
       throw new Error("retained callback is stale or has already completed");
     }
-    return slot;
+    return handler;
   };
 
   return {
     retain(handlerRef) {
-      const slotIndex = freeSlots.pop() ?? slots.length;
-      if (slotIndex > SLOT_MASK) {
-        throw new Error("retained callback registry exhausted its slot capacity");
-      }
-      const prior = slots[slotIndex];
-      const generation = nextGeneration(prior?.generation ?? 0);
-      slots[slotIndex] = { generation, handler: handlerRef };
-      return encodeCapabilityToken({ session, slot: slotIndex, generation });
+      const token = capabilities.allocate();
+      handlers.set(token, handlerRef);
+      return token;
     },
     async dispatch(token, payload) {
-      return await resolve(token).handler!(payload);
+      return await resolve(token)(payload);
     },
     release(token) {
-      const decoded = decodeCapabilityToken(token);
-      const slot = resolve(token);
-      slot.handler = undefined;
-      freeSlots.push(decoded.slot);
+      resolve(token);
+      handlers.delete(token);
     },
     releaseMany(tokens) {
       Array.from(tokens).forEach((token) => {
-        const decoded = decodeCapabilityToken(token);
-        const slot = resolve(token);
-        slot.handler = undefined;
-        freeSlots.push(decoded.slot);
+        resolve(token);
+        handlers.delete(token);
       });
     },
     clear() {
-      slots.forEach((slot, index) => {
-        if (!slot.handler) return;
-        slot.handler = undefined;
-        freeSlots.push(index);
-      });
+      handlers.clear();
     },
     size() {
-      return slots.reduce((count, slot) => count + (slot.handler ? 1 : 0), 0);
+      return handlers.size;
     },
   };
 }
-
-const allocateRegistrySession = (): number => {
-  if (nextRegistrySession > SESSION_MASK) {
-    throw new Error("retained callback runtime session capacity exhausted");
-  }
-  return nextRegistrySession++;
-};
-
-const nextGeneration = (generation: number): number => {
-  const next = (generation + 1) & GENERATION_MASK;
-  return next === 0 ? 1 : next;
-};
-
-const encodeCapabilityToken = ({
-  session,
-  slot,
-  generation,
-}: {
-  session: number;
-  slot: number;
-  generation: number;
-}): number =>
-  (session << (GENERATION_BITS + SLOT_BITS)) |
-  (generation << SLOT_BITS) |
-  slot;
-
-const decodeCapabilityToken = (
-  token: number,
-): { session: number; slot: number; generation: number } => {
-  if (!Number.isInteger(token) || token <= 0) {
-    throw new Error("invalid retained callback capability token");
-  }
-  return {
-    session: (token >>> (GENERATION_BITS + SLOT_BITS)) & SESSION_MASK,
-    generation: (token >>> SLOT_BITS) & GENERATION_MASK,
-    slot: token & SLOT_MASK,
-  };
-};
 
 export function createRetainedCallbackScopeManager<Payload = unknown>(
   registry: RetainedEventHandlerRegistry<Payload>,

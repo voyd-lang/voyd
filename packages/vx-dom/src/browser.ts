@@ -3260,7 +3260,7 @@ function readCanvasFrame(command: VxCommandEnvelope): {
     throw new Error("vx-dom: canvas_render command missing frame value");
   }
   const frame = command.value;
-  const version = readCanvasFrameVersion(frame.version);
+  readCanvasFrameVersion(frame.version);
   if (!Array.isArray(frame.draws)) {
     throw new Error("vx-dom: canvas_render frame missing draws array");
   }
@@ -3274,7 +3274,7 @@ function readCanvasFrame(command: VxCommandEnvelope): {
     if (!isRecord(draw)) {
       throw new Error(`vx-dom: ${label} must be an object`);
     }
-    validateCanvasDraw(draw, label, version);
+    validateCanvasDraw(draw, label);
     const kind = readRequiredStringField(draw, "kind", label);
     if (kind === "save") savedStateDepth += 1;
     if (kind === "restore") {
@@ -3302,38 +3302,18 @@ function readCanvasFrame(command: VxCommandEnvelope): {
   };
 }
 
-type CanvasFrameVersion = 1 | 2;
-
-function readCanvasFrameVersion(input: unknown): CanvasFrameVersion {
-  if (input === 1 || input === 2) return input;
+function readCanvasFrameVersion(input: unknown): 2 {
+  if (input === 2) return input;
   throw new Error(
     `vx-dom: canvas_render unsupported frame version ${String(input)}`,
   );
 }
 
-const canvasV2DrawKinds = new Set([
-  "save",
-  "restore",
-  "transform",
-  "translate",
-  "rotate",
-  "scale",
-  "lineDash",
-  "composite",
-  "path",
-]);
-
 function validateCanvasDraw(
   draw: Record<string, unknown>,
   label: string,
-  version: CanvasFrameVersion,
 ): void {
   const kind = readRequiredStringField(draw, "kind", label);
-  if (version === 1 && canvasV2DrawKinds.has(kind)) {
-    throw new Error(
-      `vx-dom: ${label} kind ${JSON.stringify(kind)} requires frame version 2`,
-    );
-  }
   if (kind === "save" || kind === "restore") return;
   if (kind === "transform") {
     ["a", "b", "c", "d", "e", "f"].forEach((field) => {

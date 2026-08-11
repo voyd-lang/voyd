@@ -32,7 +32,7 @@ pub obj RadialGradientDto {
   api outerRadius?: f64
 }
 
-pub obj PathSegmentDto {
+obj PathSegmentDto {
   api kind: String,
   api point?: Point,
   api control?: Point,
@@ -52,7 +52,7 @@ pub obj PathSegmentDto {
   api height?: f64
 }
 
-pub obj DrawDto {
+obj DrawDto {
   api kind: String,
   api from?: Point,
   api to?: Point,
@@ -94,7 +94,7 @@ pub obj DrawDto {
   api operation?: String
 }
 
-pub obj FrameDto {
+obj FrameDto {
   api version: i32,
   api selector: String,
   api width: f64,

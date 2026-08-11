@@ -2434,57 +2434,6 @@ describe("vx-dom browser renderer", () => {
     expect(context.fillText).toHaveBeenCalledWith("Voyd", 40, 41, 120);
   });
 
-  it("continues to render legacy version 1 canvas frames", () => {
-    const canvas = document.createElement("canvas");
-    canvas.id = "scene";
-    container.appendChild(canvas);
-    const context = {
-      beginPath: vi.fn(),
-      clearRect: vi.fn(),
-      lineTo: vi.fn(),
-      moveTo: vi.fn(),
-      restore: vi.fn(),
-      save: vi.fn(),
-      setLineDash: vi.fn(),
-      setTransform: vi.fn(),
-      stroke: vi.fn(),
-    } as unknown as CanvasRenderingContext2D;
-    Object.defineProperty(canvas, "getContext", {
-      configurable: true,
-      value: vi.fn(() => context),
-    });
-
-    const executor = createBrowserVxRuntimeHost().commands?.canvas_render;
-    expect(() =>
-      executor?.(
-        {
-          type: "cmd",
-          kind: "canvas_render",
-          value: {
-            version: 1,
-            selector: "#scene",
-            width: 100,
-            height: 50,
-            draws: [
-              {
-                kind: "line",
-                from: { x: 1, y: 2 },
-                to: { x: 3, y: 4 },
-                color: "#ffffff",
-                width: 1,
-              },
-            ],
-          },
-        },
-        {
-          dispatch: vi.fn(async () => undefined),
-          signal: new AbortController().signal,
-        },
-      ),
-    ).not.toThrow();
-    expect(context.stroke).toHaveBeenCalledOnce();
-  });
-
   it("rejects invalid canvas render targets before drawing", () => {
     const executor = createBrowserVxRuntimeHost().commands?.canvas_render;
     expect(executor).toBeTypeOf("function");
@@ -2494,7 +2443,7 @@ describe("vx-dom browser renderer", () => {
           type: "cmd",
           kind: "canvas_render",
           value: {
-            version: 1,
+            version: 2,
             selector: "#missing-canvas",
             width: 640,
             height: 360,
@@ -2582,7 +2531,7 @@ describe("vx-dom browser renderer", () => {
         },
         runtimeContext,
       ),
-    ).toThrow('draws[0] kind "path" requires frame version 2');
+    ).toThrow("canvas_render unsupported frame version 1");
 
     expect(() =>
       executor?.(

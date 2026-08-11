@@ -50,18 +50,6 @@ describe("vx-dom server renderer", () => {
     });
   });
 
-  it("renders legacy Voyd HTML payloads", async () => {
-    const result = await renderVxToString({
-      tree: {
-        name: "main",
-        attributes: [["role", "main"]],
-        children: [{ name: "h1", children: ["Wiki"] }],
-      },
-    });
-
-    expect(result.html).toBe(`<main role="main"><h1>Wiki</h1></main>`);
-  });
-
   it("encodes carriage returns so HTML parsing preserves exact text and attributes", async () => {
     const result = await renderVxToString({
       frame: {

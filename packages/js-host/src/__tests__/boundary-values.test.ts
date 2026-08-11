@@ -181,6 +181,7 @@ describe("host transport negotiation", () => {
       id: "example.transport",
       version: 3,
       encodedPayloadSize: () => 1,
+      decodePayload: () => undefined,
       encodeFrame: () => new Uint8Array([2]),
       decodeFrame: () => ({
         kind: "cancellation-acknowledgement" as const,

@@ -76,6 +76,27 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
         expect.objectContaining({ name: "add", abi: "direct" }),
       ]),
     );
+    expect(abi.payloadFingerprints).not.toHaveLength(0);
+    expect(abi.payloadFingerprints).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^[0-9a-f]{64}$/)]),
+    );
+  });
+
+  it("binds nested payload decoding to module-emitted fingerprints", async () => {
+    const wasm = await buildModule({
+      entryFile: "boundary-export-contract.voyd",
+      codegenOptions: { boundaryExports: "auto" },
+    });
+    const module = new WebAssembly.Module(wasmBufferSource(wasm));
+    const abi = parseExportAbi(module);
+    const fingerprint = abi.payloadFingerprints[0];
+    expect(fingerprint).toBeDefined();
+    const host = await createVoydHost({ wasm });
+
+    expect(host.decodePayload(new Uint8Array([0xc0]), fingerprint!)).toBeNull();
+    expect(() =>
+      host.decodePayload(new Uint8Array([0xc0]), "f".repeat(64)),
+    ).toThrow("does not declare encoded payload fingerprint");
   });
 
   it("unwraps compiler-derived canvas payloads through boundary metadata", async () => {

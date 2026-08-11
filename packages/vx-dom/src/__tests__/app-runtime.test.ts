@@ -1,7 +1,41 @@
 import { describe, expect, it, vi } from "vitest";
 import { createVoydVxAppRuntime, type VoydVxAppHost } from "../app-runtime.js";
+import { decodeVxPayload } from "../payload.js";
 
 describe("createVoydVxAppRuntime", () => {
+  it("decodes erased leaves through the selected transport", () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const fingerprint = "a".repeat(64);
+    const decodePayload = vi.fn(() => ({ message: "decoded" }));
+
+    expect(
+      decodeVxPayload(
+        {
+          $variant: "CommandMessage",
+          payload: { bytes, fingerprint },
+        },
+        decodePayload,
+      ),
+    ).toEqual({
+      type: "cmd",
+      kind: "message",
+      value: { message: "decoded" },
+    });
+    expect(decodePayload).toHaveBeenCalledWith(bytes, fingerprint);
+  });
+
+  it("rejects erased leaves without a selected transport", () => {
+    expect(() =>
+      decodeVxPayload({
+        $variant: "CommandMessage",
+        payload: {
+          bytes: new Uint8Array([1]),
+          fingerprint: "a".repeat(64),
+        },
+      }),
+    ).toThrow("encoded payload requires the selected host transport");
+  });
+
   it("keeps model ownership in Voyd exports", async () => {
     let model = "intro";
     const host = fakeHost({

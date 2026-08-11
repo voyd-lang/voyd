@@ -1785,6 +1785,12 @@ export const emitModuleExports = (
         )
         .values(),
     ),
+    payloadFingerprints: Array.from(
+      ctx.programHelpers.getHelperState(
+        Symbol.for("voyd.codegen.dtoPayloadFingerprints"),
+        () => new Set<string>(),
+      ),
+    ),
   });
 
   const retainedCallbackTargets = Array.from(

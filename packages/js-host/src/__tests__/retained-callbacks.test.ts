@@ -169,18 +169,32 @@ describe("retained event handler registry", () => {
     );
   });
 
-  it("increments the generation when a released slot is reused", async () => {
+  it("never reuses released callback capabilities", async () => {
     const registry = createRetainedEventHandlerRegistry<string>();
     const oldToken = registry.retain(vi.fn());
     registry.release(oldToken);
+    const tokens = Array.from({ length: 300 }, () => {
+      const token = registry.retain(vi.fn());
+      registry.release(token);
+      return token;
+    });
     const replacement = vi.fn();
-    const newToken = registry.retain(replacement);
+    const currentToken = registry.retain(replacement);
 
-    expect(newToken).not.toBe(oldToken);
+    expect(new Set([oldToken, ...tokens, currentToken]).size).toBe(302);
     await expect(registry.dispatch(oldToken, "stale")).rejects.toThrow(
       "stale or has already completed",
     );
-    await registry.dispatch(newToken, "current");
+    await registry.dispatch(currentToken, "current");
     expect(replacement).toHaveBeenCalledWith("current");
+  });
+
+  it("does not exhaust callback capability sessions", () => {
+    const tokens = Array.from({ length: 1_100 }, () => {
+      const registry = createRetainedEventHandlerRegistry();
+      return registry.retain(vi.fn());
+    });
+
+    expect(new Set(tokens).size).toBe(tokens.length);
   });
 });

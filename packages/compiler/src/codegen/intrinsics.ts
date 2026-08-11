@@ -71,6 +71,7 @@ import {
   writeHostStreamEvent,
 } from "./boundary/dto-stream-writer.js";
 import {
+  hostStreamNameMatches,
   readDtoValueFromHostStream,
   readDtoValueFromStream,
   readHostStreamValue,
@@ -602,30 +603,39 @@ const ensureRetainedCallbackHelper = ({
     }),
     ctx.mod.drop(read("read_i32")),
     ctx.mod.if(
-      ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(1)),
+      ctx.mod.i32.ne(
+        read("begin_array"),
+        ctx.mod.i32.const(parameterCodecs.length),
+      ),
       ctx.mod.unreachable(),
     ),
-    ctx.mod.if(
-      ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(2)),
-      ctx.mod.unreachable(),
-    ),
-    ctx.mod.drop(read("read_string")),
   ];
-  if (parameterCodecs.length === 0) {
-    parsePayload.push(ctx.mod.drop(read("skip_value")));
-  } else if (parameterCodecs.length !== 1) {
+  parameterCodecs.forEach((codec, index) => {
+    const fingerprint = withDtoFingerprint(codec.schema).fingerprint;
+    if (!fingerprint) {
+      throw new Error(`callback parameter ${index + 1} is missing a DTO fingerprint`);
+    }
     parsePayload.push(
       ctx.mod.if(
         ctx.mod.i32.ne(
           read("begin_array"),
-          ctx.mod.i32.const(parameterCodecs.length),
+          ctx.mod.i32.const(2),
         ),
         ctx.mod.unreachable(),
       ),
-    );
-  }
-  parameterCodecs.forEach((codec, index) => {
-    parsePayload.push(
+      ctx.mod.if(
+        ctx.mod.i32.eqz(
+          hostStreamNameMatches({
+            reader: readerRef(),
+            readerTypeId: provider.readerTypeId,
+            actual: read("read_string"),
+            expected: fingerprint,
+            ctx,
+            fnCtx: helperFnCtx,
+          }),
+        ),
+        ctx.mod.unreachable(),
+      ),
       storeLocalValue({
         binding: argLocals[index]!,
         value: readDtoValueFromHostStream({
@@ -638,13 +648,10 @@ const ensureRetainedCallbackHelper = ({
         ctx,
         fnCtx: helperFnCtx,
       }),
+      ctx.mod.drop(read("end_array")),
     );
   });
-  if (parameterCodecs.length > 1) {
-    parsePayload.push(ctx.mod.drop(read("end_array")));
-  }
   parsePayload.push(
-    ctx.mod.drop(read("end_array")),
     ctx.mod.drop(read("end_array")),
     ctx.mod.drop(read("end_array")),
     ctx.mod.if(
@@ -1608,6 +1615,12 @@ export const compileIntrinsicCall = ({
           }),
         ).fingerprint;
         if (!fingerprint) throw new Error("DTO fingerprint is missing");
+        ctx.programHelpers
+          .getHelperState(
+            Symbol.for("voyd.codegen.dtoPayloadFingerprints"),
+            () => new Set<string>(),
+          )
+          .add(fingerprint);
         return emitStringLiteral(fingerprint, ctx);
       } catch (error) {
         rethrowBoundarySchemaDiagnostic({ error, call });

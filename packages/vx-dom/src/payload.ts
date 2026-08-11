@@ -1,9 +1,15 @@
-import { decode as decodeMsgPack } from "@msgpack/msgpack";
-
 const taskObserverProperty = Symbol.for("voyd.taskObserver");
 
-export function decodeVxPayload(value: unknown): unknown {
-  const decoded = decodeDataValue(value);
+export type VxPayloadDecoder = (
+  bytes: Uint8Array,
+  fingerprint: string,
+) => unknown;
+
+export function decodeVxPayload(
+  value: unknown,
+  decodePayload?: VxPayloadDecoder,
+): unknown {
+  const decoded = decodeDataValue(value, decodePayload);
   const observer =
     value !== null && typeof value === "object"
       ? (value as Record<PropertyKey, unknown>)[taskObserverProperty]
@@ -22,7 +28,10 @@ export function decodeVxPayload(value: unknown): unknown {
   return decoded;
 }
 
-const decodeDataValue = (value: unknown): unknown => {
+const decodeDataValue = (
+  value: unknown,
+  decodePayload?: VxPayloadDecoder,
+): unknown => {
   if (!isRecord(value)) return value;
   const variant =
     typeof value.$variant === "string"
@@ -32,7 +41,7 @@ const decodeDataValue = (value: unknown): unknown => {
         : undefined;
   if (variant === undefined) {
     return Object.keys(value).length === 1 && Object.hasOwn(value, "node")
-      ? decodeDataValue(value.node)
+      ? decodeDataValue(value.node, decodePayload)
       : value;
   }
   switch (variant) {
@@ -42,21 +51,21 @@ const decodeDataValue = (value: unknown): unknown => {
       return {
         type: "cmd",
         kind: "message",
-        value: decodeEncodedPayload(value.payload),
+        value: decodeEncodedPayload(value.payload, decodePayload),
       };
     case "CommandBatch":
       return {
         type: "cmd",
         kind: "batch",
         children: Array.isArray(value.children)
-          ? value.children.map(decodeDataValue)
+          ? value.children.map((child) => decodeDataValue(child, decodePayload))
           : [],
       };
     case "CommandMap":
       return {
         type: "cmd",
         kind: "map",
-        child: decodeDataValue(value.child),
+        child: decodeDataValue(value.child, decodePayload),
         handlerId: value.handler_id,
       };
     case "CommandRuntime":
@@ -64,7 +73,7 @@ const decodeDataValue = (value: unknown): unknown => {
         type: "cmd",
         kind: value.kind,
         ...(Object.hasOwn(value, "payload")
-          ? { value: decodeEncodedPayload(value.payload) }
+          ? { value: decodeEncodedPayload(value.payload, decodePayload) }
           : {}),
       };
     case "CommandReadClipboard":
@@ -88,10 +97,10 @@ const decodeDataValue = (value: unknown): unknown => {
           typeof value.millis === "bigint"
             ? Number(value.millis)
             : value.millis,
-        value: decodeEncodedPayload(value.payload),
+        value: decodeEncodedPayload(value.payload, decodePayload),
       };
     case "CommandOwned": {
-      const child = decodeDataValue(value.child);
+      const child = decodeDataValue(value.child, decodePayload);
       return isRecord(child)
         ? {
             ...child,
@@ -103,7 +112,7 @@ const decodeDataValue = (value: unknown): unknown => {
       return {
         type: "cmd",
         kind: "canvas_render",
-        value: decodeEncodedPayload(value.payload),
+        value: decodeEncodedPayload(value.payload, decodePayload),
       };
     case "CommandCanvasMeasureText":
       return {
@@ -121,7 +130,7 @@ const decodeDataValue = (value: unknown): unknown => {
         type: "sub",
         kind: "batch",
         children: Array.isArray(value.children)
-          ? value.children.map(decodeDataValue)
+          ? value.children.map((child) => decodeDataValue(child, decodePayload))
           : [],
       };
     case "SubscriptionRuntime":
@@ -138,42 +147,45 @@ const decodeDataValue = (value: unknown): unknown => {
             ? { ms: value.millis }
             : {}),
         ...(Object.hasOwn(value, "payload")
-          ? { value: decodeEncodedPayload(value.payload) }
+          ? { value: decodeEncodedPayload(value.payload, decodePayload) }
           : {}),
       };
     case "SubscriptionMap":
       return {
         type: "sub",
         kind: "map",
-        child: decodeDataValue(value.child),
+        child: decodeDataValue(value.child, decodePayload),
         handlerId: value.handler_ref,
         ...(typeof value.handler_key === "number"
           ? { handlerKey: value.handler_key }
           : {}),
       };
     case "SubscriptionOwned": {
-      const child = decodeDataValue(value.child);
+      const child = decodeDataValue(value.child, decodePayload);
       return isRecord(child)
         ? { ...child, __vxOwnedMapHandlerIds: [value.handler_ref] }
         : child;
     }
     case "ProgramResult": {
-      const frame = decodeOptionalWire(value.frame);
-      const commands = decodeOptionalWire(value.commands);
-      const subscriptions = decodeOptionalWire(value.subscriptions);
+      const frame = decodeOptionalWire(value.frame, decodePayload);
+      const commands = decodeOptionalWire(value.commands, decodePayload);
+      const subscriptions = decodeOptionalWire(value.subscriptions, decodePayload);
       return {
         $vx: "runtime_result",
-        model: decodeEncodedPayload(value.model),
+        model: decodeEncodedPayload(value.model, decodePayload),
         ...(frame !== undefined ? { frame } : {}),
         ...(commands !== undefined ? { commands } : {}),
         ...(subscriptions !== undefined ? { subscriptions } : {}),
       };
     }
     case "ProgramMapModel": {
-      const hydrateHandlerId = decodeOptionalWire(value.hydrate_handler_ref);
+      const hydrateHandlerId = decodeOptionalWire(
+        value.hydrate_handler_ref,
+        decodePayload,
+      );
       return {
         kind: "program_map_model",
-        child: decodeDataValue(value.child),
+        child: decodeDataValue(value.child, decodePayload),
         handlerId: value.handler_ref,
         ...(typeof hydrateHandlerId === "number" ? { hydrateHandlerId } : {}),
       };
@@ -181,12 +193,13 @@ const decodeDataValue = (value: unknown): unknown => {
     case "ProgramMapMessage":
       return {
         kind: "program_map_message",
-        child: decodeDataValue(value.child),
+        child: decodeDataValue(value.child, decodePayload),
         handlerId: value.handler_ref,
       };
     case "ProgramHandlers": {
       const subscriptionsHandlerId = decodeOptionalWire(
         value.subscriptions_handler_ref,
+        decodePayload,
       );
       return {
         kind: "program",
@@ -207,7 +220,7 @@ const decodeDataValue = (value: unknown): unknown => {
       return {
         kind: value.kind,
         name: value.name,
-        value: decodeDataValue(value.value),
+        value: decodeDataValue(value.value, decodePayload),
       };
     case "EventAttr":
       return {
@@ -223,35 +236,51 @@ const decodeDataValue = (value: unknown): unknown => {
     case "HtmlFragment":
       return {
         kind: "fragment",
-        children: decodeWireList(value.children, "HtmlWireEnd", "HtmlWireNext"),
+        children: decodeWireList(
+          value.children,
+          "HtmlWireEnd",
+          "HtmlWireNext",
+          decodePayload,
+        ),
       };
     case "HtmlElement":
-      return decodeHtmlElement(value);
+      return decodeHtmlElement(value, decodePayload);
     case "HtmlKeyed": {
-      const child = decodeDataValue(value.child);
+      const child = decodeDataValue(value.child, decodePayload);
       return isRecord(child) ? { ...child, key: value.key } : child;
     }
     case "HtmlMapped":
       return {
         kind: "map",
-        child: decodeDataValue(value.child),
+        child: decodeDataValue(value.child, decodePayload),
         handlerId: value.handler_ref,
       };
     case "HtmlFrame":
-      return { version: value.version, root: decodeDataValue(value.root) };
+      return {
+        version: value.version,
+        root: decodeDataValue(value.root, decodePayload),
+      };
     default:
       return value;
   }
 };
 
-const decodeHtmlElement = (value: Record<string, unknown>): unknown => {
+const decodeHtmlElement = (
+  value: Record<string, unknown>,
+  decodePayload?: VxPayloadDecoder,
+): unknown => {
   const attrs: Record<string, unknown> = {};
   const props: Record<string, unknown> = {};
   const styles: Record<string, unknown> = {};
   const events: unknown[] = [];
   const targetFor = (kind: unknown): Record<string, unknown> =>
     kind === "prop" ? props : kind === "style" ? styles : attrs;
-  decodeWireList(value.attrs, "AttrWireEnd", "AttrWireNext").forEach(
+  decodeWireList(
+    value.attrs,
+    "AttrWireEnd",
+    "AttrWireNext",
+    decodePayload,
+  ).forEach(
     (entry) => {
       if (!isRecord(entry)) return;
       if (entry.kind === "event") {
@@ -266,7 +295,12 @@ const decodeHtmlElement = (value: Record<string, unknown>): unknown => {
   return {
     kind: "element",
     tag: value.element_name,
-    children: decodeWireList(value.children, "HtmlWireEnd", "HtmlWireNext"),
+    children: decodeWireList(
+      value.children,
+      "HtmlWireEnd",
+      "HtmlWireNext",
+      decodePayload,
+    ),
     ...(Object.keys(attrs).length > 0 ? { attrs } : {}),
     ...(Object.keys(props).length > 0 ? { props } : {}),
     ...(Object.keys(styles).length > 0 ? { styles } : {}),
@@ -278,6 +312,7 @@ const decodeWireList = (
   value: unknown,
   endTag: string,
   nextTag: string,
+  decodePayload?: VxPayloadDecoder,
 ): unknown[] => {
   const out: unknown[] = [];
   let current = value;
@@ -290,7 +325,7 @@ const decodeWireList = (
           : undefined;
     if (tag === endTag) return out;
     if (tag !== nextTag) break;
-    out.push(decodeDataValue(current.value));
+    out.push(decodeDataValue(current.value, decodePayload));
     current = current.rest;
   }
   return out;
@@ -312,7 +347,10 @@ const decodeEventOptions = (
     : {}),
 });
 
-const decodeEncodedPayload = (value: unknown): unknown => {
+const decodeEncodedPayload = (
+  value: unknown,
+  decodePayload?: VxPayloadDecoder,
+): unknown => {
   if (!isRecord(value) || !(value.bytes instanceof Uint8Array)) {
     throw new Error("vx-dom: encoded payload is missing immutable bytes");
   }
@@ -322,10 +360,16 @@ const decodeEncodedPayload = (value: unknown): unknown => {
   ) {
     throw new Error("vx-dom: encoded payload is missing its DTO fingerprint");
   }
-  return decodeMsgPack(value.bytes, { useBigInt64: true });
+  if (!decodePayload) {
+    throw new Error("vx-dom: encoded payload requires the selected host transport");
+  }
+  return decodePayload(value.bytes, value.fingerprint);
 };
 
-const decodeOptionalWire = (value: unknown): unknown => {
+const decodeOptionalWire = (
+  value: unknown,
+  decodePayload?: VxPayloadDecoder,
+): unknown => {
   if (!isRecord(value)) return undefined;
   const tag =
     typeof value.$variant === "string"
@@ -334,7 +378,9 @@ const decodeOptionalWire = (value: unknown): unknown => {
         ? value.tag
         : undefined;
   if (tag === "None") return undefined;
-  return tag === "Some" ? decodeDataValue(value.value) : undefined;
+  return tag === "Some"
+    ? decodeDataValue(value.value, decodePayload)
+    : undefined;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

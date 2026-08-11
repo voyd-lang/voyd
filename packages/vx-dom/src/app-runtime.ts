@@ -20,6 +20,7 @@ export type VoydVxAppHost = {
     release?: (id: number) => void;
     releaseMany?: (ids: Iterable<number>) => void;
   };
+  decodePayload?: (bytes: Uint8Array, fingerprint: string) => unknown;
   transportFrame?: (frame: VxTransportFrame) => unknown;
 };
 
@@ -131,6 +132,8 @@ export function createVoydVxAppRuntime(
   let model = options.initialModel;
   let initialized = Object.hasOwn(options, "initialModel");
   const componentState = createComponentStateRuntime(options.host);
+  const decode = (value: unknown): unknown =>
+    decodeVxPayload(value, options.host.decodePayload);
 
   const requireModel = (): unknown => {
     if (!initialized) {
@@ -155,7 +158,7 @@ export function createVoydVxAppRuntime(
     if (programRunner) return programRunner;
     programRunner = createProgramDescriptorRunner({
       descriptor: parseProgramDescriptor(
-        decodeVxPayload(await options.host.run(appEntryName)),
+        decode(await options.host.run(appEntryName)),
       ),
       host: options.host,
       dispatch: runProgramHandler,
@@ -167,7 +170,7 @@ export function createVoydVxAppRuntime(
     handlerId: number,
     payload: unknown,
   ): Promise<T> =>
-    decodeVxPayload(
+    decode(
       await Promise.resolve(
         requireRetainedCallbacks().dispatch(handlerId, payload) as T,
       ),
@@ -185,7 +188,7 @@ export function createVoydVxAppRuntime(
             entryNames.view,
             options.viewReceivesModel === false ? [] : [requireModel()],
           );
-      frame = decodeVxPayload(frame);
+      frame = decode(frame);
       componentState.finishRender(frame);
       if (!componentState.isDirty()) return frame;
     }
@@ -193,7 +196,7 @@ export function createVoydVxAppRuntime(
   };
 
   const readSubscriptions = async (): Promise<unknown> =>
-    decodeVxPayload(
+    decode(
       await readProgramRunner().then((descriptor) =>
         descriptor
           ? descriptor.subscriptions()
@@ -207,7 +210,7 @@ export function createVoydVxAppRuntime(
     result: unknown,
     adoptPlainModel: boolean,
   ): Promise<VxRuntimeStep> => {
-    result = decodeVxPayload(result);
+    result = decode(result);
     const resolvedResult = await resolveProgramResultMaps(
       result,
       runProgramHandler,

@@ -122,7 +122,7 @@ fn lower_sub<Msg>(value: Sub<Msg>) -> SubscriptionWire
   let run = value.plan.thunk.at(0)
   run()
 
-pub fn lower_html_node<Msg>(value: Html<Msg>) -> HtmlWire
+fn lower_html_node<Msg>(value: Html<Msg>) -> HtmlWire
   lower_html_plan(value.plan)
 
 fn lower_html_plan(plan: HtmlPlan) -> HtmlWire
