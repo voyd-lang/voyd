@@ -1,7 +1,11 @@
 import path from "node:path";
-import { decode } from "@msgpack/msgpack";
 import { describe, expect, it } from "vitest";
 import { createSdk, type CompileResult } from "@voyd-lang/sdk";
+import { createVoydHost } from "@voyd-lang/sdk/js-host";
+import {
+  createVoydVxAppRuntime,
+  type VoydVxAppHost,
+} from "@voyd-lang/vx-dom";
 
 const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
 
@@ -17,16 +21,27 @@ const expectCompileSuccess = (
   return result;
 };
 
+const readVxExport = (
+  host: VoydVxAppHost,
+  entryName: string,
+): Promise<unknown> =>
+  Promise.resolve(
+    createVoydVxAppRuntime({
+      host,
+      app: false,
+      initialModel: {},
+      exports: { view: entryName },
+      viewReceivesModel: false,
+    }).render(),
+  );
+
 describe("integration: html.voyd", () => {
   it("returns the expected opaque HTML plan", async () => {
     const sdk = createSdk();
     const entryPath = path.join(fixtureRoot, "html.voyd");
     const result = expectCompileSuccess(await sdk.compile({ entryPath }));
-
-    const encoded = await result.run<Uint8Array>({
-      entryName: "main",
-    });
-    const output = decode(encoded);
+    const host = await createVoydHost({ wasm: result.wasm });
+    const output = await readVxExport(host, "main");
 
     expect(output).toEqual({
       attrs: {
@@ -54,9 +69,7 @@ describe("integration: html.voyd", () => {
     });
 
     await expect(
-      result
-        .run<Uint8Array>({ entryName: "empty_children_with_shadows" })
-        .then((value) => decode(value)),
+      readVxExport(host, "empty_children_with_shadows"),
     ).resolves.toEqual({
       kind: "element",
       tag: "input",
@@ -64,9 +77,7 @@ describe("integration: html.voyd", () => {
     });
 
     await expect(
-      result
-        .run<Uint8Array>({ entryName: "option_attributes" })
-        .then((value) => decode(value)),
+      readVxExport(host, "option_attributes"),
     ).resolves.toEqual({
       attrs: {
         selected: true,

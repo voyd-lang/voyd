@@ -243,7 +243,7 @@ describe("integration: task runtime", () => {
             functionName: "unsupported_detached_outcome_probe",
             span: {
               file: expect.stringContaining("task-runtime.voyd"),
-              startLine: 347,
+              startLine: 353,
             },
           },
           transition: {
