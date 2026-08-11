@@ -642,7 +642,7 @@ pub fn main() -> i32
       "union_return_context_conflict.voyd",
     );
 
-    expect(() => semanticsPipeline(ast)).toThrow(/type mismatch/);
+    expect(() => semanticsPipeline(ast)).toThrow(/make is missing 1 type argument/);
   });
 
   it("aggregates repeated nominal union members into one generic binding", () => {
