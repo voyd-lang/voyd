@@ -548,8 +548,61 @@ const readRecord = ({
   state: StreamReaderState;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): binaryen.ExpressionRef =>
-  ctx.mod.block(
+}): binaryen.ExpressionRef => {
+  if (schema.tag) {
+    const variantNameRead = readScalar({
+      name: "begin_variant",
+      reader,
+      state,
+      ctx,
+      fnCtx,
+    });
+    return ctx.mod.block(
+      null,
+      [
+        callReaderRaw({
+          name: "enter_field",
+          reader,
+          args: [emitStringLiteral("$variant", ctx)],
+          state,
+          ctx,
+          fnCtx,
+        }),
+        ctx.mod.if(
+          ctx.mod.i32.eqz(
+            namesMatch({
+              reader,
+              actual: variantNameRead.value,
+              expected: schema.tag,
+              state,
+              ctx,
+              fnCtx,
+            }),
+          ),
+          rejectValue({
+            reader,
+            message: `expected variant ${schema.tag}`,
+            targetTypeId: schema.typeId,
+            state,
+            ctx,
+            fnCtx,
+          }),
+        ),
+        callReaderRaw({ name: "leave", reader, args: [], state, ctx, fnCtx }),
+        readRecordFields({
+          reader,
+          typeId: schema.typeId,
+          fields: schema.fields,
+          endMethod: "end_variant",
+          state,
+          ctx,
+          fnCtx,
+        }),
+      ],
+      wasmTypeFor(schema.typeId, ctx),
+    );
+  }
+  return ctx.mod.block(
     null,
     [
       checkedUnitCall({
@@ -577,6 +630,7 @@ const readRecord = ({
     ],
     wasmTypeFor(schema.typeId, ctx),
   );
+};
 
 const readUnion = ({
   reader,

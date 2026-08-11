@@ -513,6 +513,7 @@ const writeRecord = ({
     value,
     typeId: schema.typeId,
     name: schema.name,
+    ...(schema.tag ? { variantTag: schema.tag } : {}),
     fields: schema.fields,
     ancestors,
     ancestorCount,
@@ -589,6 +590,7 @@ const writeRecordFields = ({
   typeId,
   name,
   variant,
+  variantTag,
   fields,
   ancestors,
   ancestorCount,
@@ -601,6 +603,7 @@ const writeRecordFields = ({
   typeId: TypeId;
   name: string;
   variant?: BoundaryVariantSchema;
+  variantTag?: string;
   fields: readonly BoundaryFieldSchema[];
   ancestors: binaryen.ExpressionRef;
   ancestorCount: binaryen.ExpressionRef;
@@ -674,13 +677,13 @@ const writeRecordFields = ({
   });
   setup.push(
     checkedWriterCall({
-      call: variant
+      call: variant || variantTag
         ? callWriter({
             name: "begin_variant",
             writer,
             args: [
               emitStringLiteral(name, ctx),
-              emitStringLiteral(variant.name, ctx),
+              emitStringLiteral(variant?.name ?? variantTag!, ctx),
               fieldCountRef(),
             ],
             state,
@@ -760,7 +763,7 @@ const writeRecordFields = ({
   });
   setup.push(
     callWriter({
-      name: variant ? "end_variant" : "end_record",
+      name: variant || variantTag ? "end_variant" : "end_record",
       writer,
       args: [],
       state,
