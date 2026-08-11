@@ -26,6 +26,8 @@ export type MsgpackHostTransportContractTypes = {
   readonly bytes: TypeId;
   readonly array: TypeId;
   readonly map: TypeId;
+  readonly reader: TypeId;
+  readonly writer: TypeId;
 };
 
 export type DtoDataContractTypes = {
@@ -88,6 +90,14 @@ export const validateMsgpackHostTransportFunctionContracts = (
       MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeMap,
       0,
     ),
+    reader: resultType(
+      resolved,
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader,
+    ),
+    writer: resultType(
+      resolved,
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createWriter,
+    ),
   };
   const sharedTypes: ContractTypes = {
     msgpack: types.msgpack,
@@ -95,6 +105,8 @@ export const validateMsgpackHostTransportFunctionContracts = (
     bytes: types.bytes,
     "msgpack-array": types.array,
     "msgpack-map": types.map,
+    "msgpack-reader": types.reader,
+    "msgpack-writer": types.writer,
   };
 
   validateSharedDomainTypes(program, types);
@@ -479,6 +491,8 @@ const formatExpectedType = (type: CompilerContractTypeSpec): string => {
     bytes: "Bytes",
     "msgpack-array": "Array<MsgPack>",
     "msgpack-map": "Map<String, MsgPack>",
+    "msgpack-reader": "MsgPackReader",
+    "msgpack-writer": "MsgPackWriter",
     data: "DataValue",
     "data-array": "Array<DataValue>",
     "data-map": "Map<String, DataValue>",

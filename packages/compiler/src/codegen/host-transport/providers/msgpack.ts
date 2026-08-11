@@ -10,6 +10,12 @@ import { stateFor } from "../../effects/host-boundary/state.js";
 
 export type MsgPackProviderFunctions = {
   valueTypeId: TypeId;
+  readerTypeId: TypeId;
+  writerTypeId: TypeId;
+  createReader: FunctionMetadata;
+  readerComplete: FunctionMetadata;
+  createWriter: FunctionMetadata;
+  finishWriter: FunctionMetadata;
   encodeValue: FunctionMetadata;
   decodeValue: FunctionMetadata;
   makeNull: FunctionMetadata;
@@ -51,6 +57,86 @@ type ReachabilityState = {
   symbols?: Set<ProgramSymbolId>;
 };
 
+export const enqueueMsgPackProviderReachability = ({
+  ctx,
+  enqueue,
+}: {
+  ctx: CodegenContext;
+  enqueue: (symbol: ProgramSymbolId) => void;
+}): void => {
+  Object.values(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS).forEach((contractId) => {
+    const symbol =
+      ctx.program.symbols.resolveCompilerFunctionContract(contractId);
+    if (typeof symbol === "number") enqueue(symbol);
+  });
+  const contractResultType = (
+    contractId: CompilerFunctionContractId,
+  ): TypeId => {
+    const symbol =
+      ctx.program.symbols.resolveCompilerFunctionContract(contractId);
+    if (typeof symbol !== "number") {
+      throw new Error(`missing compiler function contract '${contractId}'`);
+    }
+    const ref = ctx.program.symbols.refOf(symbol);
+    const typeId = ctx.program.functions.getSignature(
+      ref.moduleId,
+      ref.symbol,
+    )?.returnType;
+    if (typeof typeId !== "number") {
+      throw new Error(
+        `compiler function contract '${contractId}' has no result type`,
+      );
+    }
+    return typeId;
+  };
+  enqueueTraitImplementation({
+    ctx,
+    typeId: contractResultType(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader,
+    ),
+    traitName: "DataReader",
+    enqueue,
+  });
+  enqueueTraitImplementation({
+    ctx,
+    typeId: contractResultType(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createWriter,
+    ),
+    traitName: "DataWriter",
+    enqueue,
+  });
+};
+
+const enqueueTraitImplementation = ({
+  ctx,
+  typeId,
+  traitName,
+  enqueue,
+}: {
+  ctx: CodegenContext;
+  typeId: TypeId;
+  traitName: string;
+  enqueue: (symbol: ProgramSymbolId) => void;
+}): void => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  const nominal =
+    desc.kind === "intersection" && desc.nominal !== undefined
+      ? desc.nominal
+      : (ctx.program.types.getNominalOwner(typeId) ?? typeId);
+  const impl = ctx.program.traits
+    .getImplsByNominal(nominal)
+    .find(
+      (candidate) =>
+        ctx.program.symbols.getName(candidate.traitSymbol) === traitName,
+    );
+  if (!impl) {
+    throw new Error(
+      `MessagePack host transport requires ${traitName} for type ${typeId}`,
+    );
+  }
+  impl.methods.forEach(({ implMethod }) => enqueue(implMethod));
+};
+
 const markReachable = ({
   ctx,
   moduleId,
@@ -77,13 +163,63 @@ const requireContract = (
 ): FunctionMetadata =>
   requireFunctionMetaByCompilerContract({ ctx, contractId });
 
+const markTraitImplementationReachable = ({
+  ctx,
+  typeId,
+  traitName,
+}: {
+  ctx: CodegenContext;
+  typeId: TypeId;
+  traitName: string;
+}): void => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  const nominal =
+    desc.kind === "intersection" && desc.nominal !== undefined
+      ? desc.nominal
+      : (ctx.program.types.getNominalOwner(typeId) ?? typeId);
+  const impl = ctx.program.traits
+    .getImplsByNominal(nominal)
+    .find(
+      (candidate) =>
+        ctx.program.symbols.getName(candidate.traitSymbol) === traitName,
+    );
+  if (!impl) {
+    throw new Error(
+      `MessagePack host transport requires ${traitName} for type ${typeId}`,
+    );
+  }
+  impl.methods.forEach(({ implMethod }) => {
+    const ref = ctx.program.symbols.refOf(implMethod);
+    markReachable({ ctx, moduleId: ref.moduleId, symbol: ref.symbol });
+  });
+};
+
 export const ensureMsgPackProviderFunctions = (
   ctx: CodegenContext,
 ): MsgPackProviderFunctions =>
   stateFor(ctx, MSGPACK_PROVIDER_FUNCS_KEY, () => {
-    const { msgpack: valueTypeId } =
-      validateMsgpackHostTransportFunctionContracts(ctx.program);
+    const {
+      msgpack: valueTypeId,
+      reader: readerTypeId,
+      writer: writerTypeId,
+    } = validateMsgpackHostTransportFunctionContracts(ctx.program);
     const functions = {
+      createReader: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader,
+      ),
+      readerComplete: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.readerComplete,
+      ),
+      createWriter: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createWriter,
+      ),
+      finishWriter: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.finishWriter,
+      ),
       encodeValue: requireContract(
         ctx,
         MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.encodeValue,
@@ -195,6 +331,8 @@ export const ensureMsgPackProviderFunctions = (
     };
     const msgpack: MsgPackProviderFunctions = {
       valueTypeId,
+      readerTypeId,
+      writerTypeId,
       ...functions,
     };
 
@@ -213,6 +351,16 @@ export const ensureMsgPackProviderFunctions = (
       ctx,
       moduleId: stringNew.moduleId,
       symbol: stringNew.symbol,
+    });
+    markTraitImplementationReachable({
+      ctx,
+      typeId: readerTypeId,
+      traitName: "DataReader",
+    });
+    markTraitImplementationReachable({
+      ctx,
+      typeId: writerTypeId,
+      traitName: "DataWriter",
     });
 
     return msgpack;

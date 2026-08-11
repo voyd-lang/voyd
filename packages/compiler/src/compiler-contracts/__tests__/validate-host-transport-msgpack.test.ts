@@ -26,6 +26,8 @@ const shared = {
   data: 17,
   dataArray: 18,
   dataMap: 19,
+  reader: 21,
+  writer: 22,
 } as const;
 const fixed = { msgpack: 14, i32: 15, data: 20 } as const;
 const owners = {
@@ -47,6 +49,8 @@ const typeIdFor = (spec: CompilerContractTypeSpec): TypeId => {
       data: shared.data,
       "data-array": shared.dataArray,
       "data-map": shared.dataMap,
+      "msgpack-reader": shared.reader,
+      "msgpack-writer": shared.writer,
     }[spec.name] as TypeId;
   }
   if (spec.element.kind === "primitive") return fixed.i32 as TypeId;
@@ -91,6 +95,24 @@ const makeProgramFor = (
     [ids.f64, { kind: "primitive", name: "f64" }],
     [shared.msgpack, { kind: "union", members: [] }],
     [shared.data, { kind: "union", members: [] }],
+    [
+      shared.reader,
+      {
+        kind: "nominal-object",
+        owner: 105 as ProgramSymbolId,
+        name: "MsgPackReader",
+        typeArgs: [],
+      },
+    ],
+    [
+      shared.writer,
+      {
+        kind: "nominal-object",
+        owner: 106 as ProgramSymbolId,
+        name: "MsgPackWriter",
+        typeArgs: [],
+      },
+    ],
     [
       shared.bytes,
       {
@@ -228,6 +250,8 @@ describe("MessagePack host transport compiler contract signature validation", ()
       bytes: shared.bytes,
       array: shared.array,
       map: shared.map,
+      reader: shared.reader,
+      writer: shared.writer,
     });
   });
 

@@ -74,6 +74,48 @@ export const writeDtoValueToStream = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
+  const writerLocal = allocateTempLocal(
+    wasmTypeFor(writerTypeId, ctx),
+    fnCtx,
+    writerTypeId,
+    ctx,
+  );
+  return ctx.mod.block(
+    null,
+    [
+      storeLocalValue({ binding: writerLocal, value: writer, ctx, fnCtx }),
+      writeDtoValueToHostStream({
+        writer: () => loadLocalValue(writerLocal, ctx),
+        writerTypeId,
+        value,
+        schema,
+        resultTypeId,
+        ctx,
+        fnCtx,
+      }),
+    ],
+    wasmTypeFor(resultTypeId, ctx),
+  );
+};
+
+/** Writes a DTO through an already-stable host writer reference. */
+export const writeDtoValueToHostStream = ({
+  writer,
+  writerTypeId,
+  value,
+  schema,
+  resultTypeId,
+  ctx,
+  fnCtx,
+}: {
+  writer: () => binaryen.ExpressionRef;
+  writerTypeId: TypeId;
+  value: binaryen.ExpressionRef;
+  schema: BoundarySchema;
+  resultTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
   const errorLabel = freshLabel("dto_stream_write_error");
   const state: StreamWriterState = {
     writerTypeId,
@@ -85,19 +127,12 @@ export const writeDtoValueToStream = ({
     errorLabel,
   };
   registerSchema({ schema, registry: state.registry });
-  const writerLocal = allocateTempLocal(
-    wasmTypeFor(writerTypeId, ctx),
-    fnCtx,
-    writerTypeId,
-    ctx,
-  );
   const ancestorStack = emptyAncestorStack({ state, ctx });
   return ctx.mod.block(
     errorLabel,
     [
-      storeLocalValue({ binding: writerLocal, value: writer, ctx, fnCtx }),
       writeValue({
-        writer: () => loadLocalValue(writerLocal, ctx),
+        writer,
         value,
         schema,
         ancestors: ancestorStack,
@@ -109,6 +144,84 @@ export const writeDtoValueToStream = ({
     ],
     wasmTypeFor(resultTypeId, ctx),
   );
+};
+
+/** Emits one provider-neutral framing event into a host stream writer. */
+export const writeHostStreamEvent = ({
+  writer,
+  writerTypeId,
+  name,
+  args,
+  ctx,
+  fnCtx,
+}: {
+  writer: binaryen.ExpressionRef;
+  writerTypeId: TypeId;
+  name: string;
+  args: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const methods = resolveWriterMethods({ writerTypeId, ctx });
+  const method = methods.get(name);
+  if (!method) throw new Error(`DataWriter implementation is missing ${name}`);
+  const state: StreamWriterState = {
+    writerTypeId,
+    resultTypeId: method.resultTypeId,
+    methods,
+    registry: new Map(),
+    helpers: new Map(),
+    activeHelpers: new Set(),
+    errorLabel: freshLabel("host_stream_writer_error"),
+  };
+  const loweredArgs = args.map((arg, index) => {
+    const parameterIndex = index + 1;
+    const typeId = method.paramTypeIds[parameterIndex];
+    const targetType =
+      method.paramAbiTypes[parameterIndex]?.[0] ??
+      method.paramTypes.at(-args.length + index);
+    if (
+      typeof typeId !== "number" ||
+      typeof targetType !== "number" ||
+      targetType === binaryen.i32 ||
+      targetType === binaryen.i64 ||
+      targetType === binaryen.f32 ||
+      targetType === binaryen.f64
+    ) {
+      return arg;
+    }
+    return lowerValueToMutableRefStorage({
+      value: arg,
+      typeId,
+      targetType,
+      ctx,
+    });
+  });
+  const call = callWriter({
+    name,
+    writer: () => writer,
+    args: loweredArgs,
+    state,
+    ctx,
+    fnCtx,
+  });
+  const type = binaryen.getExpressionType(call);
+  return type === binaryen.none || type === binaryen.unreachable
+    ? call
+    : ctx.mod.drop(call);
+};
+
+export const hostStreamWriterResultTypeId = ({
+  writerTypeId,
+  ctx,
+}: {
+  writerTypeId: TypeId;
+  ctx: CodegenContext;
+}): TypeId => {
+  const method = resolveWriterMethods({ writerTypeId, ctx }).get("end_array");
+  if (!method)
+    throw new Error("DataWriter implementation is missing end_array");
+  return method.resultTypeId;
 };
 
 const writeValue = ({
@@ -675,19 +788,40 @@ const callWriter = ({
 }): binaryen.ExpressionRef => {
   const method = state.methods.get(name);
   if (!method) throw new Error(`DataWriter implementation is missing ${name}`);
-  const receiver =
-    method.paramAbiKinds[0] === "mutable_ref"
-      ? lowerValueToMutableRefStorage({
-          value: writer(),
-          typeId: method.paramTypeIds[0]!,
-          targetType: method.paramTypes[method.firstUserParamIndex]!,
-          ctx,
-        })
-      : writer();
+  const receiver = lowerValueToMutableRefStorage({
+    value: writer(),
+    typeId: method.paramTypeIds[0]!,
+    targetType:
+      method.paramAbiTypes[0]?.[0] ??
+      method.paramTypes[method.firstUserParamIndex]!,
+    ctx,
+  });
   const actual = [receiver, ...args];
   const coerced = actual.map((arg, index) => {
     const targetTypeId = method.paramTypeIds[index];
     if (typeof targetTypeId !== "number") return arg;
+    const abiKind = method.paramAbiKinds[index];
+    const targetWasmType =
+      method.paramAbiTypes[index]?.[0] ??
+      method.paramTypes[method.firstUserParamIndex + index]!;
+    if (
+      index > 0 &&
+      (abiKind === "readonly_ref" ||
+        abiKind === "mutable_ref" ||
+        (targetWasmType !== binaryen.i32 &&
+          targetWasmType !== binaryen.i64 &&
+          targetWasmType !== binaryen.f32 &&
+          targetWasmType !== binaryen.f64 &&
+          targetWasmType !== binaryen.none &&
+          targetWasmType !== binaryen.getExpressionType(arg)))
+    ) {
+      return lowerValueToMutableRefStorage({
+        value: arg,
+        typeId: targetTypeId,
+        targetType: targetWasmType,
+        ctx,
+      });
+    }
     const actualTypeId =
       index === 0 && method.paramAbiKinds[0] !== "mutable_ref"
         ? state.writerTypeId

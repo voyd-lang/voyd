@@ -129,6 +129,15 @@ test "typed msgpack codecs enforce explicit resource limits":
     Err<MsgPackError>:
       void
 
+test "typed msgpack decode accepts compact integer encodings for float DTO fields":
+  let ~encoded = ByteBuffer::with_capacity(1)
+  encoded.push(10)
+  match(decode<f64>(encoded.as_bytes()))
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<f64> { value }:
+      assert(value, eq: 10.0)
+
 test "typed msgpack codecs stream recursive DTO values":
   let source = RecursiveCodecNode {
     value: 1,

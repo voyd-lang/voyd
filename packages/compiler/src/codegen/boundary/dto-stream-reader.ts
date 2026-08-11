@@ -58,6 +58,7 @@ type StreamReaderState = {
   rejectUnknownFields: binaryen.ExpressionRef;
   registry: Map<TypeId, BoundarySchema>;
   helpers: Map<TypeId, RecursiveReadHelper>;
+  trapOnError: boolean;
 };
 
 type RecursiveReadHelper = {
@@ -99,6 +100,7 @@ export const readDtoValueFromStream = ({
     rejectUnknownFields,
     registry: new Map(),
     helpers: new Map(),
+    trapOnError: false,
   };
   registerSchema({ schema, registry: state.registry });
   const readerLocal = allocateTempLocal(
@@ -124,6 +126,139 @@ export const readDtoValueFromStream = ({
     ],
     wasmTypeFor(resultTypeId, ctx),
   );
+};
+
+/** Reads one host-boundary DTO directly and traps on malformed provider input. */
+export const readDtoValueFromHostStream = ({
+  reader,
+  readerTypeId,
+  schema,
+  ctx,
+  fnCtx,
+}: {
+  reader: binaryen.ExpressionRef;
+  readerTypeId: TypeId;
+  schema: BoundarySchema;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const errorLabel = freshLabel("dto_host_stream_read_error");
+  const state: StreamReaderState = {
+    readerTypeId,
+    resultTypeId: schema.typeId,
+    rootTypeId: schema.typeId,
+    methods: resolveReaderMethods({ readerTypeId, ctx }),
+    errorLabel,
+    rejectUnknownFields: ctx.mod.i32.const(1),
+    registry: new Map(),
+    helpers: new Map(),
+    trapOnError: true,
+  };
+  registerSchema({ schema, registry: state.registry });
+  const readerLocal = allocateTempLocal(
+    wasmTypeFor(readerTypeId, ctx),
+    fnCtx,
+    readerTypeId,
+    ctx,
+  );
+  const value = readValue({
+    reader: () => loadLocalValue(readerLocal, ctx),
+    schema,
+    state,
+    ctx,
+    fnCtx,
+  });
+  return ctx.mod.block(
+    errorLabel,
+    [
+      storeLocalValue({ binding: readerLocal, value: reader, ctx, fnCtx }),
+      value,
+    ],
+    wasmTypeFor(schema.typeId, ctx),
+  );
+};
+
+/** Reads one provider-neutral framing value and traps on malformed input. */
+export const readHostStreamValue = ({
+  reader,
+  readerTypeId,
+  name,
+  args = [],
+  ctx,
+  fnCtx,
+}: {
+  reader: binaryen.ExpressionRef;
+  readerTypeId: TypeId;
+  name: string;
+  args?: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const methods = resolveReaderMethods({ readerTypeId, ctx });
+  const method = methods.get(name);
+  if (!method) throw new Error(`DataReader implementation is missing ${name}`);
+  const state: StreamReaderState = {
+    readerTypeId,
+    resultTypeId: method.resultTypeId,
+    rootTypeId: readerTypeId,
+    methods,
+    errorLabel: freshLabel("host_stream_reader_error"),
+    rejectUnknownFields: ctx.mod.i32.const(1),
+    registry: new Map(),
+    helpers: new Map(),
+    trapOnError: true,
+  };
+  return unwrapReaderResult({
+    call: callReader({
+      name,
+      reader: () => reader,
+      args,
+      state,
+      ctx,
+      fnCtx,
+    }),
+    state,
+    ctx,
+    fnCtx,
+  }).value;
+};
+
+/** Compares one provider name token without allocating a JavaScript-visible tree. */
+export const hostStreamNameMatches = ({
+  reader,
+  readerTypeId,
+  actual,
+  expected,
+  ctx,
+  fnCtx,
+}: {
+  reader: binaryen.ExpressionRef;
+  readerTypeId: TypeId;
+  actual: binaryen.ExpressionRef;
+  expected: string;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const methods = resolveReaderMethods({ readerTypeId, ctx });
+  const state: StreamReaderState = {
+    readerTypeId,
+    resultTypeId: readerTypeId,
+    rootTypeId: readerTypeId,
+    methods,
+    errorLabel: freshLabel("host_stream_name_error"),
+    rejectUnknownFields: ctx.mod.i32.const(1),
+    registry: new Map(),
+    helpers: new Map(),
+    trapOnError: true,
+  };
+  return callReader({
+    name: "matches_name",
+    reader: () => reader,
+    args: [actual, emitStringLiteral(expected, ctx)],
+    state,
+    ctx,
+    fnCtx,
+  }).expr;
 };
 
 const readValue = ({
@@ -1067,22 +1202,24 @@ const unwrapResultExpression = ({
             variant: { name: "Err", typeId: err, fields: [] },
             ctx,
           }),
-          ctx.mod.br(
-            state.errorLabel,
-            undefined,
-            makeRootResult({
-              member: "Err",
-              payload: errorValue,
-              payloadTypeId: requiredField(
-                requiredStructuralInfo(err, ctx).fieldMap,
-                "error",
-                err,
-              ).typeId,
-              state,
-              ctx,
-              fnCtx,
-            }),
-          ),
+          state.trapOnError
+            ? ctx.mod.unreachable()
+            : ctx.mod.br(
+                state.errorLabel,
+                undefined,
+                makeRootResult({
+                  member: "Err",
+                  payload: errorValue,
+                  payloadTypeId: requiredField(
+                    requiredStructuralInfo(err, ctx).fieldMap,
+                    "error",
+                    err,
+                  ).typeId,
+                  state,
+                  ctx,
+                  fnCtx,
+                }),
+              ),
         ),
         value,
       ],
@@ -1124,11 +1261,7 @@ const ensureRecursiveReadHelper = ({
   };
   state.helpers.set(schema.typeId, helper);
   const readerType = wasmTypeFor(state.readerTypeId, ctx);
-  const params = binaryen.createType([
-    readerType,
-    binaryen.i32,
-    holder.type,
-  ]);
+  const params = binaryen.createType([readerType, binaryen.i32, holder.type]);
   const locals: binaryen.Type[] = [];
   const fnCtx: FunctionContext = {
     bindings: new Map(),
@@ -1273,7 +1406,9 @@ const makeRootResult = ({
   const fieldValue =
     binaryen.getExpressionType(payload) === binaryen.none
       ? defaultWasmValue(
-          info.layoutKind === "value-object" ? field.wasmType : field.heapWasmType,
+          info.layoutKind === "value-object"
+            ? field.wasmType
+            : field.heapWasmType,
           ctx,
         )
       : lowerFieldValueForInit({
@@ -1408,7 +1543,7 @@ const callReader = ({
   args,
   state,
   ctx,
-  fnCtx,
+  fnCtx: _fnCtx,
 }: {
   name: string;
   reader: () => binaryen.ExpressionRef;
@@ -1418,23 +1553,47 @@ const callReader = ({
   fnCtx: FunctionContext;
 }): ReaderCall => {
   const method = requiredReaderMethod({ name, state });
-  const receiver =
-    method.paramAbiKinds[0] === "mutable_ref"
-      ? lowerValueToMutableRefStorage({
-          value: reader(),
-          typeId: method.paramTypeIds[0]!,
-          targetType: method.paramTypes[method.firstUserParamIndex]!,
-          ctx,
-        })
-      : coerceValueToType({
-          value: reader(),
-          actualType: state.readerTypeId,
-          targetType: method.paramTypeIds[0]!,
-          ctx,
-          fnCtx,
-        });
+  const receiver = lowerValueToMutableRefStorage({
+    value: reader(),
+    typeId: method.paramTypeIds[0]!,
+    targetType:
+      method.paramAbiTypes[0]?.[0] ??
+      method.paramTypes[method.firstUserParamIndex]!,
+    ctx,
+  });
+  const loweredArgs = args.map((arg, index) => {
+    const parameterIndex = index + 1;
+    const typeId = method.paramTypeIds[parameterIndex];
+    const abiKind = method.paramAbiKinds[parameterIndex];
+    const targetWasmType =
+      method.paramAbiTypes[parameterIndex]?.[0] ??
+      method.paramTypes[method.firstUserParamIndex + parameterIndex]!;
+    if (
+      typeof typeId === "number" &&
+      (abiKind === "readonly_ref" ||
+        abiKind === "mutable_ref" ||
+        (targetWasmType !== binaryen.i32 &&
+          targetWasmType !== binaryen.i64 &&
+          targetWasmType !== binaryen.f32 &&
+          targetWasmType !== binaryen.f64 &&
+          targetWasmType !== binaryen.none &&
+          targetWasmType !== binaryen.getExpressionType(arg)))
+    ) {
+      return lowerValueToMutableRefStorage({
+        value: arg,
+        typeId,
+        targetType: targetWasmType,
+        ctx,
+      });
+    }
+    return arg;
+  });
   return {
-    expr: ctx.mod.call(method.wasmName, [receiver, ...args], method.resultType),
+    expr: ctx.mod.call(
+      method.wasmName,
+      [receiver, ...loweredArgs],
+      method.resultType,
+    ),
     meta: method,
   };
 };

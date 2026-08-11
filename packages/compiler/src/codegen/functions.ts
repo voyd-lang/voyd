@@ -104,6 +104,7 @@ import {
   isCustomDtoFunctionReachable,
   markCustomDtoFunctionReachable as markCustomDtoBoundaryFunctionReachable,
 } from "./boundary/custom-dto-reachability.js";
+import { enqueueMsgPackProviderReachability } from "./host-transport/providers/msgpack.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -644,16 +645,16 @@ const collectReachableFunctionSymbols = ({
   }): void => {
     const signature = ctx.program.functions.getSignature(moduleId, symbol);
     if (!signature) return;
-    [...signature.parameters.map((parameter) => parameter.typeId), signature.returnType]
-      .forEach((typeId) => {
-        try {
-          enqueueCustomDtoPlan(
-            ctx.program.dtoPlans.get({ typeId, moduleId }),
-          );
-        } catch {
-          // Unsupported export types are handled by normal boundary diagnostics.
-        }
-      });
+    [
+      ...signature.parameters.map((parameter) => parameter.typeId),
+      signature.returnType,
+    ].forEach((typeId) => {
+      try {
+        enqueueCustomDtoPlan(ctx.program.dtoPlans.get({ typeId, moduleId }));
+      } catch {
+        // Unsupported export types are handled by normal boundary diagnostics.
+      }
+    });
   };
 
   const testScope = entryCtx.options.testScope ?? "all";
@@ -698,6 +699,9 @@ const collectReachableFunctionSymbols = ({
       );
     });
   });
+  if (resolveBoundaryExportOptions(entryCtx).mode !== "off") {
+    enqueueMsgPackProviderReachability({ ctx: entryCtx, enqueue });
+  }
   if (queue.length === 0) {
     entryCtx.module.hir.items.forEach((item) => {
       if (item.kind !== "function") {
@@ -808,7 +812,8 @@ const reachabilitySetOf = (ctx: CodegenContext): Set<ProgramSymbolId> => {
   if (state.symbols) {
     return state.symbols;
   }
-  const symbols = SHARED_REACHABILITY.get(ctx.mod) ?? new Set<ProgramSymbolId>();
+  const symbols =
+    SHARED_REACHABILITY.get(ctx.mod) ?? new Set<ProgramSymbolId>();
   SHARED_REACHABILITY.set(ctx.mod, symbols);
   state.symbols = symbols;
   return symbols;
@@ -926,10 +931,14 @@ const getReachableFunctionSymbols = ({
     return state.symbols;
   }
   if (ctx.optimization?.reachableFunctionSymbols) {
-    const symbols = reachabilitySetOf(ctx);
+    const symbols =
+      resolveBoundaryExportOptions(ctx).mode === "off"
+        ? reachabilitySetOf(ctx)
+        : collectReachableFunctionSymbols({ ctx, contexts, entryModuleId });
     ctx.optimization.reachableFunctionSymbols.forEach((symbol) =>
       symbols.add(symbol),
     );
+    state.symbols = symbols;
     return symbols;
   }
   const symbols = collectReachableFunctionSymbols({

@@ -1,4 +1,8 @@
 export const MSGPACK_HOST_TRANSPORT_CONTRACT_IDS = {
+  createReader: "voyd.std.host-transport.msgpack.create-reader",
+  readerComplete: "voyd.std.host-transport.msgpack.reader-complete",
+  createWriter: "voyd.std.host-transport.msgpack.create-writer",
+  finishWriter: "voyd.std.host-transport.msgpack.finish-writer",
   encodeValue: "voyd.std.host-transport.msgpack.encode-value",
   decodeValue: "voyd.std.host-transport.msgpack.decode-value",
   makeNull: "voyd.std.host-transport.msgpack.make-null",
@@ -122,7 +126,9 @@ export type CompilerContractSharedType =
   | "data-array"
   | "data-map"
   | "msgpack-array"
-  | "msgpack-map";
+  | "msgpack-map"
+  | "msgpack-reader"
+  | "msgpack-writer";
 
 /** Symbolic types are resolved relationally after typing, at feature use. */
 export type CompilerContractTypeSpec =
@@ -179,6 +185,8 @@ const type = {
   dataMap: shared("data-map"),
   array: shared("msgpack-array"),
   map: shared("msgpack-map"),
+  reader: shared("msgpack-reader"),
+  writer: shared("msgpack-writer"),
 } as const;
 
 const contract = (
@@ -203,6 +211,26 @@ const contract = (
 
 const msgpackHostTransportContractSpecs: readonly CompilerFunctionContractSpec[] =
   [
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader,
+      [type.i32, type.i32],
+      type.reader,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.readerComplete,
+      [type.reader],
+      type.bool,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createWriter,
+      [type.i32, type.i32],
+      type.writer,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.finishWriter,
+      [type.writer],
+      type.i32,
+    ),
     contract(
       MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.encodeValue,
       [type.msgpack, type.i32, type.i32],

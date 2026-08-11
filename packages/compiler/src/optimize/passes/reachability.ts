@@ -453,6 +453,50 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       SELECTED_HOST_TRANSPORT_CONTRACT_IDS.forEach(
         enqueueCompilerFunctionContract,
       );
+      const enqueueProviderTrait = ({
+        constructorContract,
+        traitName,
+      }: {
+        constructorContract: CompilerFunctionContractId;
+        traitName: string;
+      }): void => {
+        const constructor =
+          ctx.ir.baseProgram.symbols.resolveCompilerFunctionContract(
+            constructorContract,
+          );
+        if (typeof constructor !== "number") return;
+        const ref = ctx.ir.baseProgram.symbols.refOf(constructor);
+        const typeId = ctx.ir.baseProgram.functions.getSignature(
+          ref.moduleId,
+          ref.symbol,
+        )?.returnType;
+        if (typeof typeId !== "number") return;
+        const desc = ctx.ir.baseProgram.types.getTypeDesc(typeId);
+        const nominal =
+          desc.kind === "intersection" && desc.nominal !== undefined
+            ? desc.nominal
+            : (ctx.ir.baseProgram.types.getNominalOwner(typeId) ?? typeId);
+        const impl = ctx.ir.baseProgram.traits
+          .getImplsByNominal(nominal)
+          .find(
+            (candidate) =>
+              ctx.ir.baseProgram.symbols.getName(candidate.traitSymbol) ===
+              traitName,
+          );
+        impl?.methods.forEach(({ implMethod }) =>
+          enqueueKnownFunctionInstances(
+            ctx.ir.baseProgram.symbols.refOf(implMethod),
+          ),
+        );
+      };
+      enqueueProviderTrait({
+        constructorContract: "voyd.std.host-transport.msgpack.create-reader",
+        traitName: "DataReader",
+      });
+      enqueueProviderTrait({
+        constructorContract: "voyd.std.host-transport.msgpack.create-writer",
+        traitName: "DataWriter",
+      });
     };
 
     const enqueueDataDtoFunctions = (): void => {
@@ -543,7 +587,10 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
         moduleId,
         symbol,
       );
-      if (!signature || isPureSignature({ effectRow: signature.effectRow, ir: ctx.ir })) {
+      if (
+        !signature ||
+        isPureSignature({ effectRow: signature.effectRow, ir: ctx.ir })
+      ) {
         return;
       }
       const typeId = ctx.ir.baseProgram.types.instantiate(
