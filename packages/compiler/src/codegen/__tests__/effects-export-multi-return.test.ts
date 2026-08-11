@@ -48,7 +48,7 @@ describe("effectful exports with different return types", () => {
       entryName: "done_effectful",
       handlers,
     });
-    expect(done.value).toBeNull();
+    expect(done.value).toBeUndefined();
 
     const big = await runEffectfulExport<bigint>({
       wasm: module,

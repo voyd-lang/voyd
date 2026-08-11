@@ -401,44 +401,44 @@ const encodeRecord = ({
       withCycleCheck(
         { exportName, path, value: toCycleObject(value), ancestors },
         () => {
-      const record = toRecord({ exportName, path, value });
-      rejectUnknownRecordFields({
-        exportName,
-        path,
-        record,
-        fields,
-        allowVariantTag: tag !== undefined || allowVariantTag,
-      });
-      if (tag) {
-        const actualTag = record.tag ?? record.$variant;
-        if (actualTag !== tag) {
-          throw new Error(
-            `typed export ${exportName} ${path} expected variant tag ${tag}`,
-          );
-        }
-      }
-      return Object.fromEntries(
-        fields.flatMap((field) => {
-          const fieldValue = record[field.name];
-          if (field.optional && fieldValue === undefined) {
-            return [];
+          const record = toRecord({ exportName, path, value });
+          rejectUnknownRecordFields({
+            exportName,
+            path,
+            record,
+            fields,
+            allowVariantTag: tag !== undefined || allowVariantTag,
+          });
+          if (tag) {
+            const actualTag = record.tag ?? record.$variant;
+            if (actualTag !== tag) {
+              throw new Error(
+                `typed export ${exportName} ${path} expected variant tag ${tag}`,
+              );
+            }
           }
-          return [
-            [
-              field.name,
-              encodeBoundaryValue({
-                exportName,
-                schema: field.schema,
-                value: fieldValue,
-                path: `${path}.${field.name}`,
-                registry,
-                ancestors,
-                state,
-              }),
-            ],
-          ];
-        }),
-      );
+          return Object.fromEntries(
+            fields.flatMap((field) => {
+              const fieldValue = record[field.name];
+              if (field.optional && fieldValue === undefined) {
+                return [];
+              }
+              return [
+                [
+                  field.name,
+                  encodeBoundaryValue({
+                    exportName,
+                    schema: field.schema,
+                    value: fieldValue,
+                    path: `${path}.${field.name}`,
+                    registry,
+                    ancestors,
+                    state,
+                  }),
+                ],
+              ];
+            }),
+          );
         },
       ),
   );
@@ -528,6 +528,7 @@ const encodeUnion = ({
     throw variantTagError({ exportName, path, schema });
   }
   return {
+    $variant: tag,
     ...encodeRecord({
       exportName,
       fields: variant.fields,
@@ -538,7 +539,6 @@ const encodeUnion = ({
       state,
       allowVariantTag: true,
     }),
-    $variant: tag,
   };
 };
 

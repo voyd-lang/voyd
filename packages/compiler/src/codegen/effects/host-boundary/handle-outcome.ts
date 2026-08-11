@@ -17,16 +17,21 @@ import {
   deriveBoundarySchema,
   withDtoFingerprint,
 } from "../../boundary/schema.js";
-import { writeDtoValueToTree } from "../../boundary/dto-tree-codec.js";
+import {
+  hostStreamWriterResultTypeId,
+  writeDtoValueToHostStream,
+  writeHostStreamEvent,
+} from "../../boundary/dto-stream-writer.js";
 import { EFFECT_RESULT_STATUS } from "./constants.js";
-import { buildEffectRequestFrame } from "./effect-request.js";
+import { writeEffectRequestFrame } from "./effect-request.js";
 import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
 import {
-  makeSelectedCompletion,
   SELECTED_HOST_FRAME_TAG,
+  SELECTED_HOST_FRAME_VERSION,
 } from "../../host-transport/frame-codec.js";
+import { emitStringLiteral } from "../../expressions/primitives.js";
 
 export const HOST_COMPLETION_KIND = {
   export: 0,
@@ -51,6 +56,7 @@ export const createHandleOutcomeDynamic = ({
   stateFor(ctx, HANDLE_OUTCOME_DYNAMIC_KEY, () => {
     const provider = ensureSelectedHostTransportProvider(ctx);
     const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
+    const writerType = wasmTypeFor(provider.writerTypeId, ctx);
 
     const name = `${ctx.moduleLabel}__handle_outcome_dynamic`;
     const params = binaryen.createType([
@@ -65,7 +71,7 @@ export const createHandleOutcomeDynamic = ({
       binaryen.i32, // opIndexLocal
       binaryen.i32, // payloadLenLocal
       binaryen.eqref, // payloadLocal
-      provider.arrayWithCapacity.resultType, // arrayLocal
+      writerType, // writerLocal
     ];
     const outcomeLocal = 0;
     const bufPtrLocal = 1;
@@ -76,7 +82,7 @@ export const createHandleOutcomeDynamic = ({
     const opIndexLocal = 6;
     const payloadLenLocal = 7;
     const payloadLocal = 8;
-    const arrayLocal = 9;
+    const writerLocal = 9;
     const fnCtx: FunctionContext = {
       bindings: new Map(),
       tempLocals: new Map(),
@@ -141,63 +147,99 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.i32.const(0),
       );
 
-    const encodeTransportValueToBuffer = (
-      value: binaryen.ExpressionRef,
-    ): binaryen.ExpressionRef =>
-      ctx.mod.block(null, [
-        ctx.mod.local.set(
-          payloadLenLocal,
-          ctx.mod.call(
-            provider.encodeValue.wasmName,
-            [
-              value,
-              ctx.mod.local.get(bufPtrLocal, binaryen.i32),
-              ctx.mod.local.get(bufLenLocal, binaryen.i32),
-            ],
-            binaryen.i32,
-          ),
+    const writerRef = () => ctx.mod.local.get(writerLocal, writerType);
+    const beginWriter = () =>
+      ctx.mod.local.set(
+        writerLocal,
+        ctx.mod.call(
+          provider.createWriter.wasmName,
+          [
+            ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+            ctx.mod.local.get(bufLenLocal, binaryen.i32),
+          ],
+          provider.createWriter.resultType,
         ),
-      ]);
+      );
+    const finishWriter = () =>
+      ctx.mod.local.set(
+        payloadLenLocal,
+        ctx.mod.call(
+          provider.finishWriter.wasmName,
+          [writerRef()],
+          provider.finishWriter.resultType,
+        ),
+      );
+    const write = (
+      name: string,
+      args: readonly binaryen.ExpressionRef[] = [],
+    ) =>
+      writeHostStreamEvent({
+        writer: writerRef(),
+        writerTypeId: provider.writerTypeId,
+        name,
+        args,
+        ctx,
+        fnCtx,
+      });
+    const dtoWriteResultTypeId = hostStreamWriterResultTypeId({
+      writerTypeId: provider.writerTypeId,
+      ctx,
+    });
 
     const encodeCompletionToBuffer = ({
       value,
-      fingerprint,
+      schema,
     }: {
       value: binaryen.ExpressionRef;
-      fingerprint: string;
-    }): binaryen.ExpressionRef =>
-      encodeTransportValueToBuffer(
-        makeSelectedCompletion({
-          frameTag: ctx.mod.call(
-            provider.makeI32.wasmName,
-            [
-              ctx.mod.if(
-                ctx.mod.i32.eq(
-                  ctx.mod.local.get(completionKindLocal, binaryen.i32),
-                  ctx.mod.i32.const(HOST_COMPLETION_KIND.export),
-                ),
-                ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportCompletion),
-                ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.callbackCompletion),
-              ),
-            ],
-            providerValueType,
+      schema: ReturnType<typeof deriveBoundarySchema>;
+    }): binaryen.ExpressionRef => {
+      const fingerprint = withDtoFingerprint(schema).fingerprint!;
+      return ctx.mod.block(null, [
+        beginWriter(),
+        write("begin_array", [ctx.mod.i32.const(4)]),
+        write("write_i32", [ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION)]),
+        write("write_i32", [
+          ctx.mod.if(
+            ctx.mod.i32.eq(
+              ctx.mod.local.get(completionKindLocal, binaryen.i32),
+              ctx.mod.i32.const(HOST_COMPLETION_KIND.export),
+            ),
+            ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportCompletion),
+            ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.callbackCompletion),
           ),
-          identity: ctx.mod.call(
-            provider.makeI32.wasmName,
-            [ctx.mod.local.get(completionIdLocal, binaryen.i32)],
-            providerValueType,
-          ),
-          fingerprint,
-          value,
-          ctx,
-          fnCtx,
-          provider: provider,
-        }),
-      );
+        ]),
+        write("write_i32", [
+          ctx.mod.local.get(completionIdLocal, binaryen.i32),
+        ]),
+        write("begin_array", [ctx.mod.i32.const(2)]),
+        write("write_i32", [ctx.mod.i32.const(0)]),
+        write("begin_array", [ctx.mod.i32.const(2)]),
+        write("write_string", [emitStringLiteral(fingerprint, ctx)]),
+        ctx.mod.drop(
+          writeDtoValueToHostStream({
+            writer: writerRef,
+            writerTypeId: provider.writerTypeId,
+            value,
+            schema,
+            resultTypeId: dtoWriteResultTypeId,
+            ctx,
+            fnCtx,
+          }),
+        ),
+        write("end_array"),
+        write("end_array"),
+        write("end_array"),
+        finishWriter(),
+      ]);
+    };
 
-    const fingerprintFor = (typeId: number, label: string): string =>
-      withDtoFingerprint(deriveBoundarySchema({ typeId, ctx, label }))
-        .fingerprint!;
+    const schemaFor = (typeId: number, label: string) =>
+      deriveBoundarySchema({
+        typeId,
+        ctx,
+        label,
+        options: { tagStandaloneVariants: true, portableNames: true },
+      });
 
     const finishValue = (): binaryen.ExpressionRef =>
       ctx.mod.return(
@@ -219,11 +261,8 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.ref.is_null(ctx.mod.local.get(payloadLocal, binaryen.eqref)),
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
-            value: ctx.mod.call(provider.makeNull.wasmName, [], providerValueType),
-            fingerprint: fingerprintFor(
-              ctx.program.primitives.void,
-              "void completion",
-            ),
+            value: ctx.mod.nop(),
+            schema: schemaFor(ctx.program.primitives.void, "void completion"),
           }),
           finishValue(),
         ]),
@@ -236,22 +275,13 @@ export const createHandleOutcomeDynamic = ({
         }),
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
-            value: ctx.mod.call(
-              provider.makeBool.wasmName,
-              [
-                unboxOutcomeValue({
-                  payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
-                  valueType: binaryen.i32,
-                  typeId: ctx.program.primitives.bool,
-                  ctx,
-                }),
-              ],
-              providerValueType,
-            ),
-            fingerprint: fingerprintFor(
-              ctx.program.primitives.bool,
-              "bool completion",
-            ),
+            value: unboxOutcomeValue({
+              payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+              valueType: binaryen.i32,
+              typeId: ctx.program.primitives.bool,
+              ctx,
+            }),
+            schema: schemaFor(ctx.program.primitives.bool, "bool completion"),
           }),
           finishValue(),
         ]),
@@ -264,21 +294,12 @@ export const createHandleOutcomeDynamic = ({
         ),
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
-            value: ctx.mod.call(
-              provider.makeI32.wasmName,
-              [
-                unboxOutcomeValue({
-                  payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
-                  valueType: binaryen.i32,
-                  ctx,
-                }),
-              ],
-              providerValueType,
-            ),
-            fingerprint: fingerprintFor(
-              ctx.program.primitives.i32,
-              "i32 completion",
-            ),
+            value: unboxOutcomeValue({
+              payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+              valueType: binaryen.i32,
+              ctx,
+            }),
+            schema: schemaFor(ctx.program.primitives.i32, "i32 completion"),
           }),
           finishValue(),
         ]),
@@ -291,21 +312,12 @@ export const createHandleOutcomeDynamic = ({
         ),
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
-            value: ctx.mod.call(
-              provider.makeI64.wasmName,
-              [
-                unboxOutcomeValue({
-                  payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
-                  valueType: binaryen.i64,
-                  ctx,
-                }),
-              ],
-              providerValueType,
-            ),
-            fingerprint: fingerprintFor(
-              ctx.program.primitives.i64,
-              "i64 completion",
-            ),
+            value: unboxOutcomeValue({
+              payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+              valueType: binaryen.i64,
+              ctx,
+            }),
+            schema: schemaFor(ctx.program.primitives.i64, "i64 completion"),
           }),
           finishValue(),
         ]),
@@ -318,21 +330,12 @@ export const createHandleOutcomeDynamic = ({
         ),
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
-            value: ctx.mod.call(
-              provider.makeF32.wasmName,
-              [
-                unboxOutcomeValue({
-                  payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
-                  valueType: binaryen.f32,
-                  ctx,
-                }),
-              ],
-              providerValueType,
-            ),
-            fingerprint: fingerprintFor(
-              ctx.program.primitives.f32,
-              "f32 completion",
-            ),
+            value: unboxOutcomeValue({
+              payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+              valueType: binaryen.f32,
+              ctx,
+            }),
+            schema: schemaFor(ctx.program.primitives.f32, "f32 completion"),
           }),
           finishValue(),
         ]),
@@ -345,21 +348,12 @@ export const createHandleOutcomeDynamic = ({
         ),
         ctx.mod.block(null, [
           encodeCompletionToBuffer({
-            value: ctx.mod.call(
-              provider.makeF64.wasmName,
-              [
-                unboxOutcomeValue({
-                  payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
-                  valueType: binaryen.f64,
-                  ctx,
-                }),
-              ],
-              providerValueType,
-            ),
-            fingerprint: fingerprintFor(
-              ctx.program.primitives.f64,
-              "f64 completion",
-            ),
+            value: unboxOutcomeValue({
+              payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+              valueType: binaryen.f64,
+              ctx,
+            }),
+            schema: schemaFor(ctx.program.primitives.f64, "f64 completion"),
           }),
           finishValue(),
         ]),
@@ -392,22 +386,13 @@ export const createHandleOutcomeDynamic = ({
                 matchesBox,
                 ctx.mod.block(null, [
                   encodeCompletionToBuffer({
-                    value: writeDtoValueToTree({
-                      value: unboxOutcomeValue({
-                        payload: ctx.mod.local.get(
-                          payloadLocal,
-                          binaryen.eqref,
-                        ),
-                        valueType: box.valueType,
-                        typeId: box.typeId,
-                        ctx,
-                      }),
-                      schema,
+                    value: unboxOutcomeValue({
+                      payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                      valueType: box.valueType,
+                      typeId: box.typeId,
                       ctx,
-                      fnCtx,
-                      provider: provider,
                     }),
-                    fingerprint: withDtoFingerprint(schema).fingerprint!,
+                    schema,
                   }),
                   finishValue(),
                 ]),
@@ -428,19 +413,19 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.local.get(opIndexLocal, binaryen.i32),
         ctx.mod.i32.const(sig.opIndex),
       );
-      const requestFrame = buildEffectRequestFrame({
-        sig,
-        request: () =>
-          ctx.mod.local.get(requestLocal, runtime.effectRequestType),
-        provider: provider,
-        arrayLocal,
-        ctx,
-        runtime,
-        fnCtx,
-      });
-
       const effectOps = ctx.mod.block(null, [
-        encodeTransportValueToBuffer(requestFrame),
+        beginWriter(),
+        writeEffectRequestFrame({
+          sig,
+          request: () =>
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+          provider,
+          writer: writerRef,
+          ctx,
+          runtime,
+          fnCtx,
+        }),
+        finishWriter(),
         ctx.mod.return(
           runtime.makeEffectResult({
             status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.effect),
