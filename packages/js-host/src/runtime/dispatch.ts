@@ -79,7 +79,7 @@ const toError = (error: unknown): Error =>
 
 export type HostCompletionIdentity =
   | { kind: "export"; id: number; name?: string; schema?: BoundarySchema }
-  | { kind: "callback"; id: number };
+  | { kind: "callback"; id: number; name?: string; schema?: BoundarySchema };
 
 export const decodeHostCompletion = ({
   memory,

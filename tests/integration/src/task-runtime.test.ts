@@ -302,6 +302,21 @@ describe("integration: task runtime", () => {
     });
   });
 
+  it("encodes child end values with the child completion schema", async () => {
+    const { host, runtime } = await createTaskHost({ compiled });
+    const op = compiled.effects.findUniqueOpByLabelSuffix(
+      "TaskEndBoundary::stop",
+    );
+    host.registerHandler(op.effectId, op.opId, op.signatureHash, ({ end }) =>
+      end({ value: 23 }),
+    );
+
+    const outcome = host.run<number>("child_end_boundary_probe");
+    await drainRuntime(runtime);
+
+    await expect(outcome).resolves.toBe(23);
+  });
+
   it("cancels sleeping tasks and ignores their late completions", async () => {
     const { host, runtime } = await createTaskHost({ compiled });
     const outcome = host.run<number>("cancel_probe");

@@ -874,10 +874,7 @@ export const createVoydHost = async ({
       ...opts,
       ...(panic ? { panic } : {}),
     });
-    if (
-      isVoydRuntimeError(annotated) ||
-      (!opts?.effect && !opts?.transition)
-    ) {
+    if (isVoydRuntimeError(annotated) || (!opts?.effect && !opts?.transition)) {
       return annotated;
     }
     return trapDiagnostics.annotateBoundaryError(annotated, opts);
@@ -894,10 +891,11 @@ export const createVoydHost = async ({
     parsedTable.ops.map((op) => op.boundary);
   externalRequirements.functions.forEach((requirement) => {
     if (!requirement.effect) return;
-    const signatureHash = Number.parseInt(
-      requirement.effect.signatureHash.replace(/^0x/u, ""),
-      16,
-    ) >>> 0;
+    const signatureHash =
+      Number.parseInt(
+        requirement.effect.signatureHash.replace(/^0x/u, ""),
+        16,
+      ) >>> 0;
     const op = parsedTable.ops.find(
       (candidate) =>
         candidate.effectId === requirement.interfaceId &&
@@ -912,6 +910,9 @@ export const createVoydHost = async ({
   });
   const exportAbiByName = new Map(
     exportAbi.exports.map((entry) => [entry.name, entry] as const),
+  );
+  const taskCompletionByName = new Map(
+    exportAbi.taskCompletions.map((entry) => [entry.name, entry] as const),
   );
   const taskRuntimeImports = buildTaskRuntimeImportModule({
     importDescriptors: WebAssembly.Module.imports(module),
@@ -1283,7 +1284,9 @@ export const createVoydHost = async ({
       completionOverride ??
       (() => {
         if (!exportAbi) {
-          throw new Error(`effectful export ${entryName} is missing ABI metadata`);
+          throw new Error(
+            `effectful export ${entryName} is missing ABI metadata`,
+          );
         }
         return {
           kind: "export",
@@ -1559,6 +1562,7 @@ export const createVoydHost = async ({
       ownerId: number | null;
       detached: boolean;
       sourceFunctionName: string;
+      completion: HostCompletionIdentity;
       state: "ready" | "waiting" | "completing" | "terminal";
       starter?: () => unknown;
       pendingRawOutcome?: unknown;
@@ -1583,6 +1587,7 @@ export const createVoydHost = async ({
     const effectFramesByRequest = new Map<
       unknown,
       {
+        taskId: number;
         requestId: number;
         resultFingerprint: string;
         label: string;
@@ -1599,14 +1604,12 @@ export const createVoydHost = async ({
       if (!frame) {
         throw new Error("effect request is missing frame metadata");
       }
-      const completionFingerprint =
-        completion?.kind === "export"
-          ? completion.schema?.fingerprint
-          : undefined;
-      const encodedValue =
-        completion?.kind === "export" && completion.schema
+      effectFramesByRequest.delete(request);
+      const completionFingerprint = completion?.schema?.fingerprint;
+      const encodedValue = completion?.schema
         ? encodeBoundaryArgs({
-            exportName: completion.name ?? String(completion.id),
+            exportName:
+              completion.name ?? `${completion.kind} ${String(completion.id)}`,
             schemas: [completion.schema],
             args: [value],
           })[0]
@@ -1621,8 +1624,7 @@ export const createVoydHost = async ({
         outcome: {
           kind: "success",
           value: {
-            fingerprint:
-              completionFingerprint ?? frame.resultFingerprint,
+            fingerprint: completionFingerprint ?? frame.resultFingerprint,
             value: encodedValue,
           },
         },
@@ -1895,6 +1897,12 @@ export const createVoydHost = async ({
               ownerId: detached ? null : ownerId,
               detached,
               sourceFunctionName,
+              completion: {
+                kind: "callback",
+                id: taskId,
+                name: starterExportName,
+                schema: taskCompletionByName.get(starterExportName)?.result,
+              },
               state: "ready",
               starter: () =>
                 runWithActiveTask(
@@ -1988,6 +1996,7 @@ export const createVoydHost = async ({
           ownerId: null,
           detached: false,
           sourceFunctionName: entryName,
+          completion: rootCompletion,
           state: "ready",
           starter: () =>
             runWithActiveTask(
@@ -2168,12 +2177,7 @@ export const createVoydHost = async ({
             try {
               return {
                 ...completion,
-                value: decodeRawOutcome(
-                  completion.rawOutcome,
-                  task.id === state.rootTaskId
-                    ? rootCompletion
-                    : { kind: "callback", id: task.id },
-                ),
+                value: decodeRawOutcome(completion.rawOutcome, task.completion),
                 observed: false,
               };
             } catch (error) {
@@ -2287,6 +2291,11 @@ export const createVoydHost = async ({
             taskId: number,
             completion: TaskCompletion,
           ): void => {
+            effectFramesByRequest.forEach((frame, request) => {
+              if (frame.taskId === taskId) {
+                effectFramesByRequest.delete(request);
+              }
+            });
             const current = state.tasks.get(taskId);
             if (
               !current ||
@@ -2400,10 +2409,12 @@ export const createVoydHost = async ({
                 error: new Error(message),
                 message,
               });
+              effectFramesByRequest.delete(request);
               return;
             }
             const current = state.tasks.get(taskId);
             if (!current || current.state === "terminal") {
+              effectFramesByRequest.delete(request);
               return;
             }
             try {
@@ -2413,14 +2424,12 @@ export const createVoydHost = async ({
                   activeTaskId: taskId,
                 }),
                 () => {
-                  const completion =
-                    taskId === state.rootTaskId
-                      ? rootCompletion
-                      : ({ kind: "callback", id: taskId } as const);
                   const length = encodeToBuffer(
                     request,
                     handlerResult.value,
-                    handlerResult.kind === "end" ? completion : undefined,
+                    handlerResult.kind === "end"
+                      ? current.completion
+                      : undefined,
                   );
                   return handlerResult.kind === "end"
                     ? endRequestRaw(request, bufferPtr, length)
@@ -2448,6 +2457,8 @@ export const createVoydHost = async ({
                 error: normalized,
                 message: taskFailureMessage(normalized),
               });
+            } finally {
+              effectFramesByRequest.delete(request);
             }
           };
 
@@ -2511,6 +2522,7 @@ export const createVoydHost = async ({
               );
             }
             effectFramesByRequest.set(request, {
+              taskId: nextTaskId,
               requestId: frame.requestId,
               resultFingerprint: frame.resultFingerprint,
               label: framedOp.label,
@@ -2779,7 +2791,12 @@ export const createVoydHost = async ({
       starterExportName,
       [],
       () => starter(...workArgs),
-      { kind: "callback", id: taskId },
+      {
+        kind: "callback",
+        id: taskId,
+        name: starterExportName,
+        schema: taskCompletionByName.get(starterExportName)?.result,
+      },
     );
     const entry: StandaloneTaskEntry = { outcome: run.outcome };
     standaloneTaskRuns.set(taskId, entry);
@@ -2923,7 +2940,18 @@ export const createVoydHost = async ({
         host: {
           table,
           registerHandler,
-          encodedPayloadSize: transport.encodedPayloadSize,
+          encodedPayloadSize: (value) =>
+            transport.encodeFrame({
+              kind: "effect-outcome",
+              requestId: 0x7fffffff,
+              outcome: {
+                kind: "success",
+                value: {
+                  fingerprint: "f".repeat(64),
+                  value,
+                },
+              },
+            }).length,
         },
         options: {
           ...options,

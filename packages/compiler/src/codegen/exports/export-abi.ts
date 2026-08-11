@@ -23,12 +23,19 @@ export type ExportAbiEntry =
       result?: BoundarySchema;
     };
 
+export type TaskCompletionAbiEntry = {
+  name: string;
+  result: BoundarySchema;
+};
+
 export const emitExportAbiSection = ({
   mod,
   entries,
+  taskCompletions = [],
 }: {
   mod: binaryen.Module;
   entries: readonly ExportAbiEntry[];
+  taskCompletions?: readonly TaskCompletionAbiEntry[];
 }): void => {
   const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
   const ids = new Set(sorted.map((entry) => entry.id));
@@ -41,6 +48,9 @@ export const emitExportAbiSection = ({
     dtoSchemaAbi: DTO_SCHEMA_ABI_VERSION,
     transport: SELECTED_HOST_TRANSPORT_IDENTITY,
     exports: sorted,
+    taskCompletions: [...taskCompletions].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    ),
   });
   const bytes = new TextEncoder().encode(payload);
   mod.addCustomSection(EXPORT_ABI_SECTION, bytes);

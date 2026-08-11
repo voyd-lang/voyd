@@ -54,6 +54,12 @@ export type VoydBoundarySchema = (
       name?: string;
       variants: readonly VoydBoundaryVariantSchema[];
     }
+  | {
+      kind: "custom";
+      typeId: number;
+      representationTypeId: number;
+      representation: VoydBoundarySchema;
+    }
   | { kind: "ref"; typeId: number }
 ) & { fingerprint?: string };
 

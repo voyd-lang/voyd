@@ -147,6 +147,13 @@ interface EmitFloatUnaryIntrinsicParams {
 const TASK_IMPORT_MODULE = "voyd.task";
 const TASK_IMPORTS_KEY = Symbol("voyd.task.imports");
 const TASK_STARTERS_KEY = Symbol("voyd.task.starters");
+export const TASK_STARTER_BOUNDARIES_KEY = Symbol(
+  "voyd.task.starterBoundaries",
+);
+export type TaskStarterBoundary = {
+  name: string;
+  resultTypeId: TypeId;
+};
 const CALLBACK_IMPORT_MODULE = "voyd.callback";
 const CALLBACK_IMPORTS_KEY = Symbol("voyd.callback.imports");
 const CALLBACK_HELPERS_KEY = Symbol("voyd.callback.helpers");
@@ -441,6 +448,12 @@ const ensureTaskStarterHelper = ({
   if (ctx.programHelpers.registerExportName(exportName)) {
     ctx.mod.addFunctionExport(exportName, exportName);
   }
+  ctx.programHelpers
+    .getHelperState(
+      TASK_STARTER_BOUNDARIES_KEY,
+      () => new Map<string, TaskStarterBoundary>(),
+    )
+    .set(exportName, { name: exportName, resultTypeId: desc.returnType });
   starters.set(closureTypeId, exportName);
   return exportName;
 };

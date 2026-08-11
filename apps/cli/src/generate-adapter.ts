@@ -1,9 +1,7 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type {
-  ExternalFunctionRequirement,
-} from "@voyd-lang/sdk/js-host";
+import type { ExternalFunctionRequirement } from "@voyd-lang/sdk/js-host";
 import type {
   VoydDtoSchema,
   VoydExternalFunctionContract,
@@ -100,10 +98,12 @@ export const generateAdapterRegistry = async ({
   pkgDirs?: readonly string[];
 }): Promise<void> => {
   const entryPath = resolveApplicationEntry(index);
-  const [{ createSdk, findVoydPackageAdapterSpecifiers }, { parseExternalRequirements }] =
-    await Promise.all([
-      import("@voyd-lang/sdk"),
-      import("@voyd-lang/sdk/js-host"),
+  const [
+    { createSdk, findVoydPackageAdapterSpecifiers },
+    { parseExternalRequirements },
+  ] = await Promise.all([
+    import("@voyd-lang/sdk"),
+    import("@voyd-lang/sdk/js-host"),
   ]);
   const roots = await adapterModuleRoots({ entryPath, pkgDirs });
   const result = await createSdk({ compilerCache: "none" }).compile({
@@ -125,7 +125,10 @@ export const generateAdapterRegistry = async ({
   const target = resolve(outPath);
   await mkdir(dirname(target), { recursive: true });
   const imports = specifiers
-    .map((specifier, index) => `import adapter${index} from ${JSON.stringify(specifier)};`)
+    .map(
+      (specifier, index) =>
+        `import adapter${index} from ${JSON.stringify(specifier)};`,
+    )
     .join("\n");
   const values = specifiers.map((_, index) => `adapter${index}`).join(", ");
   await writeFile(
@@ -151,7 +154,8 @@ const resolvePackageEntries = async (index: string): Promise<string[]> => {
 
 const resolveApplicationEntry = (index: string): string => {
   const resolved = resolve(index);
-  if (!existsSync(resolved) || !statSync(resolved).isDirectory()) return resolved;
+  if (!existsSync(resolved) || !statSync(resolved).isDirectory())
+    return resolved;
   const main = join(resolved, "main.voyd");
   if (existsSync(main)) return main;
   const nestedMain = join(resolved, "src", "main.voyd");
@@ -168,7 +172,9 @@ const findExternalSourceFiles = async (root: string): Promise<string[]> => {
         const path = join(root, entry.name);
         if (entry.isDirectory()) return findExternalSourceFiles(path);
         if (!entry.isFile() || !entry.name.endsWith(".voyd")) return [];
-        return (await readFile(path, "utf8")).includes("@external") ? [path] : [];
+        return (await readFile(path, "utf8")).includes("@external")
+          ? [path]
+          : [];
       }),
   );
   return nested.flat().sort();
@@ -181,7 +187,10 @@ const dedupeRequirements = (
   functions.forEach((fn) => {
     const key = `${fn.interfaceId}::${fn.functionName}`;
     const existing = byKey.get(key);
-    if (existing && canonicalRequirement(existing) !== canonicalRequirement(fn)) {
+    if (
+      existing &&
+      canonicalRequirement(existing) !== canonicalRequirement(fn)
+    ) {
       throw new Error(`Conflicting external function declarations for ${key}`);
     }
     byKey.set(key, fn);
@@ -193,9 +202,8 @@ const dedupeRequirements = (
   );
 };
 
-const canonicalRequirement = (
-  requirement: PortableRequirement,
-): string => JSON.stringify(requirement);
+const canonicalRequirement = (requirement: PortableRequirement): string =>
+  JSON.stringify(requirement);
 
 const assertNoTagDiscriminatorCollision = (schema: VoydDtoSchema): void => {
   if (schema.kind === "array") {
@@ -208,7 +216,9 @@ const assertNoTagDiscriminatorCollision = (schema: VoydDtoSchema): void => {
         'Variant payload fields named "tag" conflict with the adapter discriminator',
       );
     }
-    schema.fields.forEach((field) => assertNoTagDiscriminatorCollision(field.schema));
+    schema.fields.forEach((field) =>
+      assertNoTagDiscriminatorCollision(field.schema),
+    );
     return;
   }
   if (schema.kind === "union") {
@@ -218,7 +228,9 @@ const assertNoTagDiscriminatorCollision = (schema: VoydDtoSchema): void => {
           `Variant ${JSON.stringify(variant.name)} payload field "tag" conflicts with the adapter discriminator`,
         );
       }
-      variant.fields.forEach((field) => assertNoTagDiscriminatorCollision(field.schema));
+      variant.fields.forEach((field) =>
+        assertNoTagDiscriminatorCollision(field.schema),
+      );
     });
   }
 };
@@ -231,48 +243,67 @@ const toPortableRequirements = (
     if (schema.kind === "ref") return;
     if (schema.typeId !== undefined) {
       schemas.set(schema.typeId, schema);
-      if (schema.kind === "array" || schema.kind === "record" || schema.kind === "union") {
+      if (
+        schema.kind === "array" ||
+        schema.kind === "record" ||
+        schema.kind === "union"
+      ) {
         schema.aliases?.forEach((alias) => schemas.set(alias, schema));
       }
     }
     if (schema.kind === "array") register(schema.element);
-    if (schema.kind === "record") schema.fields.forEach((field) => register(field.schema));
+    if (schema.kind === "record")
+      schema.fields.forEach((field) => register(field.schema));
     if (schema.kind === "union") {
-      schema.variants.forEach((variant) => variant.fields.forEach((field) => register(field.schema)));
+      schema.variants.forEach((variant) =>
+        variant.fields.forEach((field) => register(field.schema)),
+      );
     }
+    if (schema.kind === "custom") register(schema.representation);
   };
   functions.forEach((fn) => [...fn.params, fn.result].forEach(register));
 
-  const portable = (schema: VoydBoundarySchema, active = new Set<number>()): VoydDtoSchema => {
+  const portable = (
+    schema: VoydBoundarySchema,
+    active = new Set<number>(),
+  ): VoydDtoSchema => {
     if (schema.kind === "ref") {
       const target = schemas.get(schema.typeId);
-      if (!target) throw new Error(`External DTO references unknown compiler type ${schema.typeId}`);
+      if (!target)
+        throw new Error(
+          `External DTO references unknown compiler type ${schema.typeId}`,
+        );
       if (active.has(schema.typeId)) {
         throw new Error("Recursive external DTOs are not supported");
       }
       return portable(target, new Set(active).add(schema.typeId));
     }
-    if (schema.kind === "array") return { kind: "array", element: portable(schema.element, active) };
-    if (schema.kind === "record") return {
-      kind: "record",
-      ...(schema.tag ? { tag: schema.tag } : {}),
-      fields: schema.fields.map((field) => ({
-        name: field.name,
-        ...(field.optional ? { optional: true } : {}),
-        schema: portable(field.schema, active),
-      })),
-    };
-    if (schema.kind === "union") return {
-      kind: "union",
-      variants: schema.variants.map((variant) => ({
-        name: variant.name,
-        fields: variant.fields.map((field) => ({
+    if (schema.kind === "array")
+      return { kind: "array", element: portable(schema.element, active) };
+    if (schema.kind === "record")
+      return {
+        kind: "record",
+        ...(schema.tag ? { tag: schema.tag } : {}),
+        fields: schema.fields.map((field) => ({
           name: field.name,
           ...(field.optional ? { optional: true } : {}),
           schema: portable(field.schema, active),
         })),
-      })),
-    };
+      };
+    if (schema.kind === "union")
+      return {
+        kind: "union",
+        variants: schema.variants.map((variant) => ({
+          name: variant.name,
+          fields: variant.fields.map((field) => ({
+            name: field.name,
+            ...(field.optional ? { optional: true } : {}),
+            schema: portable(field.schema, active),
+          })),
+        })),
+      };
+    if (schema.kind === "custom")
+      return portable(schema.representation, active);
     return { kind: schema.kind };
   };
   return functions.map((fn) => ({
@@ -337,9 +368,7 @@ const renderContractTs = (contract: {
 export const contract = ${JSON.stringify(contract, null, 2)} as const satisfies VoydPackageAdapterContract;
 `;
 
-const renderAdapterTs = (
-  functions: readonly PortableRequirement[],
-): string => {
+const renderAdapterTs = (functions: readonly PortableRequirement[]): string => {
   const interfaces = groupBy(functions, (fn) => fn.interfaceId);
   const implementation = [...interfaces.entries()]
     .map(([interfaceId, entries]) => {
@@ -368,21 +397,33 @@ export const defineAdapter = (implementation: AdapterImplementation) =>
 `;
 };
 
-const typescriptType = (
-  schema: VoydDtoSchema,
-): string => {
+const typescriptType = (schema: VoydDtoSchema): string => {
   switch (schema.kind) {
-    case "bool": return "boolean";
-    case "i32": case "f32": case "f64": return "number";
-    case "i64": return "bigint | number";
-    case "void": return "void";
-    case "string": return "string";
-    case "bytes": return "Uint8Array";
-    case "array": return `readonly ${typescriptType(schema.element)}[]`;
+    case "bool":
+      return "boolean";
+    case "i32":
+    case "f32":
+    case "f64":
+      return "number";
+    case "i64":
+      return "bigint | number";
+    case "void":
+      return "void";
+    case "string":
+      return "string";
+    case "bytes":
+      return "Uint8Array";
+    case "array":
+      return `readonly ${typescriptType(schema.element)}[]`;
     case "record":
       return `{ ${schema.tag ? `tag: ${JSON.stringify(schema.tag)}; ` : ""}${schema.fields.map((field) => `${JSON.stringify(field.name)}${field.optional ? "?" : ""}: ${typescriptType(field.schema)}`).join("; ")} }`;
     case "union":
-      return schema.variants.map((variant) => `{ tag: ${JSON.stringify(variant.name)}; ${variant.fields.map((field) => `${JSON.stringify(field.name)}${field.optional ? "?" : ""}: ${typescriptType(field.schema)}`).join("; ")} }`).join(" | ");
+      return schema.variants
+        .map(
+          (variant) =>
+            `{ tag: ${JSON.stringify(variant.name)}; ${variant.fields.map((field) => `${JSON.stringify(field.name)}${field.optional ? "?" : ""}: ${typescriptType(field.schema)}`).join("; ")} }`,
+        )
+        .join(" | ");
   }
 };
 
@@ -390,10 +431,15 @@ const renderWitDocuments = (
   functions: readonly PortableRequirement[],
 ): Array<{ fileName: string; content: string }> => {
   assertUniqueWitNames(
-    [...new Set(functions.map(({ interfaceId }) => interfaceId))].map((interfaceId) => {
-      const parsed = parseWitInterfaceId(interfaceId);
-      return { source: interfaceId, normalized: `${parsed.packageId}/${parsed.interfaceName}` };
-    }),
+    [...new Set(functions.map(({ interfaceId }) => interfaceId))].map(
+      (interfaceId) => {
+        const parsed = parseWitInterfaceId(interfaceId);
+        return {
+          source: interfaceId,
+          normalized: `${parsed.packageId}/${parsed.interfaceName}`,
+        };
+      },
+    ),
     "external interfaces",
   );
   const interfaces = groupBy(functions, (fn) => fn.interfaceId);
@@ -401,40 +447,53 @@ const renderWitDocuments = (
     [...interfaces.entries()],
     ([interfaceId]) => parseWitInterfaceId(interfaceId).packageId,
   );
-  return [...byPackage.entries()].map(([packageId, packageInterfaces], packageIndex) => {
-    const body = packageInterfaces
-    .map(([interfaceId, entries]) => {
-      const name = parseWitInterfaceId(interfaceId).interfaceName;
-      assertUniqueWitNames(
-        entries.map(({ functionName }) => ({
-          source: functionName,
-          normalized: witIdentifier(functionName),
-        })),
-        `functions in ${interfaceId}`,
-      );
-      const renderer = createWitRenderer(entries);
-      const methods = entries.map((fn) => {
-        const params = fn.params.map((schema, index) => `arg${index}: ${renderer.type(schema)}`).join(", ");
-        const result = fn.result.kind === "void" ? "" : ` -> ${renderer.type(fn.result)}`;
-        return `  ${witIdentifier(fn.functionName)}: func(${params})${result};`;
-      }).join("\n");
-      const declarations = renderer.declarations();
-      return `interface ${name} {\n${declarations}${declarations ? "\n\n" : ""}${methods}\n}`;
-    })
-    .join("\n\n");
-    return {
-      fileName: packageIndex === 0
-        ? "interface.wit"
-        : `interface-${witIdentifier(packageId)}.wit`,
-      content: `package ${packageId};\n\n${body}\n`,
-    };
-  });
+  return [...byPackage.entries()].map(
+    ([packageId, packageInterfaces], packageIndex) => {
+      const body = packageInterfaces
+        .map(([interfaceId, entries]) => {
+          const name = parseWitInterfaceId(interfaceId).interfaceName;
+          assertUniqueWitNames(
+            entries.map(({ functionName }) => ({
+              source: functionName,
+              normalized: witIdentifier(functionName),
+            })),
+            `functions in ${interfaceId}`,
+          );
+          const renderer = createWitRenderer(entries);
+          const methods = entries
+            .map((fn) => {
+              const params = fn.params
+                .map((schema, index) => `arg${index}: ${renderer.type(schema)}`)
+                .join(", ");
+              const result =
+                fn.result.kind === "void"
+                  ? ""
+                  : ` -> ${renderer.type(fn.result)}`;
+              return `  ${witIdentifier(fn.functionName)}: func(${params})${result};`;
+            })
+            .join("\n");
+          const declarations = renderer.declarations();
+          return `interface ${name} {\n${declarations}${declarations ? "\n\n" : ""}${methods}\n}`;
+        })
+        .join("\n\n");
+      return {
+        fileName:
+          packageIndex === 0
+            ? "interface.wit"
+            : `interface-${witIdentifier(packageId)}.wit`,
+        content: `package ${packageId};\n\n${body}\n`,
+      };
+    },
+  );
 };
 
 const parseWitInterfaceId = (
   interfaceId: string,
 ): { packageId: string; interfaceName: string } => {
-  const match = /^([a-zA-Z][a-zA-Z0-9-]*):([a-zA-Z][a-zA-Z0-9-]*)\/([a-zA-Z][a-zA-Z0-9-]*)@(\d+(?:\.\d+){0,2})$/.exec(interfaceId);
+  const match =
+    /^([a-zA-Z][a-zA-Z0-9-]*):([a-zA-Z][a-zA-Z0-9-]*)\/([a-zA-Z][a-zA-Z0-9-]*)@(\d+(?:\.\d+){0,2})$/.exec(
+      interfaceId,
+    );
   if (!match) {
     throw new Error(
       `External interface ID ${interfaceId} must use namespace:package/interface@version for WIT generation`,
@@ -463,85 +522,126 @@ const createWitRenderer = (functions: readonly PortableRequirement[]) => {
     return name;
   };
   const register = (schema: VoydDtoSchema): void => {
-    if (schema.kind === "array" || schema.kind === "record" || schema.kind === "union") nameFor(schema);
+    if (
+      schema.kind === "array" ||
+      schema.kind === "record" ||
+      schema.kind === "union"
+    )
+      nameFor(schema);
     if (schema.kind === "array") register(schema.element);
-    if (schema.kind === "record") schema.fields.forEach((field) => register(field.schema));
-    if (schema.kind === "union") schema.variants.forEach((variant) => variant.fields.forEach((field) => register(field.schema)));
+    if (schema.kind === "record")
+      schema.fields.forEach((field) => register(field.schema));
+    if (schema.kind === "union")
+      schema.variants.forEach((variant) =>
+        variant.fields.forEach((field) => register(field.schema)),
+      );
   };
   functions.forEach((fn) => [...fn.params, fn.result].forEach(register));
   const inlineType = (schema: VoydDtoSchema, declaration = false): string => {
-    if (!declaration && (schema.kind === "array" || schema.kind === "record" || schema.kind === "union")) {
+    if (
+      !declaration &&
+      (schema.kind === "array" ||
+        schema.kind === "record" ||
+        schema.kind === "union")
+    ) {
       return nameFor(schema);
     }
     switch (schema.kind) {
-      case "bool": return "bool";
-      case "i32": return "s32";
-      case "i64": return "s64";
-      case "f32": return "float32";
-      case "f64": return "float64";
-      case "string": return "string";
-      case "bytes": return "list<u8>";
-      case "void": return "tuple<>";
-      case "array": return `list<${inlineType(schema.element)}>`;
-      case "record": return nameFor(schema);
-      case "union": return nameFor(schema);
+      case "bool":
+        return "bool";
+      case "i32":
+        return "s32";
+      case "i64":
+        return "s64";
+      case "f32":
+        return "float32";
+      case "f64":
+        return "float64";
+      case "string":
+        return "string";
+      case "bytes":
+        return "list<u8>";
+      case "void":
+        return "tuple<>";
+      case "array":
+        return `list<${inlineType(schema.element)}>`;
+      case "record":
+        return nameFor(schema);
+      case "union":
+        return nameFor(schema);
     }
   };
-  const declarations = (): string => [...schemas.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .flatMap(([name, schema]) => {
-      if (schema.kind === "array") return [`  type ${name} = ${inlineType(schema, true)};`];
-      if (schema.kind === "record") {
-        assertUniqueWitNames(
-          [
-            ...(schema.tag ? [{ source: "generated tag", normalized: witIdentifier("tag") }] : []),
-            ...schema.fields.map((field) => ({
-              source: field.name,
-              normalized: witIdentifier(field.name),
-            })),
-          ],
-          `fields in WIT record ${name}`,
-        );
-        const fields = [
-          ...(schema.tag ? ["    tag: string,"] : []),
-          ...schema.fields.map((field) =>
-          `    ${witIdentifier(field.name)}: ${field.optional ? `option<${inlineType(field.schema)}>` : inlineType(field.schema)},`
-          ),
-        ].join("\n");
-        return [`  record ${name} {\n${fields}\n  }`];
-      }
-      if (schema.kind === "union") {
-        assertUniqueWitNames(
-          schema.variants.map((variant) => ({
-            source: variant.name,
-            normalized: witIdentifier(variant.name),
-          })),
-          `variants in WIT type ${name}`,
-        );
-        const payloadRecords: string[] = [];
-        const variants = schema.variants.map((variant) => {
-          if (variant.fields.length === 0) return `    ${witIdentifier(variant.name)},`;
-          const payloadName = witIdentifier(
-            `${name}-${normalizeWitIdentifier(variant.name)}-payload`,
-          );
+  const declarations = (): string =>
+    [...schemas.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .flatMap(([name, schema]) => {
+        if (schema.kind === "array")
+          return [`  type ${name} = ${inlineType(schema, true)};`];
+        if (schema.kind === "record") {
           assertUniqueWitNames(
-            variant.fields.map((field) => ({
-              source: field.name,
-              normalized: witIdentifier(field.name),
-            })),
-            `fields in WIT variant ${variant.name}`,
+            [
+              ...(schema.tag
+                ? [
+                    {
+                      source: "generated tag",
+                      normalized: witIdentifier("tag"),
+                    },
+                  ]
+                : []),
+              ...schema.fields.map((field) => ({
+                source: field.name,
+                normalized: witIdentifier(field.name),
+              })),
+            ],
+            `fields in WIT record ${name}`,
           );
-          const fields = variant.fields.map((field) =>
-            `    ${witIdentifier(field.name)}: ${field.optional ? `option<${inlineType(field.schema)}>` : inlineType(field.schema)},`
-          ).join("\n");
-          payloadRecords.push(`  record ${payloadName} {\n${fields}\n  }`);
-          return `    ${witIdentifier(variant.name)}(${payloadName}),`;
-        }).join("\n");
-        return [...payloadRecords, `  variant ${name} {\n${variants}\n  }`];
-      }
-      return [];
-    })
-    .join("\n");
+          const fields = [
+            ...(schema.tag ? ["    tag: string,"] : []),
+            ...schema.fields.map(
+              (field) =>
+                `    ${witIdentifier(field.name)}: ${field.optional ? `option<${inlineType(field.schema)}>` : inlineType(field.schema)},`,
+            ),
+          ].join("\n");
+          return [`  record ${name} {\n${fields}\n  }`];
+        }
+        if (schema.kind === "union") {
+          assertUniqueWitNames(
+            schema.variants.map((variant) => ({
+              source: variant.name,
+              normalized: witIdentifier(variant.name),
+            })),
+            `variants in WIT type ${name}`,
+          );
+          const payloadRecords: string[] = [];
+          const variants = schema.variants
+            .map((variant) => {
+              if (variant.fields.length === 0)
+                return `    ${witIdentifier(variant.name)},`;
+              const payloadName = witIdentifier(
+                `${name}-${normalizeWitIdentifier(variant.name)}-payload`,
+              );
+              assertUniqueWitNames(
+                variant.fields.map((field) => ({
+                  source: field.name,
+                  normalized: witIdentifier(field.name),
+                })),
+                `fields in WIT variant ${variant.name}`,
+              );
+              const fields = variant.fields
+                .map(
+                  (field) =>
+                    `    ${witIdentifier(field.name)}: ${field.optional ? `option<${inlineType(field.schema)}>` : inlineType(field.schema)},`,
+                )
+                .join("\n");
+              payloadRecords.push(`  record ${payloadName} {\n${fields}\n  }`);
+              return `    ${witIdentifier(variant.name)}(${payloadName}),`;
+            })
+            .join("\n");
+          return [...payloadRecords, `  variant ${name} {\n${variants}\n  }`];
+        }
+        return [];
+      })
+      .join("\n");
   return { type: (schema: VoydDtoSchema) => inlineType(schema), declarations };
 };
 
@@ -560,7 +660,10 @@ const witIdentifier = (value: string): string =>
   escapeWitKeyword(normalizeWitIdentifier(value));
 
 const normalizeWitIdentifier = (value: string): string =>
-  value.replace(/_/g, "-").replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
+  value
+    .replace(/_/g, "-")
+    .replace(/[^a-zA-Z0-9-]/g, "-")
+    .toLowerCase();
 
 const assertUniqueWitNames = (
   names: readonly { source: string; normalized: string }[],
@@ -579,10 +682,33 @@ const assertUniqueWitNames = (
 };
 
 const WIT_KEYWORDS = new Set([
-  "as", "borrow", "constructor", "enum", "export", "flags", "func",
-  "future", "import", "include", "interface", "list", "option", "own",
-  "package", "record", "resource", "result", "static", "stream", "tuple",
-  "type", "union", "use", "variant", "with", "world",
+  "as",
+  "borrow",
+  "constructor",
+  "enum",
+  "export",
+  "flags",
+  "func",
+  "future",
+  "import",
+  "include",
+  "interface",
+  "list",
+  "option",
+  "own",
+  "package",
+  "record",
+  "resource",
+  "result",
+  "static",
+  "stream",
+  "tuple",
+  "type",
+  "union",
+  "use",
+  "variant",
+  "with",
+  "world",
 ]);
 
 const escapeWitKeyword = (value: string): string =>

@@ -88,6 +88,7 @@ export type ParsedExportAbi = {
   version: number;
   host?: HostTransportMetadata;
   exports: ExportAbiEntry[];
+  taskCompletions: Array<{ name: string; result: BoundarySchema }>;
 };
 
 export const EXPORT_ABI_SECTION = "voyd.export_abi";
@@ -98,7 +99,7 @@ export const parseExportAbi = (
 ): ParsedExportAbi => {
   const sections = WebAssembly.Module.customSections(module, sectionName);
   if (sections.length === 0) {
-    return { version: 0, exports: [] };
+    return { version: 0, exports: [], taskCompletions: [] };
   }
   const payload = new Uint8Array(sections[0]!);
   const json = new TextDecoder().decode(payload);
@@ -108,6 +109,7 @@ export const parseExportAbi = (
     dtoSchemaAbi?: number;
     transport?: { id?: string; version?: number };
     exports?: ExportAbiEntry[];
+    taskCompletions?: Array<{ name: string; result: BoundarySchema }>;
   };
   const host =
     typeof parsed.hostAbi === "number" &&
@@ -127,6 +129,9 @@ export const parseExportAbi = (
     version: typeof parsed.version === "number" ? parsed.version : 0,
     ...(host ? { host } : {}),
     exports: Array.isArray(parsed.exports) ? parsed.exports : [],
+    taskCompletions: Array.isArray(parsed.taskCompletions)
+      ? parsed.taskCompletions
+      : [],
   };
 };
 import type { HostTransportMetadata } from "./host-transport.js";

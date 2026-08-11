@@ -13,6 +13,12 @@ use std::time::self as time
 eff TaskBoundary
   roundtrip_i32(resume, value: i32) -> i32
 
+@effect(id: "voyd.test.task-end-boundary")
+eff TaskEndBoundary
+  stop(resume) -> void
+
+obj TaskEndResult { value: i32 }
+
 fn millis(value: i32): () -> Duration
   Duration::from_millis(to_i64(value))
 
@@ -357,3 +363,15 @@ pub fn oversized_root_outcome_probe(): task::TaskRuntime -> String
 
 pub fn continuation_boundary_probe(): TaskBoundary -> i32
   TaskBoundary::roundtrip_i32(7)
+
+pub fn child_end_boundary_probe(): (task::TaskRuntime, TaskEndBoundary) -> i32
+  let child = task::spawn do:
+    let _ = TaskEndBoundary::stop()
+    TaskEndResult { value: -1 }
+  match(task::join(child))
+    Ok { value }:
+      value.value
+    Err:
+      -2
+    Cancelled:
+      -3

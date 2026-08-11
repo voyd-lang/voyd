@@ -74,7 +74,11 @@ import {
   takePendingReceiverSpecializations,
   type ReceiverSpecialization,
 } from "./receiver-specialization.js";
-import { EFFECTFUL_RETAINED_CALLBACK_TARGETS_KEY } from "./intrinsics.js";
+import {
+  EFFECTFUL_RETAINED_CALLBACK_TARGETS_KEY,
+  TASK_STARTER_BOUNDARIES_KEY,
+  type TaskStarterBoundary,
+} from "./intrinsics.js";
 import {
   createScalarAggregateTempBinding,
   loadScalarAggregateBindingAbiValue,
@@ -1729,7 +1733,41 @@ export const emitModuleExports = (
     });
   }
 
-  emitExportAbiSection({ mod: ctx.mod, entries: exportAbiEntries });
+  const taskCompletions = Array.from(
+    ctx.programHelpers
+      .getHelperState(
+        TASK_STARTER_BOUNDARIES_KEY,
+        () => new Map<string, TaskStarterBoundary>(),
+      )
+      .values(),
+  ).flatMap(({ name, resultTypeId }) => {
+    try {
+      return [
+        {
+          name,
+          result: withDtoFingerprint(
+            deriveBoundarySchema({
+              typeId: resultTypeId,
+              ctx,
+              label: `${name} result`,
+              options: { tagStandaloneVariants: true, portableNames: true },
+            }),
+          ),
+        },
+      ];
+    } catch (error) {
+      if (error instanceof BoundarySchemaError) return [];
+      throw error;
+    }
+  });
+  taskCompletions.forEach(({ result }) =>
+    markCustomDtoPlanReachable({ schema: result, ctx }),
+  );
+  emitExportAbiSection({
+    mod: ctx.mod,
+    entries: exportAbiEntries,
+    taskCompletions,
+  });
 
   const retainedCallbackTargets = Array.from(
     ctx.programHelpers
