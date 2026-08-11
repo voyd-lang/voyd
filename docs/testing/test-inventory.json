@@ -2676,6 +2676,12 @@
     "rationale": "Keep opt-in: measures recursive static-effect runtime and stack-depth behavior outside default correctness CI."
   },
   {
+    "file": "tests/performance/src/v499-boundary-gates.test.ts",
+    "owner": "performance",
+    "disposition": "opt-in-performance",
+    "rationale": "Keep opt-in: enforces V-499 DTO, transport, typed codec, and VX performance budgets outside default correctness CI."
+  },
+  {
     "file": "tests/performance/src/vtrace-compute-benchmark.test.ts",
     "owner": "performance",
     "disposition": "opt-in-performance",

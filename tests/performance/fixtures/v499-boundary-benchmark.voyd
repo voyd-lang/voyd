@@ -1,0 +1,60 @@
+use std::array::Array
+use std::bytes::Bytes
+use std::json::self as json
+use std::msgpack::self as msgpack
+use std::result::types::all
+use std::string::type::String
+use std::vx::{ Cmd, Html }
+use std::vx::all
+
+obj BenchLeaf { api value: i32 }
+obj BenchDepth3 { api leaf: BenchLeaf }
+obj BenchDepth2 { api next: BenchDepth3 }
+obj BenchDepth1 { api next: BenchDepth2 }
+
+enum BenchEvent
+  Item { index: i32 }
+  Finished
+
+obj BenchPayload {
+  api bytes: Bytes,
+  api values: Array<i32>,
+  api event: BenchEvent,
+  api nested: BenchDepth1
+}
+
+pub fn echo_payload(value: BenchPayload) -> BenchPayload
+  value
+
+pub fn json_roundtrip_size(value: Array<i32>) -> i32
+  match(json::encode(value))
+    Err:
+      -1
+    Ok<String> { value: encoded }:
+      match(json::decode<Array<i32>>(encoded))
+        Err:
+          -2
+        Ok<Array<i32>> { value: decoded }:
+          decoded.len()
+
+pub fn msgpack_roundtrip_size(value: BenchPayload) -> i32
+  match(msgpack::encode(value))
+    Err:
+      -1
+    Ok<Bytes> { value: encoded }:
+      match(msgpack::decode<BenchPayload>(encoded))
+        Err:
+          -2
+        Ok<BenchPayload> { value: decoded }:
+          decoded.bytes.len() + decoded.values.len()
+
+pub fn command_batch(count: i32) -> Cmd<BenchEvent>
+  let ~commands = Array<Cmd<BenchEvent>>::with_capacity(count)
+  var index = 0
+  while index < count:
+    commands.push(Cmd<BenchEvent>::message(BenchEvent::Item { index }))
+    index = index + 1
+  Cmd<BenchEvent>::batch(commands)
+
+pub fn event_frame(index: i32) -> Html<BenchEvent>
+  <button on_click={BenchEvent::Item { index }}>Run</button>

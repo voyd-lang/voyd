@@ -3,6 +3,16 @@
 Performance tests and large regression workloads are opt-in. They do not run
 as part of the default test suite.
 
+## V-499 DTO and host-boundary gates
+
+`npm run test:perf --workspace @voyd-lang/performance-tests` includes explicit
+budgets for large arrays and byte buffers, nested records, variants, typed JSON
+and MessagePack throughput, VX command batches, frequent event frames, and the
+compiled artifact size. The fixture deliberately compiles without optimizer
+fusion so a mandatory intermediate tree cannot hide behind optimization.
+Set `VOYD_V499_PERF_GATE_MULTIPLIER` only when calibrating a materially slower
+CI runner; the default multiplier is `1`.
+
 ## Intrinsic Array `for` benchmark
 
 Measure intrinsic Array iteration against equivalent indexed-loop controls:
