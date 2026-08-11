@@ -133,6 +133,8 @@ export {
   isVoydRuntimeError,
 } from "./runtime/trap-diagnostics.js";
 export type {
+  VoydHostBoundaryDiagnostics,
+  VoydHostBoundaryError,
   VoydRuntimeDiagnostics,
   VoydRuntimeEffectContext,
   VoydRuntimeError,

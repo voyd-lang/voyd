@@ -91,6 +91,34 @@ const withStack = (error: Error, stack: string): Error => {
 };
 
 describe("createVoydTrapDiagnostics", () => {
+  it("preserves context on host boundary failures without labeling them as traps", () => {
+    const diagnostics = createVoydTrapDiagnostics({ module: EMPTY_WASM_MODULE });
+    const error = new Error("expected i32");
+
+    const annotated = diagnostics.annotateBoundaryError(error, {
+      effect: {
+        effectId: "voyd.test.boundary",
+        opId: 3,
+        opName: "roundtrip",
+        label: "Boundary::roundtrip",
+        resumeKind: "resume",
+        continuationBoundary: "resume",
+      },
+      transition: {
+        point: "resume_effectful",
+        direction: "host->vm",
+      },
+    });
+
+    expect(annotated).toBe(error);
+    expect(annotated.voyd).toMatchObject({
+      kind: "host-boundary-error",
+      effect: { effectId: "voyd.test.boundary" },
+      transition: { point: "resume_effectful", direction: "host->vm" },
+    });
+    expect(isVoydRuntimeError(annotated)).toBe(false);
+  });
+
   it("detects wasm traps from Firefox/WebKit-style stack frames", () => {
     const diagnostics = createVoydTrapDiagnostics({ module: EMPTY_WASM_MODULE });
     const error = withStack(

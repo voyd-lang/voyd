@@ -88,6 +88,17 @@ export type VoydRuntimeError = Error & {
   voyd: VoydRuntimeDiagnostics;
 };
 
+export type VoydHostBoundaryDiagnostics = {
+  version: 1;
+  kind: "host-boundary-error";
+  effect?: VoydRuntimeEffectContext;
+  transition?: VoydRuntimeTransitionContext;
+};
+
+export type VoydHostBoundaryError = Error & {
+  voyd: VoydHostBoundaryDiagnostics;
+};
+
 export type VoydTrapAnnotation = {
   panic?: VoydRuntimePanicContext;
   effect?: VoydRuntimeEffectContext;
@@ -97,6 +108,10 @@ export type VoydTrapAnnotation = {
 
 export type VoydTrapDiagnostics = {
   annotateTrap: (error: unknown, annotation?: VoydTrapAnnotation) => Error;
+  annotateBoundaryError: (
+    error: unknown,
+    annotation?: Pick<VoydTrapAnnotation, "effect" | "transition">,
+  ) => VoydHostBoundaryError;
 };
 
 const toError = (error: unknown): Error =>
@@ -554,6 +569,14 @@ export const isVoydRuntimeError = (error: unknown): error is VoydRuntimeError =>
   typeof (error as { voyd?: unknown }).voyd === "object" &&
   (error as { voyd?: { kind?: unknown } }).voyd?.kind === "wasm-trap";
 
+const isVoydHostBoundaryError = (
+  error: unknown,
+): error is VoydHostBoundaryError =>
+  error instanceof Error &&
+  typeof (error as { voyd?: unknown }).voyd === "object" &&
+  (error as { voyd?: { kind?: unknown } }).voyd?.kind ===
+    "host-boundary-error";
+
 export const createVoydTrapDiagnostics = ({
   module,
 }: {
@@ -575,6 +598,24 @@ export const createVoydTrapDiagnostics = ({
   });
   const functionNamesByIndex = parseNameSectionFunctionNames(module);
   return {
+    annotateBoundaryError: (error, annotation) => {
+      const normalized = toError(error);
+      const existing = isVoydHostBoundaryError(normalized)
+        ? normalized.voyd
+        : undefined;
+      const withDiagnostics = normalized as VoydHostBoundaryError;
+      withDiagnostics.voyd = {
+        version: 1,
+        kind: "host-boundary-error",
+        ...(existing?.effect || annotation?.effect
+          ? { effect: annotation?.effect ?? existing?.effect }
+          : {}),
+        ...(existing?.transition || annotation?.transition
+          ? { transition: annotation?.transition ?? existing?.transition }
+          : {}),
+      };
+      return withDiagnostics;
+    },
     annotateTrap: (error, annotation) => {
       const normalized = toError(error);
       const panic = annotation?.panic ?? panicContextFromError(normalized);

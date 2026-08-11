@@ -60,6 +60,7 @@ import {
 } from "./runtime/environment.js";
 import {
   createVoydTrapDiagnostics,
+  isVoydRuntimeError,
   type VoydTrapAnnotation,
   type VoydRuntimePanicContext,
 } from "./runtime/trap-diagnostics.js";
@@ -869,10 +870,17 @@ export const createVoydHost = async ({
     | undefined;
   const annotateTrap = (error: unknown, opts?: VoydTrapAnnotation): Error => {
     const panic = consumePanicContext({ instance: instanceRef });
-    return trapDiagnostics.annotateTrap(error, {
+    const annotated = trapDiagnostics.annotateTrap(error, {
       ...opts,
       ...(panic ? { panic } : {}),
     });
+    if (
+      isVoydRuntimeError(annotated) ||
+      (!opts?.effect && !opts?.transition)
+    ) {
+      return annotated;
+    }
+    return trapDiagnostics.annotateBoundaryError(annotated, opts);
   };
   const parsedTable = parseEffectTable(module, EFFECT_TABLE_EXPORT);
   const table = toHostProtocolTable(parsedTable);
@@ -1582,23 +1590,37 @@ export const createVoydHost = async ({
       }
     >();
 
-    const encodeToBuffer = (request: unknown, value: unknown): number => {
+    const encodeToBuffer = (
+      request: unknown,
+      value: unknown,
+      completion?: HostCompletionIdentity,
+    ): number => {
       const frame = effectFramesByRequest.get(request);
       if (!frame) {
         throw new Error("effect request is missing frame metadata");
       }
+      const completionSchema =
+        completion?.kind === "export" ? completion.schema : undefined;
+      const encodedValue = completionSchema
+        ? encodeBoundaryArgs({
+            exportName: completion.name ?? String(completion.id),
+            schemas: [completionSchema],
+            args: [value],
+          })[0]
+        : encodeEffectBoundaryResult({
+            label: frame.label,
+            value,
+            schemas: frame.schemas,
+          });
       const encoded = transport.encodeFrame({
         kind: "effect-outcome",
         requestId: frame.requestId,
         outcome: {
           kind: "success",
           value: {
-            fingerprint: frame.resultFingerprint,
-            value: encodeEffectBoundaryResult({
-              label: frame.label,
-              value,
-              schemas: frame.schemas,
-            }),
+            fingerprint:
+              completionSchema?.fingerprint ?? frame.resultFingerprint,
+            value: encodedValue,
           },
         },
       });
@@ -2145,7 +2167,7 @@ export const createVoydHost = async ({
                 ...completion,
                 value: decodeRawOutcome(
                   completion.rawOutcome,
-                  task.ownerId === null
+                  task.id === state.rootTaskId
                     ? rootCompletion
                     : { kind: "callback", id: task.id },
                 ),
@@ -2388,7 +2410,15 @@ export const createVoydHost = async ({
                   activeTaskId: taskId,
                 }),
                 () => {
-                  const length = encodeToBuffer(request, handlerResult.value);
+                  const completion =
+                    taskId === state.rootTaskId
+                      ? rootCompletion
+                      : ({ kind: "callback", id: taskId } as const);
+                  const length = encodeToBuffer(
+                    request,
+                    handlerResult.value,
+                    handlerResult.kind === "end" ? completion : undefined,
+                  );
                   return handlerResult.kind === "end"
                     ? endRequestRaw(request, bufferPtr, length)
                     : resumeEffectfulRaw(request, bufferPtr, length);
@@ -2448,12 +2478,12 @@ export const createVoydHost = async ({
               rawOutcome,
               bufferPtr,
               bufferSize,
-              task.ownerId === null
+              task.id === state.rootTaskId
                 ? rootCompletion.kind === "export"
                   ? 0
                   : 1
                 : 1,
-              task.ownerId === null ? rootCompletion.id : task.id,
+              task.id === state.rootTaskId ? rootCompletion.id : task.id,
             );
             const payloadLength = effectLen(effectResult) as number;
             const request = effectCont(effectResult);
