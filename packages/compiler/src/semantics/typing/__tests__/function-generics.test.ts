@@ -644,4 +644,51 @@ pub fn main() -> i32
 
     expect(() => semanticsPipeline(ast)).toThrow(/make is missing 1 type argument/);
   });
+
+  it("aggregates repeated nominal union members into one generic binding", () => {
+    const ast = parse(
+      `
+obj Box<T> {}
+obj None {}
+type MaybeBoxes<T> = Box<T> | None
+
+fn accept<T>(value: MaybeBoxes<T>) -> void
+  void
+
+pub fn main(value: Box<i32> | Box<i64> | None) -> void
+  accept(value)
+`,
+      "union_return_context_repeated_nominal.voyd",
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const acceptSymbol = symbolTable.resolve("accept", symbolTable.rootScope);
+    expect(typeof acceptSymbol).toBe("number");
+    if (typeof acceptSymbol !== "number") return;
+
+    const makeCall = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") return false;
+        const callee = hir.expressions.get(expr.callee);
+        return (
+          callee?.exprKind === "identifier" &&
+          (callee as HirIdentifierExpr).symbol === acceptSymbol
+        );
+      },
+    );
+    expect(makeCall).toBeDefined();
+    if (!makeCall) return;
+
+    const typeArgsByInstance = typing.callTypeArguments.get(makeCall.id);
+    const typeArgs = typeArgsByInstance
+      ? Array.from(typeArgsByInstance.values())[0]
+      : undefined;
+    const expected = typing.arena.internUnion([
+      typing.arena.internPrimitive("i32"),
+      typing.arena.internPrimitive("i64"),
+    ]);
+    expect(typeArgs).toEqual([expected]);
+  });
 });
