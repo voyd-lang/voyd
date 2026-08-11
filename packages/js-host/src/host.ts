@@ -1599,12 +1599,15 @@ export const createVoydHost = async ({
       if (!frame) {
         throw new Error("effect request is missing frame metadata");
       }
-      const completionSchema =
-        completion?.kind === "export" ? completion.schema : undefined;
-      const encodedValue = completionSchema
+      const completionFingerprint =
+        completion?.kind === "export"
+          ? completion.schema?.fingerprint
+          : undefined;
+      const encodedValue =
+        completion?.kind === "export" && completion.schema
         ? encodeBoundaryArgs({
             exportName: completion.name ?? String(completion.id),
-            schemas: [completionSchema],
+            schemas: [completion.schema],
             args: [value],
           })[0]
         : encodeEffectBoundaryResult({
@@ -1619,7 +1622,7 @@ export const createVoydHost = async ({
           kind: "success",
           value: {
             fingerprint:
-              completionSchema?.fingerprint ?? frame.resultFingerprint,
+              completionFingerprint ?? frame.resultFingerprint,
             value: encodedValue,
           },
         },
