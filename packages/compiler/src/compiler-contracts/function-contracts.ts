@@ -39,24 +39,15 @@ export const DTO_DATA_CONTRACT_IDS = {
 } as const;
 
 export const WEB_RENDER_CONTRACT_IDS = {
-  render: "voyd.web.render",
   typedRender: "voyd.web.render-generic",
-  document: "voyd.web.document",
   typedDocument: "voyd.web.document-generic",
-  hydratedDocument: "voyd.web.document-hydrated",
   typedHydratedDocument: "voyd.web.document-hydrated-generic",
-  namedHydratedDocument: "voyd.web.hydrated-document",
   typedNamedHydratedDocument: "voyd.web.hydrated-document-generic",
-  htmlResponse: "voyd.web.html-response",
   typedHtmlResponse: "voyd.web.html-response-generic",
-  hydratedHtmlResponse: "voyd.web.html-response-hydrated",
   typedHydratedHtmlResponse: "voyd.web.html-response-hydrated-generic",
-  namedHydratedHtmlResponse: "voyd.web.hydrated-html-response",
   typedNamedHydratedHtmlResponse: "voyd.web.hydrated-html-response-generic",
   responseHtml: "voyd.web.response-html-generic",
   hydratedResponseHtml: "voyd.web.hydrated-response-html-generic",
-  legacyResponseHtml: "voyd.web.response-html",
-  legacyHydratedResponseHtml: "voyd.web.hydrated-response-html",
 } as const;
 
 export type CompilerFunctionContractId =
@@ -297,26 +288,16 @@ const webRenderContract = ({
 });
 
 const webRenderContractSpecs: readonly CompilerFunctionContractSpec[] = [
-  webRenderContract({ id: WEB_RENDER_CONTRACT_IDS.render, expectedArity: 1 }),
   webRenderContract({
     id: WEB_RENDER_CONTRACT_IDS.typedRender,
     expectedArity: 1,
   }),
-  webRenderContract({ id: WEB_RENDER_CONTRACT_IDS.document, expectedArity: 1 }),
   webRenderContract({
     id: WEB_RENDER_CONTRACT_IDS.typedDocument,
     expectedArity: 1,
   }),
   webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.hydratedDocument,
-    expectedArity: 2,
-  }),
-  webRenderContract({
     id: WEB_RENDER_CONTRACT_IDS.typedHydratedDocument,
-    expectedArity: 2,
-  }),
-  webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.namedHydratedDocument,
     expectedArity: 2,
   }),
   webRenderContract({
@@ -324,23 +305,11 @@ const webRenderContractSpecs: readonly CompilerFunctionContractSpec[] = [
     expectedArity: 2,
   }),
   webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.htmlResponse,
-    expectedArity: 2,
-  }),
-  webRenderContract({
     id: WEB_RENDER_CONTRACT_IDS.typedHtmlResponse,
     expectedArity: 2,
   }),
   webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.hydratedHtmlResponse,
-    expectedArity: 3,
-  }),
-  webRenderContract({
     id: WEB_RENDER_CONTRACT_IDS.typedHydratedHtmlResponse,
-    expectedArity: 3,
-  }),
-  webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.namedHydratedHtmlResponse,
     expectedArity: 3,
   }),
   webRenderContract({
@@ -354,16 +323,6 @@ const webRenderContractSpecs: readonly CompilerFunctionContractSpec[] = [
   }),
   webRenderContract({
     id: WEB_RENDER_CONTRACT_IDS.hydratedResponseHtml,
-    expectedArity: 3,
-    methodAlias: "html",
-  }),
-  webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.legacyResponseHtml,
-    expectedArity: 2,
-    methodAlias: "html",
-  }),
-  webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.legacyHydratedResponseHtml,
     expectedArity: 3,
     methodAlias: "html",
   }),

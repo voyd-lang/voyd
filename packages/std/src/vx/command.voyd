@@ -1,18 +1,18 @@
 //! Core VX command envelope and constructors shared by VX feature modules.
 
 use std::array::Array
+use std::data::{ DataValue }
 use std::data::self as data
-use std::dict::{ Dict, DictKey }
 use std::fixed_array::fns::all
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use std::task::Task
 use std::task::self as tasks
+use super::wire::{ WireMap }
+use super::wire::self as wire
 
-type CommandLower = fn() : () -> MsgPack
+type CommandLower = fn() : () -> DataValue
 
 pub obj Cmd<Msg> { thunk: FixedArray<CommandLower> }
 
@@ -21,12 +21,12 @@ pub fn command_plan<Msg>(run: CommandLower) -> Cmd<Msg>
   thunk.set<CommandLower>(0, run)
   Cmd<Msg> { thunk: thunk }
 
-pub fn lower_command<Msg>(value: Cmd<Msg>) -> MsgPack
+pub fn lower_command<Msg>(value: Cmd<Msg>) -> DataValue
   match(value.thunk.get<CommandLower>(0))
     Some<CommandLower> { value: run }:
       run()
     None:
-      msgpack::make_null()
+      wire::make_null()
 
 pub obj Ref<T> {
   api id: String
@@ -43,36 +43,36 @@ pub fn retain_typed_message_mapper<From, To>(handler: fn(From) -> To): () -> i32
 impl<Msg> Cmd<Msg>
   /// Creates an empty command.
   api fn none() -> Cmd<Msg>
-    command_plan<Msg>(() -> MsgPack => command_payload("none"))
+    command_plan<Msg>(() -> DataValue => command_payload("none"))
 
   /// Creates a command that dispatches a typed application message.
   api fn message(value: Msg) -> Cmd<Msg>
-    command_plan<Msg>(() -> MsgPack =>
+    command_plan<Msg>(() -> DataValue =>
       let ~out = command_map("message")
-      out.set("value", msgpack::from_data_value(data::encode(value)))
-      msgpack::make_map(out)
+      out.set("value", wire::from_data_value(data::encode(value)))
+      wire::make_map(out)
     )
 
   /// Creates a command batch from existing command values.
   api fn batch(values: Array<Cmd<Msg>>) -> Cmd<Msg>
-    command_plan<Msg>(() -> MsgPack =>
-      let ~children = Array<MsgPack>::with_capacity(values.len())
+    command_plan<Msg>(() -> DataValue =>
+      let ~children = Array<DataValue>::with_capacity(values.len())
       var index = 0
       while index < values.len():
         children.push(lower_command(values.at(index)))
         index = index + 1
       let ~out = command_map("batch")
-      out.set("children", msgpack::make_array(children))
-      msgpack::make_map(out)
+      out.set("children", wire::make_array(children))
+      wire::make_map(out)
     )
 
   /// Lifts a child command through a retained message mapper.
   fn map_with_handler_id<NextMsg>(self, handler_id: i32) -> Cmd<NextMsg>
-    command_plan<NextMsg>(() -> MsgPack =>
+    command_plan<NextMsg>(() -> DataValue =>
       let ~out = command_map("map")
       out.set("child", lower_command(self))
-      out.set("handlerId", msgpack::make_i32(handler_id))
-      msgpack::make_map(out)
+      out.set("handlerId", wire::make_i32(handler_id))
+      wire::make_map(out)
     )
 
   /// Lifts a child command through a retained typed message mapper.
@@ -82,7 +82,7 @@ impl<Msg> Cmd<Msg>
 
   /// Creates a host/runtime command envelope for a registered VX command executor.
   fn runtime({ kind: String, value?: CommandLower }) -> Cmd<Msg>
-    command_plan<Msg>(() -> MsgPack =>
+    command_plan<Msg>(() -> DataValue =>
       let out = command_map(kind)
       let complete =
         match(value)
@@ -90,7 +90,7 @@ impl<Msg> Cmd<Msg>
             out.setting("value", lower_value())
           None:
             out
-      msgpack::make_map(complete)
+      wire::make_map(complete)
     )
 
   fn runtime({ kind: StringSlice, value?: CommandLower }) -> Cmd<Msg>
@@ -98,17 +98,17 @@ impl<Msg> Cmd<Msg>
 
   /// Copies text to the browser clipboard through the VX runtime host.
   api fn copy_to_clipboard(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "copy_to_clipboard", value: () -> MsgPack => msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "copy_to_clipboard", value: () -> DataValue => wire::make_string(value))
 
   api fn copy_to_clipboard(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::copy_to_clipboard(value.to_string())
 
   /// Reads text from the browser clipboard and dispatches the handler result.
   fn read_clipboard_with_handler_id(handler_id: i32) -> Cmd<Msg>
-    command_plan<Msg>(() -> MsgPack =>
+    command_plan<Msg>(() -> DataValue =>
       let ~out = command_map("read_clipboard")
-      out.set("handlerId", msgpack::make_i32(handler_id))
-      msgpack::make_map(out)
+      out.set("handlerId", wire::make_i32(handler_id))
+      wire::make_map(out)
     )
 
   api fn read_clipboard(handler: fn(String) -> Msg) -> Cmd<Msg>
@@ -117,28 +117,28 @@ impl<Msg> Cmd<Msg>
 
   /// Sets the browser document title through the VX runtime host.
   api fn set_document_title(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "set_document_title", value: () -> MsgPack => msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "set_document_title", value: () -> DataValue => wire::make_string(value))
 
   api fn set_document_title(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::set_document_title(value.to_string())
 
   /// Pushes a URL into browser history through the VX runtime host.
   api fn push_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "push_url", value: () -> MsgPack => msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "push_url", value: () -> DataValue => wire::make_string(value))
 
   api fn push_url(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::push_url(value.to_string())
 
   /// Replaces the current browser history URL through the VX runtime host.
   api fn replace_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "replace_url", value: () -> MsgPack => msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "replace_url", value: () -> DataValue => wire::make_string(value))
 
   api fn replace_url(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::replace_url(value.to_string())
 
   /// Replaces the browser location hash through the VX runtime host.
   api fn set_hash(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "set_hash", value: () -> MsgPack => msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "set_hash", value: () -> DataValue => wire::make_string(value))
 
   api fn set_hash(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::set_hash(value.to_string())
@@ -153,35 +153,35 @@ impl<Msg> Cmd<Msg>
 
   /// Opens a URL in a browser window or tab.
   api fn open_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "open_url", value: () -> MsgPack => msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "open_url", value: () -> DataValue => wire::make_string(value))
 
   api fn open_url(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::open_url(value.to_string())
 
   api fn open_url({ url: String, target: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "open_url", value: () -> MsgPack => open_url_value(url: url, target: target))
+    Cmd<Msg>::runtime(kind: "open_url", value: () -> DataValue => open_url_value(url: url, target: target))
 
   api fn open_url({ url: StringSlice, target: StringSlice }) -> Cmd<Msg>
     Cmd<Msg>::open_url(url: url.to_string(), target: target.to_string())
 
   /// Scrolls the browser window to an absolute coordinate.
   api fn scroll_window_to({ x: f64, y: f64 }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_window_to", value: () -> MsgPack => window_scroll_value(x: x, y: y))
+    Cmd<Msg>::runtime(kind: "scroll_window_to", value: () -> DataValue => window_scroll_value(x: x, y: y))
 
   /// Scrolls the browser window by a relative coordinate.
   api fn scroll_window_by({ x: f64, y: f64 }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_window_by", value: () -> MsgPack => window_scroll_value(x: x, y: y))
+    Cmd<Msg>::runtime(kind: "scroll_window_by", value: () -> DataValue => window_scroll_value(x: x, y: y))
 
   /// Writes a string value into localStorage.
   api fn local_storage_set({ key: String, value: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "local_storage_set", value: () -> MsgPack => storage_entry_value(key: key, value: value))
+    Cmd<Msg>::runtime(kind: "local_storage_set", value: () -> DataValue => storage_entry_value(key: key, value: value))
 
   api fn local_storage_set({ key: StringSlice, value: StringSlice }) -> Cmd<Msg>
     Cmd<Msg>::local_storage_set(key: key.to_string(), value: value.to_string())
 
   /// Removes a localStorage key.
   api fn local_storage_remove(key: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "local_storage_remove", value: () -> MsgPack => msgpack::make_string(key))
+    Cmd<Msg>::runtime(kind: "local_storage_remove", value: () -> DataValue => wire::make_string(key))
 
   api fn local_storage_remove(key: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::local_storage_remove(key.to_string())
@@ -192,14 +192,14 @@ impl<Msg> Cmd<Msg>
 
   /// Writes a string value into sessionStorage.
   api fn session_storage_set({ key: String, value: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "session_storage_set", value: () -> MsgPack => storage_entry_value(key: key, value: value))
+    Cmd<Msg>::runtime(kind: "session_storage_set", value: () -> DataValue => storage_entry_value(key: key, value: value))
 
   api fn session_storage_set({ key: StringSlice, value: StringSlice }) -> Cmd<Msg>
     Cmd<Msg>::session_storage_set(key: key.to_string(), value: value.to_string())
 
   /// Removes a sessionStorage key.
   api fn session_storage_remove(key: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "session_storage_remove", value: () -> MsgPack => msgpack::make_string(key))
+    Cmd<Msg>::runtime(kind: "session_storage_remove", value: () -> DataValue => wire::make_string(key))
 
   api fn session_storage_remove(key: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::session_storage_remove(key.to_string())
@@ -210,11 +210,11 @@ impl<Msg> Cmd<Msg>
 
   /// Creates a task command envelope for a retained result mapper.
   fn perform_with_ids({ task_id: i32, handler_id: i32 }) -> Cmd<Msg>
-    command_plan<Msg>(() -> MsgPack =>
+    command_plan<Msg>(() -> DataValue =>
       let ~out = command_map("task")
-      out.set("taskId", msgpack::make_i32(task_id))
-      out.set("handlerId", msgpack::make_i32(handler_id))
-      msgpack::make_map(out)
+      out.set("taskId", wire::make_i32(task_id))
+      out.set("handlerId", wire::make_i32(handler_id))
+      wire::make_map(out)
     )
 
   /// Creates a task command envelope for a retained typed result mapper.
@@ -238,63 +238,63 @@ impl<Msg> Cmd<Msg>
 
   /// Creates a timer command that dispatches a typed message after the delay.
   api fn delay({ millis: i64, value: Msg }) -> Cmd<Msg>
-    command_plan<Msg>(() -> MsgPack =>
+    command_plan<Msg>(() -> DataValue =>
       let ~out = command_map("delay")
-      out.set("ms", msgpack::make_i64(millis))
-      out.set("value", msgpack::from_data_value(data::encode(value)))
-      msgpack::make_map(out)
+      out.set("ms", wire::make_i64(millis))
+      out.set("value", wire::from_data_value(data::encode(value)))
+      wire::make_map(out)
     )
 
   /// Creates a DOM focus command for a constrained VX ref.
   api fn focus<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "focus", value: () -> MsgPack => msgpack::make_string(target.id))
+    Cmd<Msg>::runtime(kind: "focus", value: () -> DataValue => wire::make_string(target.id))
 
   /// Creates a scroll-into-view command for a constrained VX ref.
   api fn scroll_into_view<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_into_view", value: () -> MsgPack => msgpack::make_string(target.id))
+    Cmd<Msg>::runtime(kind: "scroll_into_view", value: () -> DataValue => wire::make_string(target.id))
 
   /// Selects text in an input-like DOM element found by `data-vx-ref`.
   api fn select_text<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "select_text", value: () -> MsgPack => msgpack::make_string(target.id))
+    Cmd<Msg>::runtime(kind: "select_text", value: () -> DataValue => wire::make_string(target.id))
 
 
-fn window_scroll_value({ x: f64, y: f64 }) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("x", msgpack::make_f64(x))
-  out.set("y", msgpack::make_f64(y))
-  msgpack::make_map(out)
+fn window_scroll_value({ x: f64, y: f64 }) -> DataValue
+  let ~out = WireMap::init()
+  out.set("x", wire::make_f64(x))
+  out.set("y", wire::make_f64(y))
+  wire::make_map(out)
 
-fn storage_entry_value({ key: String, value: String }) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
+fn storage_entry_value({ key: String, value: String }) -> DataValue
+  let ~out = WireMap::init()
   out.set("key", key)
   out.set("value", value)
-  msgpack::make_map(out)
+  wire::make_map(out)
 
-fn open_url_value({ url: String, target: String }) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
+fn open_url_value({ url: String, target: String }) -> DataValue
+  let ~out = WireMap::init()
   out.set("url", url)
   out.set("target", target)
-  msgpack::make_map(out)
+  wire::make_map(out)
 
-fn command_payload(kind: String) -> MsgPack
-  msgpack::make_map(command_map(kind))
+fn command_payload(kind: String) -> DataValue
+  wire::make_map(command_map(kind))
 
-fn command_map(kind: String) -> Dict<String, MsgPack>
-  let ~out = Dict<String, MsgPack>::init()
+fn command_map(kind: String) -> WireMap
+  let ~out = WireMap::init()
   out.set("type", "cmd")
   out.set("kind", kind)
   out
 
 fn mark_owned_handler<Msg>(cmd: Cmd<Msg>, handler_id: i32) -> Cmd<Msg>
-  command_plan<Msg>(() -> MsgPack =>
-    match(msgpack::unpack_map(lower_command(cmd)))
-      Ok<Dict<String, MsgPack>> { value }:
-        msgpack::make_map(with_owned_handler(value, handler_id))
+  command_plan<Msg>(() -> DataValue =>
+    match(wire::unpack_map(lower_command(cmd)))
+      Ok<WireMap> { value }:
+        wire::make_map(with_owned_handler(value, handler_id))
       Err:
         lower_command(cmd)
   )
 
-fn with_owned_handler(out: Dict<String, MsgPack>, handler_id: i32) -> Dict<String, MsgPack>
-  let ~owned = Array<MsgPack>::with_capacity(1)
-  owned.push(msgpack::make_i32(handler_id))
-  out.setting("__vxOwnedMapHandlerIds", msgpack::make_array(owned))
+fn with_owned_handler(out: WireMap, handler_id: i32) -> WireMap
+  let ~owned = Array<DataValue>::with_capacity(1)
+  owned.push(wire::make_i32(handler_id))
+  out.setting("__vxOwnedMapHandlerIds", wire::make_array(owned))

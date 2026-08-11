@@ -58,8 +58,6 @@ describe("compiler function contract catalog", () => {
     const methodAliases = new Set<string>([
       WEB_RENDER_CONTRACT_IDS.responseHtml,
       WEB_RENDER_CONTRACT_IDS.hydratedResponseHtml,
-      WEB_RENDER_CONTRACT_IDS.legacyResponseHtml,
-      WEB_RENDER_CONTRACT_IDS.legacyHydratedResponseHtml,
     ]);
     expect(new Set(ids).size).toBe(ids.length);
 

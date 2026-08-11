@@ -88,8 +88,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   been removed. Static HTML and attributes use the message-neutral `void`
   specialization. HTML, command,
   subscription, program, and canvas composition now retains typed semantic
-  plans and creates the private MessagePack renderer wire only at the VX host
-  boundary.
+  plans and creates a private provider-neutral renderer wire only at the VX
+  host boundary.
 - VX plans are lowered lazily when their DTO representation crosses a host or
   server-rendering boundary. Building and combining plans no longer performs
   an eager encode/decode cycle.
@@ -97,6 +97,10 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   The DOM runtime receives decoded values from the selected host transport and
   no longer decodes a nested MessagePack byte payload. Runtime value messages
   use `kind: "value"`; the former `kind: "msgpack"` wrapper is removed.
+- Server rendering consumes the same provider-neutral VX wire and no longer
+  converts renderer plans through a MessagePack tree.
+- Component-local state, keyed scopes, and task keys use neutral DTO values;
+  the VX runtime no longer stores nested MessagePack byte payloads for them.
 - `std::web` HTML rendering accepts `Html<Msg>` for any message type, so
   server-rendered event handlers keep their real message type. The public raw
   `std::vx::lower_html` byte escape hatch has been removed.

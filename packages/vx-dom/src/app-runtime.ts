@@ -7,7 +7,7 @@ import type {
   VxRuntimeStep,
   VxRuntimeSubscriptionMessage,
 } from "./types.js";
-import { decodeVxPayload } from "./memory.js";
+import { decodeVxPayload } from "./payload.js";
 
 export type VoydVxAppHost = {
   run<T = unknown>(entryName: string, args?: unknown[]): Promise<T>;

@@ -1,22 +1,23 @@
 //! Server-side rendering helpers for current `std::vx` HTML values.
 
 use std::array::Array
-use std::data::DataValue
+use std::data::{ DataArray, DataBool, DataField, DataI32, DataNull, DataObject, DataString, DataValue, DataVariant }
 use std::data::self as data
 use std::dict::Dict
 use std::error::panic
 use std::http::Response
 use std::json::{ JsonError, stringify as stringify_json }
-use std::msgpack::{ MsgPack, MsgPackError }
-use std::msgpack::self as msgpack
 use std::number::cast::to_string
 use std::optional::types::all
+use std::result::types::all
 use std::string::type::{ String, StringIndex, StringSlice }
 use std::vx
 use super::response::encode_json_value
 use super::response::IntoResponse
 use super::openapi::contract::OpenApiResponseContract
 use super::openapi::response_contracts::typed_responses
+
+obj DataWireError {}
 
 /// Typed `200 text/html` response for rendered HTML and VX values.
 pub obj HtmlResponse {
@@ -107,13 +108,13 @@ fn hydrated_html_response_impl<Model, Msg>(response: Response, { view: vx::Html<
   with_html_content_type(response)
     .text(hydrated_document_impl<Model, Msg>(view: view, hydrate: hydrate))
 
-fn lower_html<Msg>(value: vx::Html<Msg>) -> MsgPack
+fn lower_html<Msg>(value: vx::Html<Msg>) -> DataValue
   match(data::decode<DataValue>(data::encode(value)))
     Ok<DataValue> { value }:
-      msgpack::from_data_value(value)
+      value
     Err:
       panic("invalid VX HTML DTO representation")
-      msgpack::make_null()
+      DataNull {}
 
 fn with_html_content_type(response: Response): () -> Response
   response
@@ -144,24 +145,24 @@ pub fn hydrate_named<Model>({ id: StringSlice, target: StringSlice, entry: Strin
 pub fn hydrate_named<Model>({ id: String, target: String, entry: String, model: Model }) -> Hydration<Model>
   Hydration<Model> { id: id, target: target, entry: entry, model: model }
 
-fn render_node(value: MsgPack): () -> String
+fn render_node(value: DataValue): () -> String
   render_node_in_namespace(value, false)
 
-fn render_node_in_namespace(value: MsgPack, svg_parent: bool): () -> String
-  match(msgpack::unpack_string(value))
+fn render_node_in_namespace(value: DataValue, svg_parent: bool): () -> String
+  match(unpack_string(value))
     Ok<String> { value }:
       return escape_text(value.as_slice())
-    Err<MsgPackError>:
+    Err<DataWireError>:
       void
 
-  match(msgpack::unpack_array(value))
-    Ok<Array<MsgPack>> { value }:
+  match(unpack_array(value))
+    Ok<Array<DataValue>> { value }:
       return render_children(value, svg_parent)
-    Err<MsgPackError>:
+    Err<DataWireError>:
       void
 
-  match(msgpack::unpack_map(value))
-    Ok<Dict<String, MsgPack>> { value: map }:
+  match(unpack_map(value))
+    Ok<Dict<String, DataValue>> { value: map }:
       match(read_string(map, "kind".as_slice()))
         Some<String> { value: kind }:
           if kind.equals("element"):
@@ -179,17 +180,17 @@ fn render_node_in_namespace(value: MsgPack, svg_parent: bool): () -> String
           String::init()
         None:
           String::init()
-    Err<MsgPackError>:
+    Err<DataWireError>:
       String::init()
 
-fn render_mapped_node(map: Dict<String, MsgPack>, svg_parent: bool) -> String
+fn render_mapped_node(map: Dict<String, DataValue>, svg_parent: bool) -> String
   match(map.get("child"))
-    Some<MsgPack> { value }:
+    Some<DataValue> { value }:
       render_node_in_namespace(value, svg_parent)
     None:
       String::init()
 
-fn render_element(map: Dict<String, MsgPack>, svg_parent: bool): () -> String
+fn render_element(map: Dict<String, DataValue>, svg_parent: bool): () -> String
   let tag = read_string_or(map, "tag".as_slice(), "div".as_slice())
   let svg_element = svg_parent or tag == "svg"
   if not is_valid_tag_name(tag, svg_element):
@@ -217,78 +218,78 @@ fn render_element(map: Dict<String, MsgPack>, svg_parent: bool): () -> String
     .concat(tag)
     .concat(">".as_slice())
 
-fn render_node_children(map: Dict<String, MsgPack>, svg_parent: bool): () -> String
+fn render_node_children(map: Dict<String, DataValue>, svg_parent: bool): () -> String
   match(map.get("children".as_slice().to_string()))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_array(value))
-        Ok<Array<MsgPack>> { value }:
+    Some<DataValue> { value }:
+      match(unpack_array(value))
+        Ok<Array<DataValue>> { value }:
           render_children(value, svg_parent)
-        Err<MsgPackError>:
+        Err<DataWireError>:
           String::init()
     None:
       String::init()
 
-fn has_element_children(map: Dict<String, MsgPack>) -> bool
+fn has_element_children(map: Dict<String, DataValue>) -> bool
   match(map.get("children".as_slice().to_string()))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_array(value))
-        Ok<Array<MsgPack>> { value }:
+    Some<DataValue> { value }:
+      match(unpack_array(value))
+        Ok<Array<DataValue>> { value }:
           not value.is_empty()
-        Err<MsgPackError>:
+        Err<DataWireError>:
           false
     None:
       false
 
-fn render_children(children: Array<MsgPack>, svg_parent: bool): () -> String
+fn render_children(children: Array<DataValue>, svg_parent: bool): () -> String
   var out = String::init()
   var index = 0
   while index < children.len():
     match(children.get(index))
-      Some<MsgPack> { value }:
+      Some<DataValue> { value }:
         out = out.concat(render_node_in_namespace(value, svg_parent))
       None:
         void
     index = index + 1
   out
 
-fn render_raw_text_children(map: Dict<String, MsgPack>, tag: StringSlice) -> String
+fn render_raw_text_children(map: Dict<String, DataValue>, tag: StringSlice) -> String
   match(map.get("children"))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_array(value))
-        Ok<Array<MsgPack>> { value }:
+    Some<DataValue> { value }:
+      match(unpack_array(value))
+        Ok<Array<DataValue>> { value }:
           render_raw_text_array(value, tag)
-        Err<MsgPackError>:
+        Err<DataWireError>:
           String::init()
     None:
       String::init()
 
-fn render_raw_text_array(children: Array<MsgPack>, tag: StringSlice) -> String
+fn render_raw_text_array(children: Array<DataValue>, tag: StringSlice) -> String
   var out = String::init()
   var index = 0
   while index < children.len():
     match(children.get(index))
-      Some<MsgPack> { value }:
+      Some<DataValue> { value }:
         out = out.concat(render_raw_text_node(value, tag))
       None:
         void
     index = index + 1
   out
 
-fn render_raw_text_node(value: MsgPack, tag: StringSlice): () -> String
-  match(msgpack::unpack_string(value))
+fn render_raw_text_node(value: DataValue, tag: StringSlice): () -> String
+  match(unpack_string(value))
     Ok<String> { value }:
       return validate_raw_text(value, tag)
-    Err<MsgPackError>:
+    Err<DataWireError>:
       void
 
-  match(msgpack::unpack_array(value))
-    Ok<Array<MsgPack>> { value }:
+  match(unpack_array(value))
+    Ok<Array<DataValue>> { value }:
       return render_raw_text_array(value, tag)
-    Err<MsgPackError>:
+    Err<DataWireError>:
       void
 
-  match(msgpack::unpack_map(value))
-    Ok<Dict<String, MsgPack>> { value: map }:
+  match(unpack_map(value))
+    Ok<Dict<String, DataValue>> { value: map }:
       match(read_string(map, "kind".as_slice()))
         Some<String> { value: kind }:
           if kind == "text":
@@ -300,7 +301,7 @@ fn render_raw_text_node(value: MsgPack, tag: StringSlice): () -> String
             return render_raw_text_children(map, tag)
           if kind == "map":
             match(map.get("child"))
-              Some<MsgPack> { value }:
+              Some<DataValue> { value }:
                 return render_raw_text_node(value, tag)
               None:
                 return String::init()
@@ -308,7 +309,7 @@ fn render_raw_text_node(value: MsgPack, tag: StringSlice): () -> String
           String::init()
         None:
           String::init()
-    Err<MsgPackError>:
+    Err<DataWireError>:
       String::init()
 
 fn validate_raw_text(value: String, tag: StringSlice) -> String
@@ -323,28 +324,28 @@ fn validate_raw_text(value: String, tag: StringSlice) -> String
     panic("VX raw text contains its closing delimiter")
   value
 
-fn render_element_attrs(map: Dict<String, MsgPack>, tag: String, svg_element: bool): () -> String
-  let ~attrs = Dict<String, MsgPack>::init()
+fn render_element_attrs(map: Dict<String, DataValue>, tag: String, svg_element: bool): () -> String
+  let ~attrs = Dict<String, DataValue>::init()
   copy_named_values(map, field: "attrs", into: attrs)
   copy_properties(map, tag: tag, into: attrs)
   let styles = read_styles(map)
   if not styles.is_empty():
-    attrs.set("style", styles)
+    attrs.set("style", DataString { value: styles })
   render_named_values(attrs, svg_element)
 
 fn copy_properties(
-  map: Dict<String, MsgPack>,
-  { tag: String, into ~attrs: Dict<String, MsgPack> }
+  map: Dict<String, DataValue>,
+  { tag: String, into ~attrs: Dict<String, DataValue> }
 ) -> void
   match(map.get("props"))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_map(value))
-        Ok<Dict<String, MsgPack>> { value: props }:
+    Some<DataValue> { value }:
+      match(unpack_map(value))
+        Ok<Dict<String, DataValue>> { value: props }:
           let entries = props.entries()
           var index = 0
           while index < entries.len():
             match(entries.get(index))
-              Some<(String, MsgPack)> { value }:
+              Some<(String, DataValue)> { value }:
                 if not is_supported_property(value.0):
                   panic("unsupported VX DOM property: ".concat(value.0))
                 if not is_valid_property_value(name: value.0, value: value.1):
@@ -356,59 +357,59 @@ fn copy_properties(
               None:
                 void
             index = index + 1
-        Err<MsgPackError>:
+        Err<DataWireError>:
           void
     None:
       void
 
 fn copy_named_values(
-  map: Dict<String, MsgPack>,
-  { field: String, into ~attrs: Dict<String, MsgPack> }
+  map: Dict<String, DataValue>,
+  { field: String, into ~attrs: Dict<String, DataValue> }
 ): () -> void
   match(map.get(field))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_map(value))
-        Ok<Dict<String, MsgPack>> { value: values }:
+    Some<DataValue> { value }:
+      match(unpack_map(value))
+        Ok<Dict<String, DataValue>> { value: values }:
           let entries = values.entries()
           var index = 0
           while index < entries.len():
             match(entries.get(index))
-              Some<(String, MsgPack)> { value }:
+              Some<(String, DataValue)> { value }:
                 attrs.set(value.0, value.1)
               None:
                 void
             index = index + 1
-        Err<MsgPackError>:
+        Err<DataWireError>:
           void
     None:
       void
 
-fn render_named_values(attrs: Dict<String, MsgPack>, svg_element: bool): () -> String
+fn render_named_values(attrs: Dict<String, DataValue>, svg_element: bool): () -> String
   var out = String::init()
   let entries = attrs.entries()
   var index = 0
   while index < entries.len():
     match(entries.get(index))
-      Some<(String, MsgPack)> { value }:
+      Some<(String, DataValue)> { value }:
         out = out.concat(render_attr(value.0, value.1, svg_element))
       None:
         void
     index = index + 1
   out
 
-fn render_attr(name: String, value: MsgPack, svg_element: bool): () -> String
+fn render_attr(name: String, value: DataValue, svg_element: bool): () -> String
   if not is_valid_attr_name(name, svg_element):
     panic("invalid VX HTML attribute: ".concat(name))
     return String::init()
-  match(msgpack::unpack_bool(value))
+  match(unpack_bool(value))
     Ok<bool> { value }:
       if value:
         return " ".as_slice().to_string().concat(name)
       return String::init()
-    Err<MsgPackError>:
+    Err<DataWireError>:
       void
 
-  match(msgpack::unpack_string(value))
+  match(unpack_string(value))
     Ok<String> { value }:
       return " ".as_slice()
         .to_string()
@@ -416,10 +417,10 @@ fn render_attr(name: String, value: MsgPack, svg_element: bool): () -> String
         .concat("=\"".as_slice())
         .concat(escape_attr(value.as_slice()))
         .concat("\"".as_slice())
-    Err<MsgPackError>:
+    Err<DataWireError>:
       void
 
-  match(msgpack::unpack_i32(value))
+  match(unpack_i32(value))
     Ok<i32> { value }:
       return " ".as_slice()
         .to_string()
@@ -427,56 +428,56 @@ fn render_attr(name: String, value: MsgPack, svg_element: bool): () -> String
         .concat("=\"".as_slice())
         .concat(to_string(value))
         .concat("\"".as_slice())
-    Err<MsgPackError>:
+    Err<DataWireError>:
       String::init()
 
-fn read_styles(map: Dict<String, MsgPack>): () -> String
+fn read_styles(map: Dict<String, DataValue>): () -> String
   match(map.get("styles"))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_map(value))
-        Ok<Dict<String, MsgPack>> { value: styles }:
+    Some<DataValue> { value }:
+      match(unpack_map(value))
+        Ok<Dict<String, DataValue>> { value: styles }:
           render_style_entries(styles)
-        Err<MsgPackError>:
+        Err<DataWireError>:
           String::init()
     None:
       String::init()
 
-fn render_style_entries(styles: Dict<String, MsgPack>): () -> String
+fn render_style_entries(styles: Dict<String, DataValue>): () -> String
   var out = String::init()
   let entries = styles.entries()
   var index = 0
   while index < entries.len():
     match(entries.get(index))
-      Some<(String, MsgPack)> { value }:
+      Some<(String, DataValue)> { value }:
         let name = value.0
         if not is_valid_style_name(name):
           panic("invalid VX CSS property: ".concat(name))
-        match(msgpack::unpack_string(value.1))
+        match(unpack_string(value.1))
           Ok<String> { value: style_value }:
             if not is_valid_style_value(style_value):
               panic("invalid VX CSS property value: ".concat(style_value))
             if not out.is_empty():
               out = out.concat("; ")
             out = out.concat(name).concat(": ").concat(style_value)
-          Err<MsgPackError>:
+          Err<DataWireError>:
             void
       None:
         void
     index = index + 1
   out
 
-fn read_string(map: Dict<String, MsgPack>, key: StringSlice): () -> Option<String>
+fn read_string(map: Dict<String, DataValue>, key: StringSlice): () -> Option<String>
   match(map.get(key.to_string()))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_string(value))
+    Some<DataValue> { value }:
+      match(unpack_string(value))
         Ok<String> { value }:
           Some<String> { value: value }
-        Err<MsgPackError>:
+        Err<DataWireError>:
           None {}
     None:
       None {}
 
-fn read_string_or(map: Dict<String, MsgPack>, key: StringSlice, fallback: StringSlice): () -> String
+fn read_string_or(map: Dict<String, DataValue>, key: StringSlice, fallback: StringSlice): () -> String
   match(read_string(map, key))
     Some<String> { value }:
       value
@@ -563,44 +564,92 @@ fn is_supported_property_for_tag({ name: String, tag: String }) -> bool
     tag == "optgroup" or tag == "option" or tag == "select" or
     tag == "textarea"
 
-fn validate_textarea_value(map: Dict<String, MsgPack>, { tag: String, children: String }) -> void
+fn validate_textarea_value(map: Dict<String, DataValue>, { tag: String, children: String }) -> void
   if tag == "textarea":
     match(map.get("props"))
-      Some<MsgPack> { value }:
-        match(msgpack::unpack_map(value))
-          Ok<Dict<String, MsgPack>> { value: props }:
+      Some<DataValue> { value }:
+        match(unpack_map(value))
+          Ok<Dict<String, DataValue>> { value: props }:
             match(props.get("value"))
-              Some<MsgPack> { value }:
-                match(msgpack::unpack_string(value))
+              Some<DataValue> { value }:
+                match(unpack_string(value))
                   Ok<String> { value }:
                     let expected = preserve_leading_newline(tag, escape_text(value.as_slice()))
                     if children != expected:
                       panic("textarea value must match its text children for hydration")
-                  Err<MsgPackError>:
+                  Err<DataWireError>:
                     panic("textarea value must be a string for server rendering")
               None:
                 void
-          Err<MsgPackError>:
+          Err<DataWireError>:
             void
       None:
         void
 
-fn is_valid_property_value({ name: String, value: MsgPack }) -> bool
+fn is_valid_property_value({ name: String, value: DataValue }) -> bool
   if name == "value":
-    match(msgpack::unpack_string(value))
+    match(unpack_string(value))
       Ok<String>:
         return true
-      Err<MsgPackError>:
-        match(msgpack::unpack_i32(value))
+      Err<DataWireError>:
+        match(unpack_i32(value))
           Ok<i32>:
             return true
-          Err<MsgPackError>:
+          Err<DataWireError>:
             return false
-  match(msgpack::unpack_bool(value))
+  match(unpack_bool(value))
     Ok<bool>:
       true
-    Err<MsgPackError>:
+    Err<DataWireError>:
       false
+
+fn unpack_array(value: DataValue) -> Result<Array<DataValue>, DataWireError>
+  value.match(active)
+    DataArray:
+      Ok<Array<DataValue>> { value: active.values }
+    else:
+      Err<DataWireError> { error: DataWireError {} }
+
+fn unpack_bool(value: DataValue) -> Result<bool, DataWireError>
+  value.match(active)
+    DataBool:
+      Ok<bool> { value: active.value }
+    else:
+      Err<DataWireError> { error: DataWireError {} }
+
+fn unpack_i32(value: DataValue) -> Result<i32, DataWireError>
+  value.match(active)
+    DataI32:
+      Ok<i32> { value: active.value }
+    else:
+      Err<DataWireError> { error: DataWireError {} }
+
+fn unpack_string(value: DataValue) -> Result<String, DataWireError>
+  value.match(active)
+    DataString:
+      Ok<String> { value: active.value }
+    else:
+      Err<DataWireError> { error: DataWireError {} }
+
+fn unpack_map(value: DataValue) -> Result<Dict<String, DataValue>, DataWireError>
+  value.match(active)
+    DataObject:
+      Ok<Dict<String, DataValue>> { value: data_map(active.fields) }
+    DataVariant:
+      let ~out = data_map(active.fields)
+      out.set("$variant", DataString { value: active.name })
+      Ok<Dict<String, DataValue>> { value: out }
+    else:
+      Err<DataWireError> { error: DataWireError {} }
+
+fn data_map(fields: Array<DataField>) -> Dict<String, DataValue>
+  let ~values = Dict<String, DataValue>::init()
+  var index = 0
+  while index < fields.len():
+    let field = fields.at(index)
+    values.set(field.name, field.value)
+    index = index + 1
+  values
 
 fn is_valid_tag_name(name: String, svg_element: bool) -> bool
   if name.is_empty() or (if svg_element then: not is_ascii_letter(name.get_byte(0) ?? 0) else: not is_ascii_lowercase(name.get_byte(0) ?? 0)):

@@ -1,25 +1,23 @@
 use std::array::Array
-use std::bytes::{ ByteBuffer, Bytes }
 use std::data::{ CustomDto, CustomDtoError, DataValue }
 use std::data::self as data
-use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
 use std::error::panic
-use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
 use std::task::{ Task, TaskRuntime }
 use std::task::self as tasks
-use std::msgpack::MsgPack
 
 pub self::canvas
+use self::wire::{ WireMap }
+use self::wire::self as wire
 use self::command::{ command_plan, lower_command, retain_typed_message_mapper }
 pub use self::command::{ Cmd, Ref }
 
 /// Opaque virtual DOM node plan. The message parameter records the event
 /// message type while the renderer wire stays private to VX.
-type VxLower = fn() : () -> MsgPack
+type VxLower = fn() : () -> DataValue
 obj VxPlan { thunk: Array<VxLower> }
 pub obj Html<Msg> { plan: VxPlan }
 
@@ -36,16 +34,16 @@ pub obj Program<Model, Msg> {
 
 pub obj Sub<Msg> { plan: VxPlan }
 
-fn lower_program<Model, Msg>(value: Program<Model, Msg>) -> MsgPack
+fn lower_program<Model, Msg>(value: Program<Model, Msg>) -> DataValue
   lower_vx_plan(value)
 
-fn lower_sub<Msg>(value: Sub<Msg>) -> MsgPack
+fn lower_sub<Msg>(value: Sub<Msg>) -> DataValue
   lower_vx_plan(value)
 
-fn lower_html_node<Msg>(value: Html<Msg>) -> MsgPack
+fn lower_html_node<Msg>(value: Html<Msg>) -> DataValue
   lower_vx_plan(value)
 
-fn lower_html_attr<Msg>(value: Attr<Msg>) -> MsgPack
+fn lower_html_attr<Msg>(value: Attr<Msg>) -> DataValue
   lower_vx_plan(value)
 
 fn html_plan<Msg>(run: VxLower) -> Html<Msg>
@@ -65,95 +63,95 @@ fn vx_plan(run: VxLower) -> VxPlan
   thunk.push(run)
   VxPlan { thunk: thunk }
 
-fn lower_vx_plan(value: VxThunkPlan) -> MsgPack
+fn lower_vx_plan(value: VxThunkPlan) -> DataValue
   match(value.plan.thunk.get<VxLower>(0))
     Some<VxLower> { value: run }:
       run()
     None:
-      msgpack::make_null()
+      wire::make_null()
 
 impl<Model, Msg> CustomDto<Program<Model, Msg>, DataValue> for Program<Model, Msg>
   fn write(value: Program<Model, Msg>) -> DataValue
-    msgpack::to_data_value(lower_program(value))
+    wire::to_data_value(lower_program(value))
 
   fn read(value: DataValue) -> Result<Program<Model, Msg>, CustomDtoError>
     Ok<Program<Model, Msg>> {
       value: Program<Model, Msg> {
-        plan: vx_plan(() -> MsgPack => msgpack::from_data_value(value))
+        plan: vx_plan(() -> DataValue => wire::from_data_value(value))
       }
     }
 
 impl<Msg> CustomDto<Sub<Msg>, DataValue> for Sub<Msg>
   fn write(value: Sub<Msg>) -> DataValue
-    msgpack::to_data_value(lower_sub(value))
+    wire::to_data_value(lower_sub(value))
 
   fn read(value: DataValue) -> Result<Sub<Msg>, CustomDtoError>
     Ok<Sub<Msg>> {
       value: Sub<Msg> {
-        plan: vx_plan(() -> MsgPack => msgpack::from_data_value(value))
+        plan: vx_plan(() -> DataValue => wire::from_data_value(value))
       }
     }
 
 impl<Msg> CustomDto<Cmd<Msg>, DataValue> for Cmd<Msg>
   fn write(value: Cmd<Msg>) -> DataValue
-    msgpack::to_data_value(lower_command(value))
+    wire::to_data_value(lower_command(value))
 
   fn read(value: DataValue) -> Result<Cmd<Msg>, CustomDtoError>
     Ok<Cmd<Msg>> {
-      value: command_plan<Msg>(() -> MsgPack => msgpack::from_data_value(value))
+      value: command_plan<Msg>(() -> DataValue => wire::from_data_value(value))
     }
 
 impl<Msg> CustomDto<Html<Msg>, DataValue> for Html<Msg>
   fn write(value: Html<Msg>) -> DataValue
-    msgpack::to_data_value(lower_html_node(value))
+    wire::to_data_value(lower_html_node(value))
 
   fn read(value: DataValue) -> Result<Html<Msg>, CustomDtoError>
     Ok<Html<Msg>> {
       value: Html<Msg> {
-        plan: vx_plan(() -> MsgPack => msgpack::from_data_value(value))
+        plan: vx_plan(() -> DataValue => wire::from_data_value(value))
       }
     }
 
 impl<Msg> CustomDto<Attr<Msg>, DataValue> for Attr<Msg>
   fn write(value: Attr<Msg>) -> DataValue
-    msgpack::to_data_value(lower_html_attr(value))
+    wire::to_data_value(lower_html_attr(value))
 
   fn read(value: DataValue) -> Result<Attr<Msg>, CustomDtoError>
     Ok<Attr<Msg>> {
       value: Attr<Msg> {
-        plan: vx_plan(() -> MsgPack => msgpack::from_data_value(value))
+        plan: vx_plan(() -> DataValue => wire::from_data_value(value))
       }
     }
 
-fn typed_html_node_payloads<Msg>(values: Array<Html<Msg>>) -> Array<MsgPack>
-  let ~out = Array<MsgPack>::with_capacity(values.len())
+fn typed_html_node_payloads<Msg>(values: Array<Html<Msg>>) -> Array<DataValue>
+  let ~out = Array<DataValue>::with_capacity(values.len())
   var index = 0
   while index < values.len():
     out.push(lower_html_node(values.at(index)))
     index = index + 1
   out
 
-fn typed_html_attr_payloads<Msg>(values: Array<Attr<Msg>>) -> Array<MsgPack>
-  let ~out = Array<MsgPack>::with_capacity(values.len())
+fn typed_html_attr_payloads<Msg>(values: Array<Attr<Msg>>) -> Array<DataValue>
+  let ~out = Array<DataValue>::with_capacity(values.len())
   var index = 0
   while index < values.len():
     out.push(lower_html_attr(values.at(index)))
     index = index + 1
   out
 
-fn lower_vx_input(value: VxThunkPlan) -> MsgPack
+fn lower_vx_input(value: VxThunkPlan) -> DataValue
   lower_vx_plan(value)
 
-fn html_node_payloads<Msg>(values: Array<HtmlInput<Msg>>) -> Array<MsgPack>
-  let ~out = Array<MsgPack>::with_capacity(values.len())
+fn html_node_payloads<Msg>(values: Array<HtmlInput<Msg>>) -> Array<DataValue>
+  let ~out = Array<DataValue>::with_capacity(values.len())
   var index = 0
   while index < values.len():
     out.push(lower_vx_input(values.at(index)))
     index = index + 1
   out
 
-fn html_attr_payloads<Msg>(values: Array<AttrInput<Msg>>) -> Array<MsgPack>
-  let ~out = Array<MsgPack>::with_capacity(values.len())
+fn html_attr_payloads<Msg>(values: Array<AttrInput<Msg>>) -> Array<DataValue>
+  let ~out = Array<DataValue>::with_capacity(values.len())
   var index = 0
   while index < values.len():
     out.push(lower_vx_input(values.at(index)))
@@ -262,15 +260,15 @@ pub type GenericEvent = {
 
 @effect(id: "voyd.std.vx.component")
 pub eff Component
-  state_scope(tail, key: Bytes) -> void
+  state_scope(tail, key: DataValue) -> void
 
   state_key(tail, id: i32) -> i32
 
-  state_get(tail, id: i32, initial: Bytes) -> Bytes
+  state_get(tail, id: i32, initial: DataValue) -> DataValue
 
-  state_set(tail, id: i32, value: Bytes) -> void
+  state_set(tail, id: i32, value: DataValue) -> void
 
-  task_started(tail, key: Bytes, task_id: i32) -> void
+  task_started(tail, key: DataValue, task_id: i32) -> void
 
 @intrinsic(name: "__render_retain_callback", uses_signature: true)
 fn retain_typed_event_handler_id<Msg>(handler: fn() -> Msg): () -> i32
@@ -296,16 +294,11 @@ fn retain_program_callback_id<Handler>(handler: Handler): () -> i32
 fn stable_callsite_id(): () -> i32
   0
 
-fn encode_vx_payload<T>(value: T) -> Bytes
-  match(msgpack::encode(value))
-    Ok<Bytes> { value }:
-      value
-    Err:
-      panic("failed to encode VX payload")
-      ByteBuffer::init().as_bytes()
+fn encode_vx_value<T>(value: T) -> DataValue
+  data::encode(value)
 
-fn decode_vx_payload<T>(value: Bytes, fallback: T) -> T
-  match(msgpack::decode<T>(value))
+fn decode_vx_value<T>(value: DataValue, fallback: T) -> T
+  match(data::decode<T>(value))
     Ok<T> { value }:
       value
     Err:
@@ -314,11 +307,11 @@ fn decode_vx_payload<T>(value: Bytes, fallback: T) -> T
 impl<T> StateHandle<T>
   /// Replaces component-local typed state and schedules the component runtime.
   api fn set(self, value: T): Component -> void
-    Component::state_set(self.id, encode_vx_payload(value))
+    Component::state_set(self.id, encode_vx_value(value))
 
   /// Replaces component-local typed state and returns the updated handle.
   api fn update(self, value: T): Component -> StateHandle<T>
-    Component::state_set(self.id, encode_vx_payload(value))
+    Component::state_set(self.id, encode_vx_value(value))
     StateHandle<T> { id: self.id, value: value }
 
 impl<Msg> Sub<Msg>
@@ -337,24 +330,24 @@ impl<Msg> Sub<Msg>
 impl<Msg> Sub<Msg>
   /// Creates an empty subscription set.
   api fn none() -> Sub<Msg>
-    subscription_plan(() -> MsgPack => subscription_payload("none"))
+    subscription_plan(() -> DataValue => subscription_payload("none"))
 
   /// Creates a subscription batch from existing subscription values.
   api fn batch(values: Array<Sub<Msg>>) -> Sub<Msg>
-    subscription_plan(() -> MsgPack =>
-      let ~children = Array<MsgPack>::with_capacity(values.len())
+    subscription_plan(() -> DataValue =>
+      let ~children = Array<DataValue>::with_capacity(values.len())
       var index = 0
       while index < values.len():
         children.push(lower_sub(values.at(index)))
         index = index + 1
       let ~out = subscription_map("batch")
-      out.set("children", msgpack::make_array(children))
-      msgpack::make_map(out)
+      out.set("children", wire::make_array(children))
+      wire::make_map(out)
     )
 
   /// Creates a host/runtime subscription envelope for a registered VX subscription runner.
   fn runtime({ kind: String, key: String, value?: VxLower }) -> Sub<Msg>
-    subscription_plan(() -> MsgPack =>
+    subscription_plan(() -> DataValue =>
       let out = subscription_map(kind).setting("key", key)
       let complete =
         match(value)
@@ -362,7 +355,7 @@ impl<Msg> Sub<Msg>
             out.setting("value", lower_value())
           None:
             out
-      msgpack::make_map(complete)
+      wire::make_map(complete)
     )
 
   fn runtime({ kind: StringSlice, key: StringSlice, value?: VxLower }) -> Sub<Msg>
@@ -389,12 +382,12 @@ impl<Msg> Sub<Msg>
 
   /// Creates an interval subscription that dispatches a typed message.
   api fn every({ key: String, millis: i64, value: Msg }) -> Sub<Msg>
-    subscription_plan(() -> MsgPack =>
+    subscription_plan(() -> DataValue =>
       let ~out = subscription_map("interval")
       out.set("key", key)
-      out.set("ms", msgpack::make_i64(millis))
-      out.set("value", msgpack::from_data_value(data::encode(value)))
-      msgpack::make_map(out)
+      out.set("ms", wire::make_i64(millis))
+      out.set("value", wire::from_data_value(data::encode(value)))
+      wire::make_map(out)
     )
 
   api fn every({ key: StringSlice, millis: i64, value: Msg }) -> Sub<Msg>
@@ -405,7 +398,7 @@ pub fn keyboard_on_key_down<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   keyboard_subscription<Msg>(
     kind: "keydown",
     key: key,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn keyboard_on_key_down<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
@@ -425,7 +418,7 @@ pub fn keyboard_on_key_up<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   keyboard_subscription<Msg>(
     kind: "keyup",
     key: key,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn keyboard_on_key_up<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
@@ -445,7 +438,7 @@ pub fn online_status<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "online_status",
     key: key,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn online_status<Msg>({ key: String, handler: fn(bool) -> Msg }) -> Sub<Msg>
@@ -462,7 +455,7 @@ pub fn window_on_resize<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "window_resize",
     key: key,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn window_on_resize<Msg>({
@@ -485,7 +478,7 @@ pub fn document_on_visibility_change<Msg>({ key: String, value: Msg }) -> Sub<Ms
   Sub<Msg>::runtime(
     kind: "visibility_change",
     key: key,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn document_on_visibility_change<Msg>({
@@ -512,7 +505,7 @@ pub fn location_on_change<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "location_change",
     key: key,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn location_on_change<Msg>({ key: String, handler: fn(Location) -> Msg }) -> Sub<Msg>
@@ -530,7 +523,7 @@ pub fn window_on_focus<Msg>({ key: String, value: Msg }) -> Sub<Msg>
     kind: "window_focus",
     event: "focus",
     key: key,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn window_on_focus<Msg>({ key: String, handler: fn(GenericEvent) -> Msg }) -> Sub<Msg>
@@ -551,7 +544,7 @@ pub fn window_on_blur<Msg>({ key: String, value: Msg }) -> Sub<Msg>
     kind: "window_blur",
     event: "blur",
     key: key,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn window_on_blur<Msg>({ key: String, handler: fn(GenericEvent) -> Msg }) -> Sub<Msg>
@@ -571,7 +564,7 @@ pub fn animation_frame<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "animation_frame",
     key: key,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn animation_frame<Msg>({
@@ -593,7 +586,7 @@ pub fn animation_frame<Msg>({
 pub fn media_query<Msg>({ query: String, value: Msg }) -> Sub<Msg>
   media_query_subscription<Msg>(
     query: query,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn media_query<Msg>({ query: String, handler: fn(MediaQuery) -> Msg }) -> Sub<Msg>
@@ -610,7 +603,7 @@ pub fn storage_on_change<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "storage",
     key: key,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn storage_on_change<Msg>({ key: String, handler: fn(StorageChange) -> Msg }) -> Sub<Msg>
@@ -629,7 +622,7 @@ pub fn storage_on_change<Msg>({
 pub fn broadcast_channel<Msg>({ name: String, value: Msg }) -> Sub<Msg>
   broadcast_channel_subscription<Msg>(
     name: name,
-    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+    value: () -> DataValue => wire::from_data_value(data::encode(value))
   )
 
 pub fn broadcast_channel<Payload, Msg>({
@@ -658,8 +651,8 @@ fn state_handle_at<T>({ id: i32, initial: T }): Component -> StateHandle<T>
   let slot = Component::state_key(id)
   StateHandle<T> {
     id: slot,
-    value: decode_vx_payload<T>(
-      Component::state_get(slot, encode_vx_payload(initial)),
+    value: decode_vx_value<T>(
+      Component::state_get(slot, encode_vx_value(initial)),
       initial
     )
   }
@@ -687,41 +680,41 @@ pub fn state({
 
 /// Registers a task with the current component instance.
 pub fn task<Key, T>({ key: Key, task: Task<T> }): Component -> Unit
-  Component::task_started(encode_vx_payload(key), task.id)
+  Component::task_started(encode_vx_value(key), task.id)
   Unit {}
 
 /// Associates closure-backed handlers in a prebuilt view with the active server render.
 pub fn claim_server_render_callbacks<Msg>(value: Html<Msg>): () -> void
   claim_server_render_callbacks_in(lower_html_node(value))
 
-fn claim_server_render_callbacks_in(value: MsgPack): () -> void
-  match(msgpack::unpack_array(value))
-    Ok<Array<MsgPack>> { value }:
+fn claim_server_render_callbacks_in(value: DataValue): () -> void
+  match(wire::unpack_array(value))
+    Ok<Array<DataValue>> { value }:
       claim_server_render_callback_array(value)
       return void
     Err:
       void
 
-  match(msgpack::unpack_map(value))
-    Ok<Dict<String, MsgPack>> { value }:
+  match(wire::unpack_map(value))
+    Ok<WireMap> { value }:
       claim_server_render_callback_map(value)
     Err:
       void
 
-fn claim_server_render_callback_array(values: Array<MsgPack>): () -> void
+fn claim_server_render_callback_array(values: Array<DataValue>): () -> void
   var index = 0
   while index < values.len():
     match(values.get(index))
-      Some<MsgPack> { value }:
+      Some<DataValue> { value }:
         claim_server_render_callbacks_in(value)
       None:
         void
     index = index + 1
 
-fn claim_server_render_callback_map(value: Dict<String, MsgPack>): () -> void
+fn claim_server_render_callback_map(value: WireMap): () -> void
   match(value.get("kind"))
-    Some<MsgPack> { value: kind_value }:
-      match(msgpack::unpack_string(kind_value))
+    Some<DataValue> { value: kind_value }:
+      match(wire::unpack_string(kind_value))
         Ok<String> { value: kind }:
           if kind == "event":
             claim_server_render_callback_id(value)
@@ -744,10 +737,10 @@ fn claim_server_render_callback_map(value: Dict<String, MsgPack>): () -> void
 
   claim_server_render_callback_field(value, "root")
 
-fn claim_server_render_callback_id(value: Dict<String, MsgPack>): () -> void
+fn claim_server_render_callback_id(value: WireMap): () -> void
   match(value.get("handlerId"))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_i32(value))
+    Some<DataValue> { value }:
+      match(wire::unpack_i32(value))
         Ok<i32> { value: handler_id }:
           claim_render_callback_id(handler_id)
         Err:
@@ -755,29 +748,29 @@ fn claim_server_render_callback_id(value: Dict<String, MsgPack>): () -> void
     None:
       void
 
-fn claim_server_render_callback_field(value: Dict<String, MsgPack>, name: String): () -> void
+fn claim_server_render_callback_field(value: WireMap, name: String): () -> void
   match(value.get(name))
-    Some<MsgPack> { value }:
+    Some<DataValue> { value }:
       claim_server_render_callbacks_in(value)
     None:
       void
 
 /// Creates a versioned VX render frame.
 pub fn frame<Msg>(root: Html<Msg>): () -> Html<Msg>
-  html_plan<Msg>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
-    out.set("version", msgpack::make_i32(1))
+  html_plan<Msg>(() -> DataValue =>
+    let ~out = WireMap::init()
+    out.set("version", wire::make_i32(1))
     out.set("root", lower_html_node(root))
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 /// Creates a VX text node.
 pub fn text(value: String): () -> Html<void>
-  html_plan<void>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
+  html_plan<void>(() -> DataValue =>
+    let ~out = WireMap::init()
     out.set("kind", "text")
     out.set("value", value)
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 /// Creates a VX text node from a string slice.
@@ -809,50 +802,50 @@ pub fn html_child<Msg>(value: Array<HtmlInput<Msg>>): () -> Html<Msg>
   fragment<Msg>(value)
 
 pub fn html_child<Msg>(value: Array<Html<Msg>>): () -> Html<Msg>
-  html_plan<Msg>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
+  html_plan<Msg>(() -> DataValue =>
+    let ~out = WireMap::init()
     out.set("kind", "fragment")
     out.set("children", typed_html_node_payloads<Msg>(value))
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 /// Creates a VX fragment node.
 pub fn fragment(children: Array<Html<void>>): () -> Html<void>
-  html_plan<void>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
+  html_plan<void>(() -> DataValue =>
+    let ~out = WireMap::init()
     out.set("kind", "fragment")
     out.set("children", typed_html_node_payloads<void>(children))
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 pub fn fragment<Msg>(children: Array<HtmlInput<Msg>>): () -> Html<Msg>
-  html_plan<Msg>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
+  html_plan<Msg>(() -> DataValue =>
+    let ~out = WireMap::init()
     out.set("kind", "fragment")
     out.set("children", html_node_payloads<Msg>(children))
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 fn element_plan<Msg>({
   tag: String,
-  attrs: Array<MsgPack>,
-  children: Array<MsgPack>
+  attrs: Array<DataValue>,
+  children: Array<DataValue>
 }) -> Html<Msg>
-  html_plan<Msg>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
+  html_plan<Msg>(() -> DataValue =>
+    let ~out = WireMap::init()
     out.set("kind", "element")
     out.set("tag", tag)
     out.set("children", children)
     let normalized = normalize_attrs(attrs)
     if normalized.attrs.len() > 0:
-      out.set("attrs", msgpack::make_map(normalized.attrs))
+      out.set("attrs", wire::make_map(normalized.attrs))
     if normalized.props.len() > 0:
-      out.set("props", msgpack::make_map(normalized.props))
+      out.set("props", wire::make_map(normalized.props))
     if normalized.styles.len() > 0:
-      out.set("styles", msgpack::make_map(normalized.styles))
+      out.set("styles", wire::make_map(normalized.styles))
     if normalized.events.len() > 0:
       out.set("events", normalized.events)
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 /// Creates a VX element node using the versioned renderer schema.
@@ -924,13 +917,13 @@ pub fn html_element<Msg>({
 
 /// Creates a string-valued DOM attribute.
 pub fn attr({ name: String, value: String }): () -> Attr<void>
-  attr_plan<void>(() -> MsgPack => named_value("attr", name, value))
+  attr_plan<void>(() -> DataValue => named_value("attr", name, value))
 
 pub fn attr({ name: String, value: bool }): () -> Attr<void>
-  attr_plan<void>(() -> MsgPack => named_value("attr", name, msgpack::make_bool(value)))
+  attr_plan<void>(() -> DataValue => named_value("attr", name, wire::make_bool(value)))
 
 pub fn attr({ name: String, value: i32 }): () -> Attr<void>
-  attr_plan<void>(() -> MsgPack => named_value("attr", name, msgpack::make_i32(value)))
+  attr_plan<void>(() -> DataValue => named_value("attr", name, wire::make_i32(value)))
 
 pub fn attr({ name: StringSlice, value: String }): () -> Attr<void>
   attr(name: name.to_string(), value: value)
@@ -1005,28 +998,28 @@ pub fn checked(value: bool): () -> Attr<void>
   prop(name: "checked", value: value)
 
 fn prop_value({ name: String, value: VxLower }): () -> Attr<void>
-  attr_plan<void>(() -> MsgPack => named_value("prop", name, value()))
+  attr_plan<void>(() -> DataValue => named_value("prop", name, value()))
 
 pub fn prop({ name: String, value: String }): () -> Attr<void>
-  prop_value(name: name, value: () -> MsgPack => msgpack::make_string(value))
+  prop_value(name: name, value: () -> DataValue => wire::make_string(value))
 
 pub fn prop({ name: StringSlice, value: StringSlice }): () -> Attr<void>
   prop(name: name.to_string(), value: value.to_string())
 
 pub fn prop({ name: String, value: bool }): () -> Attr<void>
-  prop_value(name: name, value: () -> MsgPack => msgpack::make_bool(value))
+  prop_value(name: name, value: () -> DataValue => wire::make_bool(value))
 
 pub fn prop({ name: StringSlice, value: bool }): () -> Attr<void>
   prop(name: name.to_string(), value: value)
 
 pub fn prop({ name: String, value: i32 }): () -> Attr<void>
-  prop_value(name: name, value: () -> MsgPack => msgpack::make_i32(value))
+  prop_value(name: name, value: () -> DataValue => wire::make_i32(value))
 
 pub fn prop({ name: StringSlice, value: i32 }): () -> Attr<void>
   prop(name: name.to_string(), value: value)
 
 pub fn style({ name: String, value: String }): () -> Attr<void>
-  attr_plan<void>(() -> MsgPack => named_value("style", name, value))
+  attr_plan<void>(() -> DataValue => named_value("style", name, value))
 
 pub fn style({ name: StringSlice, value: StringSlice }): () -> Attr<void>
   style(name: name.to_string(), value: value.to_string())
@@ -1044,10 +1037,10 @@ pub fn styles(values: Array<(String, String)>): () -> Array<Attr<void>>
   out
 
 pub fn keyed({ key: String, child: Html<void> }): () -> Html<void>
-  html_plan<void>(() -> MsgPack =>
-    match(msgpack::unpack_map(lower_html_node(child)))
-      Ok<Dict<String, MsgPack>> { value }:
-        msgpack::make_map(value.setting("key", key))
+  html_plan<void>(() -> DataValue =>
+    match(wire::unpack_map(lower_html_node(child)))
+      Ok<WireMap> { value }:
+        wire::make_map(value.setting("key", key))
       Err:
         lower_html_node(child)
   )
@@ -1056,10 +1049,10 @@ pub fn keyed({ key: StringSlice, child: Html<void> }): () -> Html<void>
   keyed(key: key.to_string(), child: child)
 
 pub fn keyed<Msg>({ key: String, child: Html<Msg> }): () -> Html<Msg>
-  html_plan<Msg>(() -> MsgPack =>
-    match(msgpack::unpack_map(lower_html_node(child)))
-      Ok<Dict<String, MsgPack>> { value }:
-        msgpack::make_map(value.setting("key", key))
+  html_plan<Msg>(() -> DataValue =>
+    match(wire::unpack_map(lower_html_node(child)))
+      Ok<WireMap> { value }:
+        wire::make_map(value.setting("key", key))
       Err:
         lower_html_node(child)
   )
@@ -1068,7 +1061,7 @@ pub fn keyed<Msg>({ key: StringSlice, child: Html<Msg> }): () -> Html<Msg>
   keyed<Msg>(key: key.to_string(), child: child)
 
 pub fn keyed({ key: String, body: fn() -> Html<void> }): Component -> Html<void>
-  Component::state_scope(encode_vx_payload(key))
+  Component::state_scope(encode_vx_value(key))
   keyed(key: key, child: body())
 
 pub fn keyed({ key: StringSlice, body: fn() -> Html<void> }): Component -> Html<void>
@@ -1082,23 +1075,23 @@ pub fn map_html<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler: fn(ChildMs
   )
 
 fn map_html_with_handler_id<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler_id: i32 }) -> Html<ParentMsg>
-  html_plan<ParentMsg>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
+  html_plan<ParentMsg>(() -> DataValue =>
+    let ~out = WireMap::init()
     out.set("kind", "map")
     out.set("child", lower_html_node(html))
-    out.set("handlerId", msgpack::make_i32(handler_id))
-    msgpack::make_map(out)
+    out.set("handlerId", wire::make_i32(handler_id))
+    wire::make_map(out)
   )
 
 fn event_with_handler_id<Msg>({ name: String, handler_id: i32, options?: EventOptions }): () -> Attr<Msg>
-  attr_plan<Msg>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
+  attr_plan<Msg>(() -> DataValue =>
+    let ~out = WireMap::init()
     out.set("kind", "event")
     out.set("event", name)
-    out.set("handlerId", msgpack::make_i32(handler_id))
+    out.set("handlerId", wire::make_i32(handler_id))
     if options is Some:
-      out.set("options", msgpack::make_map(event_options_to_map(options.value)))
-    msgpack::make_map(out)
+      out.set("options", wire::make_map(event_options_to_map(options.value)))
+    wire::make_map(out)
   )
 
 pub fn event_handler<Msg>({ name: String, handler: fn() -> Msg, options?: EventOptions }): () -> Attr<Msg>
@@ -1310,17 +1303,17 @@ pub fn program<Model, Msg>({
   commands?: Cmd<Msg>,
   subscriptions?: Sub<Msg>
 }) -> Program<Model, Msg>
-  program_plan<Model, Msg>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
+  program_plan<Model, Msg>(() -> DataValue =>
+    let ~out = WireMap::init()
     out.set("$vx", "runtime_result")
-    out.set("model", msgpack::from_data_value(data::encode(model)))
+    out.set("model", wire::from_data_value(data::encode(model)))
     if frame is Some:
       out.set("frame", lower_html_node(frame.value))
     if commands is Some:
       out.set("commands", lower_command(commands.value))
     if subscriptions is Some:
       out.set("subscriptions", lower_sub(subscriptions.value))
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 /// Creates the next program transition from an explicit model.
@@ -1336,14 +1329,14 @@ fn map_model_with_handler_ids<Model, Msg, NextModel>({
   handler_id: i32,
   hydrate_handler_id?: i32
 }) -> Program<NextModel, Msg>
-  program_plan<NextModel, Msg>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
+  program_plan<NextModel, Msg>(() -> DataValue =>
+    let ~out = WireMap::init()
     out.set("kind", "program_map_model")
     out.set("child", lower_program(program))
-    out.set("handlerId", msgpack::make_i32(handler_id))
+    out.set("handlerId", wire::make_i32(handler_id))
     if hydrate_handler_id is Some:
-      out.set("hydrateHandlerId", msgpack::make_i32(hydrate_handler_id.value))
-    msgpack::make_map(out)
+      out.set("hydrateHandlerId", wire::make_i32(hydrate_handler_id.value))
+    wire::make_map(out)
   )
 
 /// Lifts a child program result through a typed model mapper.
@@ -1373,12 +1366,12 @@ fn map_message_with_handler_id<Model, ChildMsg, ParentMsg>({
   program: Program<Model, ChildMsg>,
   handler_id: i32
 }) -> Program<Model, ParentMsg>
-  program_plan<Model, ParentMsg>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
+  program_plan<Model, ParentMsg>(() -> DataValue =>
+    let ~out = WireMap::init()
     out.set("kind", "program_map_message")
     out.set("child", lower_program(program))
-    out.set("handlerId", msgpack::make_i32(handler_id))
-    msgpack::make_map(out)
+    out.set("handlerId", wire::make_i32(handler_id))
+    wire::make_map(out)
   )
 
 /// Lifts a child program result through a typed message mapper.
@@ -1428,38 +1421,38 @@ fn program_handlers<Model, Msg>({
   view_id: i32,
   subscriptions_id?: i32
 }) -> Program<Model, Msg>
-  program_plan<Model, Msg>(() -> MsgPack =>
-    let ~out = Dict<String, MsgPack>::init()
+  program_plan<Model, Msg>(() -> DataValue =>
+    let ~out = WireMap::init()
     out.set("kind", "program")
-    out.set("initHandlerId", msgpack::make_i32(init_id))
-    out.set("hydrateHandlerId", msgpack::make_i32(hydrate_id))
-    out.set("stepHandlerId", msgpack::make_i32(step_id))
-    out.set("viewHandlerId", msgpack::make_i32(view_id))
+    out.set("initHandlerId", wire::make_i32(init_id))
+    out.set("hydrateHandlerId", wire::make_i32(hydrate_id))
+    out.set("stepHandlerId", wire::make_i32(step_id))
+    out.set("viewHandlerId", wire::make_i32(view_id))
     if subscriptions_id is Some:
-      out.set("subscriptionsHandlerId", msgpack::make_i32(subscriptions_id.value))
-    msgpack::make_map(out)
+      out.set("subscriptionsHandlerId", wire::make_i32(subscriptions_id.value))
+    wire::make_map(out)
   )
 
 obj NormalizedAttrs {
-  attrs: Dict<String, MsgPack>,
-  props: Dict<String, MsgPack>,
-  styles: Dict<String, MsgPack>,
-  events: Array<MsgPack>
+  attrs: WireMap,
+  props: WireMap,
+  styles: WireMap,
+  events: Array<DataValue>
 }
 
-fn normalize_attrs(attributes: Array<MsgPack>): () -> NormalizedAttrs
+fn normalize_attrs(attributes: Array<DataValue>): () -> NormalizedAttrs
   let ~normalized = NormalizedAttrs {
-    attrs: Dict<String, MsgPack>::init(),
-    props: Dict<String, MsgPack>::init(),
-    styles: Dict<String, MsgPack>::init(),
-    events: Array<MsgPack>::init()
+    attrs: WireMap::init(),
+    props: WireMap::init(),
+    styles: WireMap::init(),
+    events: Array<DataValue>::init()
   }
   var index = 0
   while index < attributes.len():
     match(attributes.get(index))
-      Some<MsgPack> { value }:
-        match(msgpack::unpack_map(value))
-          Ok<Dict<String, MsgPack>> { value: entry }:
+      Some<DataValue> { value }:
+        match(wire::unpack_map(value))
+          Ok<WireMap> { value: entry }:
             consume_attr_entry(entry, normalized)
           Err:
             void
@@ -1469,15 +1462,15 @@ fn normalize_attrs(attributes: Array<MsgPack>): () -> NormalizedAttrs
   normalized
 
 fn consume_attr_entry(
-  entry: Dict<String, MsgPack>,
+  entry: WireMap,
   ~normalized: NormalizedAttrs
 ) -> void
   match(entry.get("kind"))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_string(value))
+    Some<DataValue> { value }:
+      match(wire::unpack_string(value))
         Ok<String> { value: kind }:
           if kind == "event":
-            normalized.events.push(msgpack::make_map(entry))
+            normalized.events.push(wire::make_map(entry))
           else:
             if kind == "style":
               consume_named_attr(entry, normalized.styles)
@@ -1491,13 +1484,13 @@ fn consume_attr_entry(
     None:
       void
 
-fn consume_named_attr(entry: Dict<String, MsgPack>, ~attrs: Dict<String, MsgPack>) -> void
+fn consume_named_attr(entry: WireMap, ~attrs: WireMap) -> void
   match(entry.get("name"))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_string(value))
+    Some<DataValue> { value }:
+      match(wire::unpack_string(value))
         Ok<String> { value: name }:
           match(entry.get("value"))
-            Some<MsgPack> { value: attr_value }:
+            Some<DataValue> { value: attr_value }:
               attrs.set(name, attr_value)
             None:
               void
@@ -1506,15 +1499,15 @@ fn consume_named_attr(entry: Dict<String, MsgPack>, ~attrs: Dict<String, MsgPack
     None:
       void
 
-fn named_value(kind: String, name: String, value: MsgPack): () -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
+fn named_value(kind: String, name: String, value: DataValue): () -> DataValue
+  let ~out = WireMap::init()
   out.set("kind", kind)
   out.set("name", name)
   out.set("value", value)
-  msgpack::make_map(out)
+  wire::make_map(out)
 
-fn named_value(kind: String, name: String, value: String): () -> MsgPack
-  named_value(kind, name, msgpack::make_string(value))
+fn named_value(kind: String, name: String, value: String): () -> DataValue
+  named_value(kind, name, wire::make_string(value))
 
 fn join_classes(values: Array<String>): () -> String
   var out = String::init()
@@ -1531,8 +1524,8 @@ fn join_classes(values: Array<String>): () -> String
     index = index + 1
   out
 
-fn event_options_to_map(options: EventOptions): () -> Dict<String, MsgPack>
-  let ~out = Dict<String, MsgPack>::init()
+fn event_options_to_map(options: EventOptions): () -> WireMap
+  let ~out = WireMap::init()
   set_bool_option(out, "preventDefault", options.prevent_default)
   set_bool_option(out, "stopPropagation", options.stop_propagation)
   set_bool_option(out, "capture", options.capture)
@@ -1540,18 +1533,18 @@ fn event_options_to_map(options: EventOptions): () -> Dict<String, MsgPack>
   set_bool_option(out, "pointerCapture", options.pointer_capture)
   out
 
-fn set_bool_option(~out: Dict<String, MsgPack>, name: String, value: Optional<bool>) -> void
+fn set_bool_option(~out: WireMap, name: String, value: Optional<bool>) -> void
   match(value)
     Some<bool> { value }:
-      out.set(name, msgpack::make_bool(value))
+      out.set(name, wire::make_bool(value))
     None:
       void
 
 fn mark_owned_subscription<Msg>(sub: Sub<Msg>, handler_id: i32) -> Sub<Msg>
-  subscription_plan(() -> MsgPack =>
-    match(msgpack::unpack_map(lower_sub(sub)))
-      Ok<Dict<String, MsgPack>> { value }:
-        msgpack::make_map(with_owned_handler(value, handler_id))
+  subscription_plan(() -> DataValue =>
+    match(wire::unpack_map(lower_sub(sub)))
+      Ok<WireMap> { value }:
+        wire::make_map(with_owned_handler(value, handler_id))
       Err:
         lower_sub(sub)
   )
@@ -1560,44 +1553,44 @@ fn sub_map_with_handler_id<ChildMsg, ParentMsg>(
   sub: Sub<ChildMsg>,
   { handler_id: i32, handler_key?: i32 }
 ) -> Sub<ParentMsg>
-  subscription_plan(() -> MsgPack =>
+  subscription_plan(() -> DataValue =>
     let ~out = subscription_map("map")
     out.set("child", lower_sub(sub))
-    out.set("handlerId", msgpack::make_i32(handler_id))
+    out.set("handlerId", wire::make_i32(handler_id))
     if handler_key is Some:
-      out.set("handlerKey", msgpack::make_i32(handler_key.value))
-    msgpack::make_map(out)
+      out.set("handlerKey", wire::make_i32(handler_key.value))
+    wire::make_map(out)
   )
 
 fn with_owned_handler(
-  out: Dict<String, MsgPack>,
+  out: WireMap,
   handler_id: i32
-) -> Dict<String, MsgPack>
-  let ~owned = Array<MsgPack>::with_capacity(1)
-  owned.push(msgpack::make_i32(handler_id))
-  out.setting("__vxOwnedMapHandlerIds", msgpack::make_array(owned))
+) -> WireMap
+  let ~owned = Array<DataValue>::with_capacity(1)
+  owned.push(wire::make_i32(handler_id))
+  out.setting("__vxOwnedMapHandlerIds", wire::make_array(owned))
 
-fn subscription_payload(kind: String): () -> MsgPack
-  msgpack::make_map(subscription_map(kind))
+fn subscription_payload(kind: String): () -> DataValue
+  wire::make_map(subscription_map(kind))
 
-fn subscription_map(kind: String): () -> Dict<String, MsgPack>
+fn subscription_map(kind: String): () -> WireMap
   tagged_vx_runtime_map("sub", kind)
 
 fn keyboard_subscription<Msg>({ kind: String, key: String, value: VxLower }) -> Sub<Msg>
-  subscription_plan(() -> MsgPack =>
+  subscription_plan(() -> DataValue =>
     let ~out = subscription_map("keyboard")
     out.set("key", key)
     out.set("event", kind)
     out.set("value", value())
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 fn keyboard_payload_subscription({ kind: String, key: String }) -> Sub<KeyboardEvent>
-  subscription_plan(() -> MsgPack =>
+  subscription_plan(() -> DataValue =>
     let ~out = subscription_map("keyboard")
     out.set("key", key)
     out.set("event", kind)
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 fn window_event_subscription<Msg>({
@@ -1606,12 +1599,12 @@ fn window_event_subscription<Msg>({
   key: String,
   value: VxLower
 }) -> Sub<Msg>
-  subscription_plan(() -> MsgPack =>
+  subscription_plan(() -> DataValue =>
     let out = subscription_map(kind)
       .setting("key", key)
       .setting("event", event)
       .setting("value", value())
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 fn window_event_payload_subscription({
@@ -1619,49 +1612,49 @@ fn window_event_payload_subscription({
   event: String,
   key: String
 }) -> Sub<GenericEvent>
-  subscription_plan(() -> MsgPack =>
+  subscription_plan(() -> DataValue =>
     let out = subscription_map(kind)
       .setting("key", key)
       .setting("event", event)
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 fn media_query_subscription<Msg>({ query: String, value: VxLower }) -> Sub<Msg>
-  subscription_plan(() -> MsgPack =>
+  subscription_plan(() -> DataValue =>
     let ~out = subscription_map("media_query")
     out.set("key", query)
     out.set("query", query)
     out.set("value", value())
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 fn media_query_payload_subscription(query: String) -> Sub<MediaQuery>
-  subscription_plan(() -> MsgPack =>
+  subscription_plan(() -> DataValue =>
     let ~out = subscription_map("media_query")
     out.set("key", query)
     out.set("query", query)
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 fn broadcast_channel_subscription<Msg>({ name: String, value: VxLower }) -> Sub<Msg>
-  subscription_plan(() -> MsgPack =>
+  subscription_plan(() -> DataValue =>
     let ~out = subscription_map("broadcast_channel")
     out.set("key", name)
     out.set("name", name)
     out.set("value", value())
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
 fn broadcast_channel_payload_subscription<Payload>(name: String) -> Sub<Payload>
-  subscription_plan(() -> MsgPack =>
+  subscription_plan(() -> DataValue =>
     let ~out = subscription_map("broadcast_channel")
     out.set("key", name)
     out.set("name", name)
-    msgpack::make_map(out)
+    wire::make_map(out)
   )
 
-fn tagged_vx_runtime_map(type_name: String, kind: String): () -> Dict<String, MsgPack>
-  let ~out = Dict<String, MsgPack>::init()
+fn tagged_vx_runtime_map(type_name: String, kind: String): () -> WireMap
+  let ~out = WireMap::init()
   out.set("type", type_name)
   out.set("kind", kind)
   out

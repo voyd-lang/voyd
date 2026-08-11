@@ -120,7 +120,8 @@ The main types are:
 These values are opaque typed plans. Composition keeps application values and
 child plans typed; VX creates its private renderer/command wire only when the
 plan crosses the runtime boundary. Application code cannot read or construct a
-raw MessagePack payload for these types.
+raw renderer payload for these types. The private wire is provider-neutral and
+uses the module's selected host transport at JavaScript boundaries.
 
 Add a `subscriptions` function when the app needs ongoing outside input:
 
@@ -539,10 +540,11 @@ cover affine transforms, translate/rotate/scale, line dashes, compositing, and
 balanced save/restore scopes. A frame with an unknown primitive, invalid field,
 or unbalanced state stack is rejected before the canvas is resized or painted.
 
-The constructors derive their MessagePack encoding from private typed records.
-Their declared camel-case field names are the wire keys, absent optional values
-are omitted, and the explicit frame `version` is encoded like any other field.
-Callers use the typed constructors rather than assembling boundary maps.
+The constructors derive a provider-neutral renderer value from private typed
+records. Their declared camel-case field names are the wire keys, absent
+optional values are omitted, and the explicit frame `version` is encoded like
+any other field. Callers use the typed constructors rather than assembling
+boundary maps.
 
 All coordinates, dimensions, line widths, and text metrics are logical CSS
 pixels. The browser host sizes the backing store using the current device pixel

@@ -1,4 +1,4 @@
-import { decodeVxPayload } from "./memory.js";
+import { decodeVxPayload } from "./payload.js";
 import {
   childNamespace,
   elementNamespace,
