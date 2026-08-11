@@ -72,6 +72,35 @@ describe("boundary DTO decoding", () => {
     );
   });
 
+  it("rejects mismatched effectful callback result fingerprints", () => {
+    const fingerprint = "a".repeat(64);
+    const encoded = msgPackHostTransport.encodeFrame({
+      kind: "callback-completion",
+      invocationId: 11,
+      outcome: {
+        kind: "success",
+        value: { fingerprint: "b".repeat(64), value: 42 },
+      },
+    });
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    new Uint8Array(memory.buffer).set(encoded);
+
+    expect(() =>
+      decodeHostCompletion({
+        memory,
+        ptr: 0,
+        length: encoded.length,
+        transport: msgPackHostTransport,
+        completion: {
+          kind: "callback",
+          id: 11,
+          name: "on_result",
+          schema: { kind: "i32", fingerprint },
+        },
+      }),
+    ).toThrow("effectful callback on_result result fingerprint mismatch");
+  });
+
   it("restores adapter-facing tags for unions and standalone variants", () => {
     const [union, variant] = decodeBoundaryArgs({
       exportName: "external variants",

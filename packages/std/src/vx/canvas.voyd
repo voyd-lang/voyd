@@ -25,7 +25,7 @@ pub obj Transform {
   api f: f64
 }
 
-pub obj RadialGradientDto {
+obj RadialGradientDto {
   api innerColor: String,
   api outerColor: String,
   api innerRadius: f64,

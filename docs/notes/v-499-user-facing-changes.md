@@ -82,8 +82,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - Web JSON bodies and authorization values now decode through typed JSON and
   neutral DTO data. Passing the dynamic `JsonValue` type through a generic
   typed body route is no longer supported; use a typed request DTO.
-- Canvas wrapper payloads are private. Construct paths, draws, gradients, and
-  frames through the typed canvas API.
+- Canvas DTO wrappers are no longer exported from the canvas module. Construct
+  paths, draws, gradients, and frames through the typed canvas API.
 - Canvas frame version 1 has been removed. The VX DOM renderer accepts only
   version 2 canvas frames.
 - Canvas paths, draws, gradients, and frames now use one typed custom DTO
@@ -106,12 +106,17 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - VX plans are lowered lazily when their DTO representation crosses a host or
   server-rendering boundary. Building and combining plans no longer performs
   an eager encode/decode cycle.
-- VX boundaries use private typed structural wires. Erased model, message,
-  command, subscription, canvas, state, keyed-scope, and task-key leaves carry
-  immutable encoded bytes together with their DTO fingerprint. The former
-  public `DataValue`/MessagePack plan maps and `kind: "msgpack"` wrapper are
-  removed. Nested payloads are decoded by the module-selected transport and
-  rejected unless their fingerprint was emitted for that module.
+- VX boundaries use typed structural wires. Erased model, message, command,
+  subscription, canvas, state, keyed-scope, and task-key leaves carry immutable
+  encoded bytes together with their DTO fingerprint. The former public
+  `DataValue`/MessagePack plan maps and `kind: "msgpack"` wrapper are removed.
+  Nested payloads are decoded by the module-selected transport and rejected
+  unless their fingerprint was emitted for that module.
+- The structural wire declarations used by the separate `std` and `web`
+  packages remain addressable as cross-package SSR plumbing. They are not a
+  supported construction API; application-facing raw lowerers and DTO wrapper
+  constructors have been removed where the package boundary does not require
+  them.
 - Server rendering walks the typed HTML and attribute wire directly; it no
   longer materializes a `DataValue`, JSON, or MessagePack tree.
 - Component-local state, keyed scopes, and task keys use fingerprinted encoded

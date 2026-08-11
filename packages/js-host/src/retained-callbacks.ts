@@ -26,29 +26,47 @@ export type RetainedCallbackScopeOwner = number | string | symbol;
 
 type OpaqueCapabilityAllocator = {
   allocate(): number;
-  owns(token: number): boolean;
 };
 
-const issuedOpaqueCapabilities = new Set<number>();
+const CAPABILITY_MASK = 0x7fff_ffff;
+let nextCapabilityInput = 1;
+let capabilityMixingKeys: readonly [number, number, number] | undefined;
+
+const getCapabilityMixingKeys = (): readonly [number, number, number] => {
+  if (capabilityMixingKeys) return capabilityMixingKeys;
+  const random = new Uint32Array(3);
+  globalThis.crypto.getRandomValues(random);
+  capabilityMixingKeys = [
+    random[0]! & CAPABILITY_MASK,
+    (random[1]! | 1) & CAPABILITY_MASK,
+    (random[2]! | 1) & CAPABILITY_MASK,
+  ];
+  return capabilityMixingKeys;
+};
+
+const mixCapability = (input: number): number => {
+  const [xorKey, firstMultiplier, secondMultiplier] =
+    getCapabilityMixingKeys();
+  let mixed = (input ^ xorKey) & CAPABILITY_MASK;
+  mixed ^= mixed >>> 16;
+  mixed = Math.imul(mixed, firstMultiplier) & CAPABILITY_MASK;
+  mixed ^= mixed >>> 13;
+  mixed = Math.imul(mixed, secondMultiplier) & CAPABILITY_MASK;
+  mixed ^= mixed >>> 16;
+  return mixed & CAPABILITY_MASK;
+};
+
+const allocateOpaqueCapability = (): number => {
+  while (nextCapabilityInput <= CAPABILITY_MASK) {
+    const token = mixCapability(nextCapabilityInput++);
+    if (token !== 0) return token;
+  }
+  throw new Error("opaque capability token space exhausted");
+};
 
 export const createOpaqueCapabilityAllocator = (): OpaqueCapabilityAllocator => {
-  const owned = new Set<number>();
   return {
-    allocate() {
-      for (let attempt = 0; attempt < 128; attempt += 1) {
-        const random = new Uint32Array(1);
-        globalThis.crypto.getRandomValues(random);
-        const token = random[0]! & 0x7fff_ffff;
-        if (token === 0 || issuedOpaqueCapabilities.has(token)) continue;
-        issuedOpaqueCapabilities.add(token);
-        owned.add(token);
-        return token;
-      }
-      throw new Error("opaque capability token allocation failed");
-    },
-    owns(token) {
-      return Number.isInteger(token) && token > 0 && owned.has(token);
-    },
+    allocate: allocateOpaqueCapability,
   };
 };
 
@@ -57,12 +75,11 @@ export function createRetainedEventHandlerRegistry<Payload = unknown>(): Retaine
   const handlers = new Map<number, WasmEventHandlerRef<Payload>>();
 
   const resolve = (token: number): WasmEventHandlerRef<Payload> => {
-    if (!capabilities.owns(token)) {
-      throw new Error("retained callback belongs to a different runtime session");
-    }
     const handler = handlers.get(token);
     if (!handler) {
-      throw new Error("retained callback is stale or has already completed");
+      throw new Error(
+        "retained callback is stale or has already completed or belongs to a different runtime session",
+      );
     }
     return handler;
   };

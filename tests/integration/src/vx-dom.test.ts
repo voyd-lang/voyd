@@ -673,7 +673,7 @@ pub fn multi_document() -> String
     ).resolves.toMatchObject({
       kind: "failed",
       error: expect.objectContaining({
-        message: "task belongs to a different runtime session",
+        message: expect.stringContaining("different runtime session"),
       }),
     });
 

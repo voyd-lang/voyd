@@ -118,16 +118,20 @@ export const decodeHostCompletion = ({
   if (outcome.kind === "failure") {
     throw new HostFrameFailureError(outcome.failure);
   }
-  if (completion.kind !== "export" || !completion.schema) {
+  if (!completion.schema) {
     return outcome.value.value;
   }
   if (outcome.value.fingerprint !== completion.schema.fingerprint) {
+    const label = completion.kind === "export" ? "effectful export" : "effectful callback";
     throw new Error(
-      `effectful export ${completion.name ?? completion.id} result fingerprint mismatch`,
+      `${label} ${completion.name ?? completion.id} result fingerprint mismatch`,
     );
   }
   return decodeBoundaryResult({
-    exportName: completion.name ?? String(completion.id),
+    exportName:
+      completion.kind === "callback"
+        ? `callback ${completion.name ?? completion.id}`
+        : completion.name ?? String(completion.id),
     schema: completion.schema,
     value: outcome.value.value,
   });

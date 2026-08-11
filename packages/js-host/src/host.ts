@@ -1020,17 +1020,13 @@ export const createVoydHost = async ({
   const observeStandaloneTask = async (
     capability: number,
   ): Promise<RunOutcome<unknown>> => {
-    if (!standaloneTaskCapabilities.owns(capability)) {
-      return {
-        kind: "failed",
-        error: new Error("task belongs to a different runtime session"),
-      };
-    }
     const entry = standaloneTaskRuns.get(capability);
     if (!entry) {
       return {
         kind: "failed",
-        error: new Error("task capability is stale or has already completed"),
+        error: new Error(
+          "task capability is stale or has already completed or belongs to a different runtime session",
+        ),
       };
     }
     if (entry.cleanupTimer) {
@@ -1753,12 +1749,11 @@ export const createVoydHost = async ({
     const taskIdsByCapability = new Map<number, number>();
 
     const resolveTaskCapability = (token: number): number => {
-      if (!taskCapabilities.owns(token)) {
-        throw new Error("task belongs to a different runtime session");
-      }
       const taskId = taskIdsByCapability.get(token);
       if (taskId === undefined) {
-        throw new Error("task capability is stale or has already completed");
+        throw new Error(
+          "task capability is stale or has already completed or belongs to a different runtime session",
+        );
       }
       return taskId;
     };
