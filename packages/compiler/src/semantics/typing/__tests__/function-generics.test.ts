@@ -691,49 +691,4 @@ pub fn main(value: Box<i32> | Box<i64> | None) -> void
     ]);
     expect(typeArgs).toEqual([expected]);
   });
-
-  it("combines generic bindings inferred from separate arguments", () => {
-    const ast = parse(
-      `
-obj Box<T> {}
-
-fn combine<T>(left: Box<T>, right: Box<T>) -> void
-  void
-
-pub fn main() -> void
-  combine(Box<i32> {}, Box<i64> {})
-`,
-      "multi_argument_union_inference.voyd",
-    );
-
-    const semantics = semanticsPipeline(ast);
-    const { hir, typing } = semantics;
-    const symbolTable = getSymbolTable(semantics);
-    const combineSymbol = symbolTable.resolve("combine", symbolTable.rootScope);
-    expect(typeof combineSymbol).toBe("number");
-    if (typeof combineSymbol !== "number") return;
-
-    const combineCall = Array.from(hir.expressions.values()).find(
-      (expr): expr is HirCallExpr => {
-        if (expr.exprKind !== "call") return false;
-        const callee = hir.expressions.get(expr.callee);
-        return (
-          callee?.exprKind === "identifier" &&
-          (callee as HirIdentifierExpr).symbol === combineSymbol
-        );
-      },
-    );
-    expect(combineCall).toBeDefined();
-    if (!combineCall) return;
-
-    const typeArgsByInstance = typing.callTypeArguments.get(combineCall.id);
-    const typeArgs = typeArgsByInstance
-      ? Array.from(typeArgsByInstance.values())[0]
-      : undefined;
-    const expected = typing.arena.internUnion([
-      typing.arena.internPrimitive("i32"),
-      typing.arena.internPrimitive("i64"),
-    ]);
-    expect(typeArgs).toEqual([expected]);
-  });
 });

@@ -3861,9 +3861,7 @@ const bindTypeParamRef = ({
   }
   if (typeSatisfies(existing, actual, ctx, state)) {
     bindings.set(expectedDesc.param, actual);
-    return;
   }
-  bindings.set(expectedDesc.param, ctx.arena.internUnion([existing, actual]));
 };
 
 const bindNominalObject = ({
