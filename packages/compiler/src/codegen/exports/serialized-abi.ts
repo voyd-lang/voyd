@@ -367,8 +367,17 @@ export const emitSerializedExportWrapper = ({
           write("write_i32", [ctx.mod.i32.const(hostExportId(exportName))]),
           write("begin_array", [ctx.mod.i32.const(2)]),
           write("write_i32", [ctx.mod.i32.const(1)]),
-          write("begin_array", [ctx.mod.i32.const(3)]),
+          write("begin_array", [ctx.mod.i32.const(8)]),
+          write("write_string", [emitStringLiteral("vm->host", ctx)]),
+          write("write_string", [
+            emitStringLiteral("export-completion", ctx),
+          ]),
+          write("write_string", [emitStringLiteral("encode", ctx)]),
+          write("write_string", [emitStringLiteral("sink", ctx)]),
           write("write_string", [emitStringLiteral("dto.write", ctx)]),
+          write("write_string", [
+            emitStringLiteral(provider.identity.id, ctx),
+          ]),
           write("write_string", [dtoWriteErrorMessage()]),
           write("write_null"),
           write("end_array"),
