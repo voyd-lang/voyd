@@ -1,22 +1,29 @@
 import binaryen from "binaryen";
-import { arrayGet } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   FunctionContext,
   FunctionMetadata,
 } from "../../context.js";
-import { coerceValueToType } from "../../structural.js";
 import { wasmTypeFor } from "../../types.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
 import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
-import { readProviderValueForType } from "./provider-values.js";
 import { HOST_COMPLETION_KIND } from "./handle-outcome.js";
 import { hostExportId } from "../../exports/export-abi.js";
 import {
   SELECTED_HOST_FRAME_TAG,
   SELECTED_HOST_FRAME_VERSION,
 } from "../../host-transport/frame-codec.js";
+import {
+  readDtoValueFromHostStream,
+  readHostStreamValue,
+} from "../../boundary/dto-stream-reader.js";
+import {
+  allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "../../locals.js";
+import { deriveBoundarySchema } from "../../boundary/schema.js";
 
 export const createEffectfulEntry = ({
   ctx,
@@ -121,22 +128,9 @@ const buildEffectfulEntryBody = ({
   const outLenLocal = 3;
 
   const provider = ensureSelectedHostTransportProvider(ctx);
-  const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
-  const arrayType = provider.unpackArray.resultType;
-  const storageType = provider.arrayRawStorage.resultType;
-
-  const frameArrayLocal = paramCount;
-  const frameStorageLocal = paramCount + 1;
-  const argsArrayLocal = paramCount + 2;
-  const argsStorageLocal = paramCount + 3;
-  const argsCountLocal = paramCount + 4;
-  const locals: binaryen.Type[] = [
-    arrayType,
-    storageType,
-    arrayType,
-    storageType,
-    binaryen.i32,
-  ];
+  const readerType = wasmTypeFor(provider.readerTypeId, ctx);
+  const readerLocal = paramCount;
+  const locals: binaryen.Type[] = [readerType];
   const fnCtx: FunctionContext = {
     bindings: new Map(),
     tempLocals: new Map(),
@@ -147,83 +141,42 @@ const buildEffectfulEntryBody = ({
     effectful: true,
   };
 
-  const decode = provider.decodeValue;
-  const decoded = ctx.mod.call(
-    decode.wasmName,
+  const readerRef = () => ctx.mod.local.get(readerLocal, readerType);
+  const createReader = ctx.mod.call(
+    provider.createReader.wasmName,
     [
       ctx.mod.local.get(inputPtrLocal, binaryen.i32),
       ctx.mod.local.get(inputLenLocal, binaryen.i32),
     ],
-    decode.resultType,
+    provider.createReader.resultType,
   );
-  const decodedValue = coerceValueToType({
-    value: decoded,
-    actualType: decode.resultTypeId,
-    targetType: provider.valueTypeId,
-    ctx,
-    fnCtx,
-  });
-  const frameArray = ctx.mod.call(
-    provider.unpackArray.wasmName,
-    [decodedValue],
-    arrayType,
-  );
-  const frameStorage = ctx.mod.call(
-    provider.arrayRawStorage.wasmName,
-    [ctx.mod.local.get(frameArrayLocal, arrayType)],
-    storageType,
-  );
-  const frameField = (index: number): binaryen.ExpressionRef =>
-    arrayGet(
-      ctx.mod,
-      ctx.mod.local.get(frameStorageLocal, storageType),
-      ctx.mod.i32.const(index),
-      providerValueType,
-      false,
-    );
-  const argsArray = ctx.mod.call(
-    provider.unpackArray.wasmName,
-    [frameField(3)],
-    arrayType,
-  );
-  const argsCount = ctx.mod.call(
-    provider.arrayLength.wasmName,
-    [ctx.mod.local.get(argsArrayLocal, arrayType)],
-    binaryen.i32,
-  );
-  const argsStorage = ctx.mod.call(
-    provider.arrayRawStorage.wasmName,
-    [ctx.mod.local.get(argsArrayLocal, arrayType)],
-    storageType,
-  );
+  const read = (name: string) =>
+    readHostStreamValue({
+      reader: readerRef(),
+      readerTypeId: provider.readerTypeId,
+      name,
+      ctx,
+      fnCtx,
+    });
   const baseExportName = exportName.replace(/_effectful(?:_raw)?$/, "");
   const checkFrame = ctx.mod.if(
     ctx.mod.i32.or(
       ctx.mod.i32.or(
+        ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(4)),
         ctx.mod.i32.ne(
-          ctx.mod.call(
-            provider.unpackI32.wasmName,
-            [frameField(0)],
-            binaryen.i32,
-          ),
+          read("read_i32"),
           ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
         ),
+      ),
+      ctx.mod.i32.or(
         ctx.mod.i32.ne(
-          ctx.mod.call(
-            provider.unpackI32.wasmName,
-            [frameField(1)],
-            binaryen.i32,
-          ),
+          read("read_i32"),
           ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportInvocation),
         ),
-      ),
-      ctx.mod.i32.ne(
-        ctx.mod.call(
-          provider.unpackI32.wasmName,
-          [frameField(2)],
-          binaryen.i32,
+        ctx.mod.i32.ne(
+          read("read_i32"),
+          ctx.mod.i32.const(hostExportId(baseExportName)),
         ),
-        ctx.mod.i32.const(hostExportId(baseExportName)),
       ),
     ),
     ctx.mod.unreachable(),
@@ -231,46 +184,58 @@ const buildEffectfulEntryBody = ({
   );
   const checkArgs = ctx.mod.if(
     ctx.mod.i32.ne(
-      ctx.mod.local.get(argsCountLocal, binaryen.i32),
+      read("begin_array"),
       ctx.mod.i32.const(meta.paramTypeIds.length),
     ),
     ctx.mod.unreachable(),
     ctx.mod.nop(),
   );
-  const userArgs = meta.paramTypeIds.map((typeId, index) => {
-    const element = arrayGet(
-      ctx.mod,
-      ctx.mod.local.get(argsStorageLocal, storageType),
-      ctx.mod.i32.const(index),
-      providerValueType,
-      false,
-    );
-    const typedPayload = ctx.mod.call(
-      provider.unpackArray.wasmName,
-      [element],
-      arrayType,
-    );
-    const typedPayloadStorage = ctx.mod.call(
-      provider.arrayRawStorage.wasmName,
-      [typedPayload],
-      storageType,
-    );
-    const payload = arrayGet(
-      ctx.mod,
-      typedPayloadStorage,
-      ctx.mod.i32.const(1),
-      providerValueType,
-      false,
-    );
-    return readProviderValueForType({
-      ctx,
-      provider: provider,
-      value: payload,
+  const argBindings = meta.paramTypeIds.map((typeId) =>
+    allocateTempLocal(wasmTypeFor(typeId, ctx), fnCtx, typeId, ctx),
+  );
+  const readArgs = meta.paramTypeIds.flatMap((typeId, index) => {
+    const schema = deriveBoundarySchema({
       typeId,
-      fnCtx,
+      ctx,
       label: `${exportName} arg${index}`,
+      options: { tagStandaloneVariants: true, portableNames: true },
     });
+    return [
+      ctx.mod.if(
+        ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(2)),
+        ctx.mod.unreachable(),
+      ),
+      ctx.mod.drop(read("read_string")),
+      storeLocalValue({
+        binding: argBindings[index]!,
+        value: readDtoValueFromHostStream({
+          reader: readerRef(),
+          readerTypeId: provider.readerTypeId,
+          schema,
+          ctx,
+          fnCtx,
+        }),
+        ctx,
+        fnCtx,
+      }),
+      ctx.mod.drop(read("end_array")),
+    ];
   });
+  const userArgs = argBindings.map((binding) => loadLocalValue(binding, ctx));
+  const finishRead = [
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.if(
+      ctx.mod.i32.eqz(
+        ctx.mod.call(
+          provider.readerComplete.wasmName,
+          [readerRef()],
+          provider.readerComplete.resultType,
+        ),
+      ),
+      ctx.mod.unreachable(),
+    ),
+  ];
   const result = effectfulCall({ ctx, runtime, meta, args: userArgs });
   const dispatched = dispatch
     ? ctx.mod.call(ensureDispatcher(ctx), [result], runtime.outcomeType)
@@ -287,13 +252,11 @@ const buildEffectfulEntryBody = ({
     result: ctx.mod.block(
       null,
       [
-        ctx.mod.local.set(frameArrayLocal, frameArray),
-        ctx.mod.local.set(frameStorageLocal, frameStorage),
+        ctx.mod.local.set(readerLocal, createReader),
         checkFrame,
-        ctx.mod.local.set(argsArrayLocal, argsArray),
-        ctx.mod.local.set(argsStorageLocal, argsStorage),
-        ctx.mod.local.set(argsCountLocal, argsCount),
         checkArgs,
+        ...readArgs,
+        ...finishRead,
         dispatched,
       ],
       runtime.outcomeType,
