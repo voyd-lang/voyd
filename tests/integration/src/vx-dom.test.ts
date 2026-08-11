@@ -11,6 +11,7 @@ import {
   mountVxApp,
   renderVxNode,
   type VxAppRuntime,
+  type VxRuntimeStep,
   type VoydVxAppHost,
 } from "@voyd-lang/vx-dom";
 
@@ -636,7 +637,7 @@ pub fn multi_document() -> String
     const app = {
       ...baseApp,
       dispatch: async (message: Parameters<typeof baseApp.dispatch>[0]) => {
-        const step = await baseApp.dispatch(message);
+        const step = (await baseApp.dispatch(message)) as VxRuntimeStep;
         const command = step.commands as
           | (Record<PropertyKey, unknown> & { kind?: string; taskId?: number })
           | undefined;
