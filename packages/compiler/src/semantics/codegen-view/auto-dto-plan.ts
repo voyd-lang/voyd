@@ -235,19 +235,21 @@ const derive = ({
   try {
     const array = arrayInfo(typeId, program);
     if (array) {
-      assertArrayStorage(array.arrayTypeId, path, program);
-      return {
-        kind: "array",
-        typeId: array.arrayTypeId,
-        elementTypeId: array.elementTypeId,
-        element: derive({
-          typeId: array.elementTypeId,
-          moduleId,
-          path: `${path}[]`,
-          active,
-          program,
-        }),
-      };
+      return withAlias(
+        {
+          kind: "array",
+          typeId: array.arrayTypeId,
+          elementTypeId: array.elementTypeId,
+          element: derive({
+            typeId: array.elementTypeId,
+            moduleId,
+            path: `${path}[]`,
+            active,
+            program,
+          }),
+        },
+        typeId,
+      );
     }
     const desc = program.types.getTypeDesc(typeId);
     if (desc.kind === "recursive") {
@@ -265,13 +267,16 @@ const derive = ({
     }
     if (desc.kind === "intersection") {
       if (typeof desc.nominal === "number") {
-        return derive({
-          typeId: desc.nominal,
-          moduleId,
-          path,
-          active,
-          program,
-        });
+        return withAlias(
+          derive({
+            typeId: desc.nominal,
+            moduleId,
+            path,
+            active,
+            program,
+          }),
+          typeId,
+        );
       }
       if (typeof desc.structural === "number") {
         return deriveRecord({ typeId, moduleId, path, active, program });
@@ -552,22 +557,6 @@ const structuralFields = (
     }
   }
   return undefined;
-};
-
-const assertArrayStorage = (
-  typeId: TypeId,
-  path: string,
-  program: ProgramCodegenView,
-): void => {
-  const storage = structuralFields(typeId, program)?.find(
-    (field) => field.name === "storage",
-  );
-  if (
-    !storage ||
-    program.types.getTypeDesc(storage.type).kind !== "fixed-array"
-  ) {
-    unsupported(typeId, path, program, "array storage layout is unavailable");
-  }
 };
 
 const primitivePlan = (

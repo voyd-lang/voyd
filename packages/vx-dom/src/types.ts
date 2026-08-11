@@ -115,7 +115,7 @@ export type RetainedEventHandlerRegistry = {
 };
 
 export type VxMessage =
-  | { kind: "msgpack"; value: unknown }
+  | { kind: "value"; value: unknown }
   | { kind: "debug"; name: string; payload?: unknown };
 
 export type VxRuntimeEventMessage = {

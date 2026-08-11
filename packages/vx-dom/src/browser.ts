@@ -4209,10 +4209,10 @@ function toVxMessage(input: unknown): VxMessage {
   ) {
     return input as VxMessage;
   }
-  if (isRecord(input) && input.kind === "msgpack") {
+  if (isRecord(input) && input.kind === "value") {
     return input as VxMessage;
   }
-  return { kind: "msgpack", value: input };
+  return { kind: "value", value: input };
 }
 
 function mapRuntimeMessage(

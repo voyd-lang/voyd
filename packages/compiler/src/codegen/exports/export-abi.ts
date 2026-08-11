@@ -28,14 +28,22 @@ export type TaskCompletionAbiEntry = {
   result: BoundarySchema;
 };
 
+export type CallbackAbiEntry = {
+  name: string;
+  params: readonly BoundarySchema[];
+  result?: BoundarySchema;
+};
+
 export const emitExportAbiSection = ({
   mod,
   entries,
   taskCompletions = [],
+  callbacks = [],
 }: {
   mod: binaryen.Module;
   entries: readonly ExportAbiEntry[];
   taskCompletions?: readonly TaskCompletionAbiEntry[];
+  callbacks?: readonly CallbackAbiEntry[];
 }): void => {
   const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
   const ids = new Set(sorted.map((entry) => entry.id));
@@ -51,6 +59,7 @@ export const emitExportAbiSection = ({
     taskCompletions: [...taskCompletions].sort((a, b) =>
       a.name.localeCompare(b.name),
     ),
+    callbacks: [...callbacks].sort((a, b) => a.name.localeCompare(b.name)),
   });
   const bytes = new TextEncoder().encode(payload);
   mod.addCustomSection(EXPORT_ABI_SECTION, bytes);

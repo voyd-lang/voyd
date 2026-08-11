@@ -60,6 +60,7 @@ import { ensureLinearMemoryExport } from "./memory-exports.js";
 import {
   BoundarySchemaError,
   deriveBoundarySchema,
+  type BoundarySchema,
   withDtoFingerprint,
 } from "./boundary/schema.js";
 import {
@@ -153,6 +154,14 @@ export const TASK_STARTER_BOUNDARIES_KEY = Symbol(
 export type TaskStarterBoundary = {
   name: string;
   resultTypeId: TypeId;
+};
+export const RETAINED_CALLBACK_BOUNDARIES_KEY = Symbol(
+  "voyd.callback.boundaries",
+);
+export type RetainedCallbackBoundary = {
+  name: string;
+  params: readonly BoundarySchema[];
+  result?: BoundarySchema;
 };
 const CALLBACK_IMPORT_MODULE = "voyd.callback";
 const CALLBACK_IMPORTS_KEY = Symbol("voyd.callback.imports");
@@ -507,6 +516,16 @@ const ensureRetainedCallbackHelper = ({
 
   const base = getClosureTypeInfo(closureTypeId, ctx);
   const exportName = `__voyd_callback_${sanitizeTaskKey(base.key)}`;
+  ctx.programHelpers
+    .getHelperState(
+      RETAINED_CALLBACK_BOUNDARIES_KEY,
+      () => new Map<string, RetainedCallbackBoundary>(),
+    )
+    .set(exportName, {
+      name: exportName,
+      params: parameterCodecs.map(({ schema }) => withDtoFingerprint(schema)),
+      ...(returnSchema ? { result: withDtoFingerprint(returnSchema) } : {}),
+    });
   const locals: binaryen.Type[] = [];
   const helperFnCtx: FunctionContext = {
     bindings: new Map(),

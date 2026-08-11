@@ -31,7 +31,7 @@ import {
   encodeBoundaryArgs,
   encodeDirectBoundaryArgs,
 } from "./boundary-values.js";
-import type { ExportAbiEntry } from "./protocol/export-abi.js";
+import type { BoundarySchema, ExportAbiEntry } from "./protocol/export-abi.js";
 import {
   resolveHostTransport,
   type HostTransportAdapter,
@@ -326,6 +326,7 @@ const buildRetainedCallbackImportModules = ({
   scopeManager,
   getActiveScopeOwner,
   nextInvocationId,
+  callbackAbiByName,
 }: {
   importDescriptors: WebAssembly.ModuleImportDescriptor[];
   getInstance: () => WebAssembly.Instance;
@@ -338,6 +339,10 @@ const buildRetainedCallbackImportModules = ({
   scopeManager: RetainedCallbackScopeManager;
   getActiveScopeOwner: () => RetainedCallbackScopeOwner | undefined;
   nextInvocationId: () => number;
+  callbackAbiByName: ReadonlyMap<
+    string,
+    { params: readonly BoundarySchema[]; result?: BoundarySchema }
+  >;
 }): WebAssembly.Imports => {
   const callbackImportsByModule = new Map<
     string,
@@ -357,6 +362,12 @@ const buildRetainedCallbackImportModules = ({
       const callbackExportName = retainedCallbackExportNameFrom(descriptor);
       if (!callbackExportName) {
         return;
+      }
+      const callbackAbi = callbackAbiByName.get(callbackExportName);
+      if (!callbackAbi) {
+        throw new Error(
+          `Voyd module is missing DTO metadata for retained callback ${callbackExportName}`,
+        );
       }
       const callbackImports =
         callbackImportsByModule.get(descriptor.module) ?? {};
@@ -408,7 +419,11 @@ const buildRetainedCallbackImportModules = ({
             args: [
               {
                 fingerprint: `callback:${callbackExportName}`,
-                value: payload,
+                value: encodeRetainedCallbackPayload({
+                  callbackExportName,
+                  schemas: callbackAbi.params,
+                  payload,
+                }),
               },
             ],
           });
@@ -474,7 +489,13 @@ const buildRetainedCallbackImportModules = ({
           if (completion.outcome.kind === "failure") {
             throw new Error(completion.outcome.failure.message);
           }
-          const result = completion.outcome.value.value;
+          const result = callbackAbi.result
+            ? decodeBoundaryResult({
+                exportName: callbackExportName,
+                schema: callbackAbi.result,
+                value: completion.outcome.value.value,
+              })
+            : completion.outcome.value.value;
           return decorateResult?.(result) ?? result;
         });
       }) as CallableFunction;
@@ -559,6 +580,30 @@ const retainedCallbackExportNameFrom = (
     return importName.slice("retain_event__".length);
   }
   return undefined;
+};
+
+const encodeRetainedCallbackPayload = ({
+  callbackExportName,
+  schemas,
+  payload,
+}: {
+  callbackExportName: string;
+  schemas: readonly BoundarySchema[];
+  payload: unknown;
+}): unknown => {
+  if (schemas.length === 0) return null;
+  const args =
+    schemas.length === 1
+      ? [payload]
+      : Array.isArray(payload)
+        ? payload
+        : [payload];
+  const encoded = encodeBoundaryArgs({
+    exportName: callbackExportName,
+    schemas,
+    args,
+  });
+  return encoded.length === 1 ? encoded[0] : encoded;
 };
 
 const isImportModuleRecord = (
@@ -914,6 +959,9 @@ export const createVoydHost = async ({
   const taskCompletionByName = new Map(
     exportAbi.taskCompletions.map((entry) => [entry.name, entry] as const),
   );
+  const callbackAbiByName = new Map(
+    exportAbi.callbacks.map((entry) => [entry.name, entry] as const),
+  );
   const taskRuntimeImports = buildTaskRuntimeImportModule({
     importDescriptors: WebAssembly.Module.imports(module),
     getContext: () => activeTaskImportContext,
@@ -978,6 +1026,7 @@ export const createVoydHost = async ({
     scopeManager: callbackScopeManager,
     getActiveScopeOwner: () => activeCallbackScopeOwner,
     nextInvocationId: () => nextRetainedCallbackInvocationId++,
+    callbackAbiByName,
   });
   const retainedCallbackScopeImports = buildRetainedCallbackScopeImportModule({
     importDescriptors: WebAssembly.Module.imports(module),
@@ -2826,6 +2875,12 @@ export const createVoydHost = async ({
       name: LINEAR_MEMORY_EXPORT,
     });
     const invocationId = nextRetainedCallbackInvocationId++;
+    const callbackAbi = callbackAbiByName.get(callbackExportName);
+    if (!callbackAbi) {
+      throw new Error(
+        `Voyd module is missing DTO metadata for retained callback ${callbackExportName}`,
+      );
+    }
     const encodedPayload = transport.encodeFrame({
       kind: "callback-invocation",
       invocationId,
@@ -2833,7 +2888,11 @@ export const createVoydHost = async ({
       args: [
         {
           fingerprint: `callback:${callbackExportName}`,
-          value: payload,
+          value: encodeRetainedCallbackPayload({
+            callbackExportName,
+            schemas: callbackAbi.params,
+            payload,
+          }),
         },
       ],
     });
@@ -2872,7 +2931,11 @@ export const createVoydHost = async ({
           });
         }
       },
-      { kind: "callback", id: invocationId },
+      {
+        kind: "callback",
+        id: invocationId,
+        schema: callbackAbi.result,
+      },
     );
     return attachTaskObserver(
       await unwrapRunOutcome(managed.outcome),

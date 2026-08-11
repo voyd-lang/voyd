@@ -1,6 +1,6 @@
 use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
-use std::data::{ CustomDto, CustomDtoError }
+use std::data::{ CustomDto, CustomDtoError, DataValue }
 use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
@@ -72,72 +72,58 @@ fn lower_vx_plan(value: VxThunkPlan) -> MsgPack
     None:
       msgpack::make_null()
 
-impl<Model, Msg> CustomDto<Program<Model, Msg>, Bytes> for Program<Model, Msg>
-  fn write(value: Program<Model, Msg>) -> Bytes
-    encode_vx_wire(lower_program(value))
+impl<Model, Msg> CustomDto<Program<Model, Msg>, DataValue> for Program<Model, Msg>
+  fn write(value: Program<Model, Msg>) -> DataValue
+    msgpack::to_data_value(lower_program(value))
 
-  fn read(value: Bytes) -> Result<Program<Model, Msg>, CustomDtoError>
+  fn read(value: DataValue) -> Result<Program<Model, Msg>, CustomDtoError>
     Ok<Program<Model, Msg>> {
       value: Program<Model, Msg> {
-        plan: vx_plan(() -> MsgPack => decode_vx_wire(value))
+        plan: vx_plan(() -> MsgPack => msgpack::from_data_value(value))
       }
     }
 
-impl<Msg> CustomDto<Sub<Msg>, Bytes> for Sub<Msg>
-  fn write(value: Sub<Msg>) -> Bytes
-    encode_vx_wire(lower_sub(value))
+impl<Msg> CustomDto<Sub<Msg>, DataValue> for Sub<Msg>
+  fn write(value: Sub<Msg>) -> DataValue
+    msgpack::to_data_value(lower_sub(value))
 
-  fn read(value: Bytes) -> Result<Sub<Msg>, CustomDtoError>
+  fn read(value: DataValue) -> Result<Sub<Msg>, CustomDtoError>
     Ok<Sub<Msg>> {
       value: Sub<Msg> {
-        plan: vx_plan(() -> MsgPack => decode_vx_wire(value))
+        plan: vx_plan(() -> MsgPack => msgpack::from_data_value(value))
       }
     }
 
-impl<Msg> CustomDto<Cmd<Msg>, Bytes> for Cmd<Msg>
-  fn write(value: Cmd<Msg>) -> Bytes
-    encode_vx_wire(lower_command(value))
+impl<Msg> CustomDto<Cmd<Msg>, DataValue> for Cmd<Msg>
+  fn write(value: Cmd<Msg>) -> DataValue
+    msgpack::to_data_value(lower_command(value))
 
-  fn read(value: Bytes) -> Result<Cmd<Msg>, CustomDtoError>
+  fn read(value: DataValue) -> Result<Cmd<Msg>, CustomDtoError>
     Ok<Cmd<Msg>> {
-      value: command_plan<Msg>(() -> MsgPack => decode_vx_wire(value))
+      value: command_plan<Msg>(() -> MsgPack => msgpack::from_data_value(value))
     }
 
-impl<Msg> CustomDto<Html<Msg>, Bytes> for Html<Msg>
-  fn write(value: Html<Msg>) -> Bytes
-    encode_vx_wire(lower_html_node(value))
+impl<Msg> CustomDto<Html<Msg>, DataValue> for Html<Msg>
+  fn write(value: Html<Msg>) -> DataValue
+    msgpack::to_data_value(lower_html_node(value))
 
-  fn read(value: Bytes) -> Result<Html<Msg>, CustomDtoError>
+  fn read(value: DataValue) -> Result<Html<Msg>, CustomDtoError>
     Ok<Html<Msg>> {
       value: Html<Msg> {
-        plan: vx_plan(() -> MsgPack => decode_vx_wire(value))
+        plan: vx_plan(() -> MsgPack => msgpack::from_data_value(value))
       }
     }
 
-impl<Msg> CustomDto<Attr<Msg>, Bytes> for Attr<Msg>
-  fn write(value: Attr<Msg>) -> Bytes
-    encode_vx_wire(lower_html_attr(value))
+impl<Msg> CustomDto<Attr<Msg>, DataValue> for Attr<Msg>
+  fn write(value: Attr<Msg>) -> DataValue
+    msgpack::to_data_value(lower_html_attr(value))
 
-  fn read(value: Bytes) -> Result<Attr<Msg>, CustomDtoError>
+  fn read(value: DataValue) -> Result<Attr<Msg>, CustomDtoError>
     Ok<Attr<Msg>> {
       value: Attr<Msg> {
-        plan: vx_plan(() -> MsgPack => decode_vx_wire(value))
+        plan: vx_plan(() -> MsgPack => msgpack::from_data_value(value))
       }
     }
-
-fn encode_vx_wire(value: MsgPack) -> Bytes
-  match(msgpack::encode_value_bytes(value))
-    Ok<Bytes> { value }:
-      value
-    Err:
-      ByteBuffer::init().as_bytes()
-
-fn decode_vx_wire(value: Bytes) -> MsgPack
-  match(msgpack::decode_value_bytes(value))
-    Ok<MsgPack> { value }:
-      value
-    Err:
-      msgpack::make_null()
 
 fn typed_html_node_payloads<Msg>(values: Array<Html<Msg>>) -> Array<MsgPack>
   let ~out = Array<MsgPack>::with_capacity(values.len())

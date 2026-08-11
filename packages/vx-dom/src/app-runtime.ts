@@ -521,7 +521,7 @@ async function resolveRuntimeMessage(
   host: VoydVxAppHost,
   message: VxRuntimeMessage,
 ): Promise<unknown> {
-  if (message.kind === "msgpack") return message.value;
+  if (message.kind === "value") return message.value;
   if (message.kind === "event") return resolveEventMessage(host, message);
   if (message.kind === "subscription")
     return resolveSubscriptionMessage(message);

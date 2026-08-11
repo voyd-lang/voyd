@@ -513,7 +513,7 @@ pub fn multi_document() -> String
     await nextTurn();
 
     expect(seenMessages).toEqual([
-      { kind: "msgpack", value: { $variant: "Save" } },
+      { kind: "value", value: { tag: "Save" } },
     ]);
 
     mounted.dispose();

@@ -76,7 +76,9 @@ import {
 } from "./receiver-specialization.js";
 import {
   EFFECTFUL_RETAINED_CALLBACK_TARGETS_KEY,
+  RETAINED_CALLBACK_BOUNDARIES_KEY,
   TASK_STARTER_BOUNDARIES_KEY,
+  type RetainedCallbackBoundary,
   type TaskStarterBoundary,
 } from "./intrinsics.js";
 import {
@@ -1767,6 +1769,14 @@ export const emitModuleExports = (
     mod: ctx.mod,
     entries: exportAbiEntries,
     taskCompletions,
+    callbacks: Array.from(
+      ctx.programHelpers
+        .getHelperState(
+          RETAINED_CALLBACK_BOUNDARIES_KEY,
+          () => new Map<string, RetainedCallbackBoundary>(),
+        )
+        .values(),
+    ),
   });
 
   const retainedCallbackTargets = Array.from(

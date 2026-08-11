@@ -1,7 +1,7 @@
 //! Server-side rendering helpers for current `std::vx` HTML values.
 
 use std::array::Array
-use std::data::{ DataBytes }
+use std::data::DataValue
 use std::data::self as data
 use std::dict::Dict
 use std::error::panic
@@ -108,15 +108,10 @@ fn hydrated_html_response_impl<Model, Msg>(response: Response, { view: vx::Html<
     .text(hydrated_document_impl<Model, Msg>(view: view, hydrate: hydrate))
 
 fn lower_html<Msg>(value: vx::Html<Msg>) -> MsgPack
-  match(data::encode(value))
-    DataBytes { value: bytes }:
-      match(msgpack::decode_value_bytes(bytes))
-        Ok<MsgPack> { value }:
-          value
-        Err<MsgPackError>:
-          panic("invalid VX HTML plan")
-          msgpack::make_null()
-    else:
+  match(data::decode<DataValue>(data::encode(value)))
+    Ok<DataValue> { value }:
+      msgpack::from_data_value(value)
+    Err:
       panic("invalid VX HTML DTO representation")
       msgpack::make_null()
 

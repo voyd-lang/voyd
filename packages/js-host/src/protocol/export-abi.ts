@@ -89,6 +89,11 @@ export type ParsedExportAbi = {
   host?: HostTransportMetadata;
   exports: ExportAbiEntry[];
   taskCompletions: Array<{ name: string; result: BoundarySchema }>;
+  callbacks: Array<{
+    name: string;
+    params: readonly BoundarySchema[];
+    result?: BoundarySchema;
+  }>;
 };
 
 export const EXPORT_ABI_SECTION = "voyd.export_abi";
@@ -99,7 +104,7 @@ export const parseExportAbi = (
 ): ParsedExportAbi => {
   const sections = WebAssembly.Module.customSections(module, sectionName);
   if (sections.length === 0) {
-    return { version: 0, exports: [], taskCompletions: [] };
+    return { version: 0, exports: [], taskCompletions: [], callbacks: [] };
   }
   const payload = new Uint8Array(sections[0]!);
   const json = new TextDecoder().decode(payload);
@@ -110,6 +115,11 @@ export const parseExportAbi = (
     transport?: { id?: string; version?: number };
     exports?: ExportAbiEntry[];
     taskCompletions?: Array<{ name: string; result: BoundarySchema }>;
+    callbacks?: Array<{
+      name: string;
+      params: readonly BoundarySchema[];
+      result?: BoundarySchema;
+    }>;
   };
   const host =
     typeof parsed.hostAbi === "number" &&
@@ -132,6 +142,7 @@ export const parseExportAbi = (
     taskCompletions: Array.isArray(parsed.taskCompletions)
       ? parsed.taskCompletions
       : [],
+    callbacks: Array.isArray(parsed.callbacks) ? parsed.callbacks : [],
   };
 };
 import type { HostTransportMetadata } from "./host-transport.js";

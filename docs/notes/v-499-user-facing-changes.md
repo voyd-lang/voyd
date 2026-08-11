@@ -93,6 +93,10 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - VX plans are lowered lazily when their DTO representation crosses a host or
   server-rendering boundary. Building and combining plans no longer performs
   an eager encode/decode cycle.
+- VX boundary values now use the provider-neutral `DataValue` representation.
+  The DOM runtime receives decoded values from the selected host transport and
+  no longer decodes a nested MessagePack byte payload. Runtime value messages
+  use `kind: "value"`; the former `kind: "msgpack"` wrapper is removed.
 - `std::web` HTML rendering accepts `Html<Msg>` for any message type, so
   server-rendered event handlers keep their real message type. The public raw
   `std::vx::lower_html` byte escape hatch has been removed.
