@@ -4,7 +4,7 @@ use std::string::type::String
 use std::vx::self as vx
 
 type View<Msg> = vx::Html<Msg>
-type Child<Msg> = vx::HtmlNode
+type Child<Msg> = vx::Html<Msg>
 
 enum ButtonSize
   Default
@@ -13,10 +13,10 @@ enum ButtonSize
 enum TestMsg
   Clicked
 
-fn icon() -> vx::HtmlNode
+fn icon() -> vx::Html<void>
   vx::html_element(
     tag: "span",
-    children: Array<vx::HtmlNode>::init()
+    children: Array<vx::Html<void>>::init()
   )
 
 fn Button<Msg>({

@@ -7,7 +7,7 @@ pub fn init() -> i32
 pub fn step(model: i32, message: i32) -> i32
   model
 
-pub fn view(): Component -> HtmlNode
+pub fn view(): Component -> Html<void>
   let (count, set_count) = state(initial: 0)
   <button on_click={() =>
     set_count(count + 1)

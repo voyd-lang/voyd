@@ -168,7 +168,7 @@ fn EmptySearch({ matches: Array<Article> }) -> Html<Msg>
   if matches.is_empty():
     <p class="empty-search">No articles match that search.</p>
   else:
-    fragment(Array<HtmlNode>::init())
+    fragment(Array<Html<void>>::init())
 
 fn StatusBar({ model: Model }) -> Html<Msg>
   <div class="status-bar">
@@ -224,7 +224,7 @@ fn ArticleView({ model: Model }) -> Html<Msg>
 
 fn DeleteButton({ article: Article }) -> Html<Msg>
   if article.slug == "home":
-    fragment(Array<HtmlNode>::init())
+    fragment(Array<Html<void>>::init())
   else:
     <button class="button quiet-danger" type="button" data-testid="delete-article" on_click={Msg::AskDelete {}}>
       Delete
@@ -243,7 +243,7 @@ fn DeleteConfirmation({ model: Model, article: Article }) -> Html<Msg>
       </div>
     </section>
   else:
-    fragment(Array<HtmlNode>::init())
+    fragment(Array<Html<void>>::init())
 
 fn RelatedSection({ article: Article, articles: Array<Article> }) -> Html<Msg>
   let related = related_articles(article, articles)

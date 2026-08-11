@@ -553,10 +553,13 @@ const emptyHtmlChildren = (): Expr =>
       }),
       call(
         "generics",
-        compilerOwnedIdentifier({
-          moduleId: VX_HELPER_MODULE_ID,
-          name: "HtmlNode",
-        }),
+        call(
+          compilerOwnedIdentifier({
+            moduleId: VX_HELPER_MODULE_ID,
+            name: "Html",
+          }),
+          call("generics", identifier("void")),
+        ),
       ),
     ),
     surfaceCall("init"),

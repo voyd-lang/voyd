@@ -8,7 +8,7 @@ const source = `use std::array::Array
 use std::string::type::{ String, new_string }
 use std::vx::all
 
-fn App() -> HtmlNode
+fn App() -> Html<void>
   let features = feature_list()
   <Card>
     <Title>Voyd + VX</Title>
@@ -16,7 +16,7 @@ fn App() -> HtmlNode
     <List value={features} />
   </Card>
 
-fn Title({ children: Array<HtmlNode> }) -> HtmlNode
+fn Title({ children: Array<Html<void>> }) -> Html<void>
   <h2 style="
     margin: 0 0 8px 0;
     font-size: 20px;
@@ -27,7 +27,7 @@ fn Title({ children: Array<HtmlNode> }) -> HtmlNode
     {children}
   </h2>
 
-fn Card({ children: Array<HtmlNode> }) -> HtmlNode
+fn Card({ children: Array<Html<void>> }) -> Html<void>
   <div style="
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     margin: 8px;
@@ -40,16 +40,16 @@ fn Card({ children: Array<HtmlNode> }) -> HtmlNode
     {children}
   </div>
 
-fn List({ value: Array<String> }) -> HtmlNode
+fn List({ value: Array<String> }) -> Html<void>
   <ul style="margin: 0; padding-left: 16px;">
-    {value.map((f: String) -> HtmlNode => <li style="line-height: 1.6;">{f}</li>)}
+    {value.map((f: String) -> Html<void> => <li style="line-height: 1.6;">{f}</li>)}
   </ul>
 
 fn feature_list() -> Array<String>
   ["WASM speed", "Tiny runtime", "Clean syntax"]
 
 
-pub fn main() -> HtmlNode
+pub fn main() -> Html<void>
   App()
 `;
 

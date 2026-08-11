@@ -1128,7 +1128,7 @@ test "static files middleware keeps absolute-looking paths under root":
   assert(read_paths.with((paths) => optional_string_or(paths.get(0), "missing".as_slice()).equals("/site/public/absolute-looking/path.txt")), eq: true)
 
 test "html rendering turns vx nodes into a text html response":
-  let page: HtmlNode =
+  let page: Html<void> =
     <main class="home">
       <h1>Hello &amp; welcome</h1>
       <p data-count="1">Voyd</p>
@@ -1164,7 +1164,7 @@ test "html rendering includes props and styles and respects void elements":
       disabled(true),
       style(name: "display", value: "grid")
     ],
-    children: Array<HtmlNode>::init()
+    children: Array<Html<void>>::init()
   )
 
   let rendered = render(input)
@@ -1182,7 +1182,7 @@ test "VX renderer accepts a basic SVG tree":
       vx::html_element(
         tag: "path",
         attrs: [vx::attr(name: "d", value: "M1 1h2")],
-        children: Array<HtmlNode>::init()
+        children: Array<Html<void>>::init()
       )
     ]
   )
@@ -1200,11 +1200,11 @@ test "VX renderer preserves canonical parser-adjusted SVG names":
       vx::html_element(
         tag: "linearGradient",
         attrs: [vx::attr(name: "gradientUnits", value: "userSpaceOnUse")],
-        children: Array<HtmlNode>::init()
+        children: Array<Html<void>>::init()
       ),
       vx::html_element(
         tag: "feDropShadow",
-        children: Array<HtmlNode>::init()
+        children: Array<Html<void>>::init()
       )
     ]
   )
@@ -1234,7 +1234,7 @@ test "VX renderer uses HTML for children of SVG integration points":
   assert(rendered.contains("<desc><span>Description</span></desc>".as_slice()), eq: true)
 
 test "html rendering unwraps mapped child views":
-  let child: HtmlNode = <p class="child">Mapped child</p>
+  let child: Html<void> = <p class="child">Mapped child</p>
   let mapped = map_html<MappedHtmlTestMsg, MappedHtmlTestMsg>(
     html: child,
     handler: (message: MappedHtmlTestMsg) -> MappedHtmlTestMsg => message
@@ -1244,7 +1244,7 @@ test "html rendering unwraps mapped child views":
   assert(rendered.contains("<p class=\"child\">Mapped child</p>".as_slice()), eq: true)
 
 test "html rendering preserves carriage returns through parsing":
-  let paragraph: HtmlNode = <p title={"A\r\nB"}>{"A\r\nB"}</p>
+  let paragraph: Html<void> = <p title={"A\r\nB"}>{"A\r\nB"}</p>
   let rendered = render(paragraph)
 
   assert(rendered.contains("title=\"A&#13;\nB\"".as_slice()), eq: true)

@@ -993,7 +993,7 @@ fn Preview({ model: Model }) -> Html<Msg>
       <pre class="mt-4 whitespace-pre-wrap rounded-md bg-zinc-50 p-4 text-sm leading-7">{model.body}</pre>
     </aside>
   else:
-    fragment(Array<HtmlNode>::init())
+    fragment(Array<Html<void>>::init())
 
 fn status_label(model: Model) -> String
   if model.saving:

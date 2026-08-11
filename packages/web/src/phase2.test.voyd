@@ -789,7 +789,7 @@ test "record route helpers compose with timeout policies":
   assert(true, eq: true)
 
 test "html document can include hydration model and client entry":
-  let page: HtmlNode =
+  let page: Html<void> =
     <html>
       <body>
         <main id="app">

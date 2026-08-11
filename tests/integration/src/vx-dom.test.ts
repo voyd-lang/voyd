@@ -40,6 +40,10 @@ const explicitStateIdEntryPath = path.join(
   fixtureRoot,
   "vx-state-explicit-id-rejected.voyd",
 );
+const planTypesRejectedEntryPath = path.join(
+  fixtureRoot,
+  "vx-plan-types-rejected.voyd",
+);
 const valueArrayModelEntryPath = path.join(
   fixtureRoot,
   "vx-value-array-model.voyd",
@@ -132,7 +136,7 @@ use pkg::web::{
 use std::array::Array
 use std::vx::all
 
-pub fn tree() -> HtmlNode
+pub fn tree() -> Html<void>
   element(
     tag: "section",
     attrs: [class("card"), style(name: "display", value: "grid")],
@@ -140,7 +144,7 @@ pub fn tree() -> HtmlNode
       element(
         tag: "input",
         attrs: [value("Draft"), disabled(true)],
-        children: Array<HtmlNode>::init()
+        children: Array<Html<void>>::init()
       ),
       fragment([text("Ready")]),
       element(
@@ -153,7 +157,7 @@ pub fn tree() -> HtmlNode
 pub fn html() -> String
   render(tree())
 
-pub fn svg_tree() -> HtmlNode
+pub fn svg_tree() -> Html<void>
   element(
     tag: "svg",
     attrs: [attr(name: "viewBox", value: "0 0 24 24")],
@@ -161,7 +165,7 @@ pub fn svg_tree() -> HtmlNode
       element(
         tag: "path",
         attrs: [attr(name: "d", value: "M1 1h2")],
-        children: Array<HtmlNode>::init()
+        children: Array<Html<void>>::init()
       )
     ]
   )
@@ -169,7 +173,7 @@ pub fn svg_tree() -> HtmlNode
 pub fn svg_html() -> String
   render(svg_tree())
 
-pub fn svg_integration_point_tree() -> HtmlNode
+pub fn svg_integration_point_tree() -> Html<void>
   element(
     tag: "svg",
     children: [
@@ -190,23 +194,23 @@ pub fn svg_integration_point_html() -> String
 pub fn invalid_svg_tag_html(tag: String) -> String
   render(element(
     tag: "svg",
-    children: [element(tag: tag, children: Array<HtmlNode>::init())]
+    children: [element(tag: tag, children: Array<Html<void>>::init())]
   ))
 
 pub fn invalid_svg_attr_html(name: String) -> String
   render(element(
     tag: "svg",
     attrs: [attr(name: name, value: "value")],
-    children: Array<HtmlNode>::init()
+    children: Array<Html<void>>::init()
   ))
 
-pub fn static_event_tree() -> HtmlNode
-  let ~attrs = Array<HtmlAttr>::init()
+pub fn static_event_tree() -> Html<void>
+  let ~attrs = Array<Attr<void>>::init()
   let interactive = false
   if interactive:
-    attrs.push(event_payload_handler<InputEvent, HtmlNode>(
+    attrs.push(event_payload_handler<InputEvent, Html<void>>(
       name: "input",
-      handler: (event: InputEvent) -> HtmlNode => text(event.value)
+      handler: (event: InputEvent) -> Html<void> => text(event.value)
     ))
   element(tag: "textarea", attrs: attrs, children: [text("Draft")])
 
@@ -214,17 +218,17 @@ pub fn invalid_void_html() -> String
   render(element(tag: "input", children: [text("not allowed")]))
 
 pub fn uppercase_tag_html() -> String
-  render(element(tag: "INPUT", children: Array<HtmlNode>::init()))
+  render(element(tag: "INPUT", children: Array<Html<void>>::init()))
 
 pub fn uppercase_attribute_html() -> String
   render(element(
     tag: "div",
     attrs: [attr(name: "CLASS", value: "card")],
-    children: Array<HtmlNode>::init()
+    children: Array<Html<void>>::init()
   ))
 
 pub fn multi_document() -> String
-  let view: HtmlNode = <html><body><main id="one">One</main><aside id="two">Two</aside></body></html>
+  let view: Html<void> = <html><body><main id="one">One</main><aside id="two">Two</aside></body></html>
   let first = append_hydration<i32>(
     document(view),
     hydrate_named<i32>(
@@ -373,6 +377,20 @@ pub fn multi_document() -> String
     expect(
       result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
     ).toContain("call has 1 extra argument(s)");
+  });
+
+  it("rejects mixed VX plan types", async () => {
+    const result = await vxDomSdk.compile({
+      entryPath: planTypesRejectedEntryPath,
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: "TY0027" }),
+    ]);
   });
 
   it("renders a compiled Voyd VX tree through vx-dom in a browser-like DOM", async () => {

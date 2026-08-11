@@ -3,14 +3,14 @@ use std::vx::all
 fn clicked(payload: GenericEvent) -> GenericEvent
   payload
 
-pub fn main() -> HtmlNode
+pub fn main() -> Html<void>
   <button on_click={(payload: GenericEvent) -> GenericEvent => clicked(payload)}>Click</button>
 
-pub fn input_echo() -> HtmlNode
+pub fn input_echo() -> Html<void>
   <input value="hello" on_input={(payload: InputEvent) -> InputEvent => payload} />
 
-fn ValueField({ value: String }) -> HtmlNode
+fn ValueField({ value: String }) -> Html<void>
   <input value={value} />
 
-pub fn value_shadow() -> HtmlNode
+pub fn value_shadow() -> Html<void>
   <ValueField value="hello" />

@@ -7,7 +7,7 @@ enum VxMessage
   Save
   Cancel
 
-fn App() -> HtmlNode
+fn App() -> Html<void>
   let features = feature_list()
   <Card>
     <Title>Voyd + VX</Title>
@@ -15,7 +15,7 @@ fn App() -> HtmlNode
     <List value={features} />
   </Card>
 
-fn Title({ children: Array<HtmlNode> }) -> HtmlNode
+fn Title({ children: Array<Html<void>> }) -> Html<void>
   <h2 style="
     margin: 0 0 8px 0;
     font-size: 20px;
@@ -26,7 +26,7 @@ fn Title({ children: Array<HtmlNode> }) -> HtmlNode
     {children}
   </h2>
 
-fn Card({ children: Array<HtmlNode> }) -> HtmlNode
+fn Card({ children: Array<Html<void>> }) -> Html<void>
   <div style="
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     margin: 8px;
@@ -39,7 +39,7 @@ fn Card({ children: Array<HtmlNode> }) -> HtmlNode
     {children}
   </div>
 
-fn List({ value: Array<String> }) -> HtmlNode
+fn List({ value: Array<String> }) -> Html<void>
   <ul style="margin: 0; padding-left: 16px;">
     {value.map(f => <li key={f} style="line-height: 1.6;">{f}</li>)}
   </ul>
@@ -50,10 +50,10 @@ fn feature_list() -> Array<String>
 pub fn main()
   App()
 
-pub fn event_message_button() -> HtmlNode
+pub fn event_message_button() -> Html<void>
   <button on_click={VxMessage::Save {}}>Save</button>
 
-pub fn full_event_options_form() -> HtmlNode
+pub fn full_event_options_form() -> Html<void>
   <form
     on_submit={on_submit_with(
       options: EventOptions {
