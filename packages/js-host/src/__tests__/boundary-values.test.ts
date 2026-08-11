@@ -8,7 +8,11 @@ import {
   encodeBoundaryArgs,
 } from "../boundary-values.js";
 import { resolveHostTransport } from "../protocol/host-transport.js";
-import type { HostFrame } from "../protocol/host-frame.js";
+import {
+  HostFrameFailureError,
+  type HostFrame,
+} from "../protocol/host-frame.js";
+import { decodeHostCompletion } from "../runtime/dispatch.js";
 import { msgPackHostTransport } from "../transports/msgpack.js";
 import { encode } from "@msgpack/msgpack";
 
@@ -34,6 +38,40 @@ const genericRuntimeFiles = (root: string): string[] =>
   });
 
 describe("boundary DTO decoding", () => {
+  it("preserves the complete failure record from completion frames", () => {
+    const failure = {
+      direction: "vm->host" as const,
+      frameCategory: "export-completion" as const,
+      phase: "decode" as const,
+      category: "custom" as const,
+      code: "user_id.non_positive",
+      providerCode: "voyd.std.msgpack.decode",
+      message: "user id must be positive",
+      path: ["profile", "user_id"] as const,
+    };
+    const encoded = msgPackHostTransport.encodeFrame({
+      kind: "export-completion",
+      exportId: 7,
+      outcome: { kind: "failure", failure },
+    });
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    new Uint8Array(memory.buffer).set(encoded);
+
+    expect(() =>
+      decodeHostCompletion({
+        memory,
+        ptr: 0,
+        length: encoded.length,
+        transport: msgPackHostTransport,
+        completion: { kind: "export", id: 7 },
+      }),
+    ).toThrowError(
+      expect.objectContaining<Partial<HostFrameFailureError>>({
+        failure,
+      }),
+    );
+  });
+
   it("restores adapter-facing tags for unions and standalone variants", () => {
     const [union, variant] = decodeBoundaryArgs({
       exportName: "external variants",

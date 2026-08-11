@@ -35,6 +35,7 @@ export type {
 } from "./adapters/default.js";
 export {
   HOST_FRAME_VERSION,
+  HostFrameFailureError,
   type DtoFingerprint,
   type HostFailure,
   type HostFrame,

@@ -24,6 +24,7 @@ import {
   decodeBoundaryResult,
   encodeBoundaryArgs,
 } from "../boundary-values.js";
+import { HostFrameFailureError } from "../protocol/host-frame.js";
 
 export type EffectBoundarySchemas = {
   params: readonly BoundarySchema[];
@@ -115,7 +116,7 @@ export const decodeHostCompletion = ({
   }
   const outcome = frame.outcome;
   if (outcome.kind === "failure") {
-    throw new Error(outcome.failure.message);
+    throw new HostFrameFailureError(outcome.failure);
   }
   if (completion.kind !== "export" || !completion.schema) {
     return outcome.value.value;

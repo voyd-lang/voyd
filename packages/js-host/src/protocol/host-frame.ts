@@ -33,6 +33,16 @@ export type HostFailure = {
   path?: readonly (string | number)[];
 };
 
+export class HostFrameFailureError extends Error {
+  readonly failure: HostFailure;
+
+  constructor(failure: HostFailure, message = failure.message) {
+    super(message);
+    this.name = "HostFrameFailureError";
+    this.failure = failure;
+  }
+}
+
 export type HostOutcome =
   | { kind: "success"; value: TypedHostPayload }
   | { kind: "failure"; failure: HostFailure };

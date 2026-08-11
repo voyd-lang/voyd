@@ -78,6 +78,7 @@ import {
   parseExternalRequirements,
   registerExternalAdapterHandlers,
 } from "./protocol/external.js";
+import { HostFrameFailureError } from "./protocol/host-frame.js";
 
 export type HostInitOptions = {
   wasm: Uint8Array | WebAssembly.Module;
@@ -487,7 +488,7 @@ const buildRetainedCallbackImportModules = ({
             throw new Error("retained callback returned an incompatible frame");
           }
           if (completion.outcome.kind === "failure") {
-            throw new Error(completion.outcome.failure.message);
+            throw new HostFrameFailureError(completion.outcome.failure);
           }
           const result = callbackAbi.result
             ? decodeBoundaryResult({
@@ -1223,9 +1224,11 @@ export const createVoydHost = async ({
       );
     }
     if (completion.outcome.kind === "failure") {
-      const { code, message, path } = completion.outcome.failure;
+      const failure = completion.outcome.failure;
+      const { code, message, path } = failure;
       const at = path && path.length > 0 ? ` at ${path.join(".")}` : "";
-      throw new Error(
+      throw new HostFrameFailureError(
+        failure,
         `serialized export ${entryName} failed (${code})${at}: ${message}`,
       );
     }
