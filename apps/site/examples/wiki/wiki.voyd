@@ -30,7 +30,8 @@ enum WikiMsg
 type TextInputEvent = {
   kind: String,
   value: String,
-  checked: bool
+  checked: bool,
+  input_type: String
 }
 
 pub fn app() -> Program<WikiModel, WikiMsg>

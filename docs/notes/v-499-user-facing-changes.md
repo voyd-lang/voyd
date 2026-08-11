@@ -30,11 +30,13 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   and result values. Adapter authors receive and return those values instead of
   MessagePack envelope objects.
 - Typed `Unit` values use their structural JavaScript representation `{}` in
-  host adapter payloads.
+  host adapter payloads. Voyd `void` results use JavaScript `undefined`.
 - HTTP and filesystem byte bodies are `Uint8Array` values in JavaScript host
   adapters.
 - VX component state is generic and typed. The serialized `MsgPack` state
   overloads and `set_serialized`/`update_serialized` methods have been removed.
+- `std::error::panic()` is available for allocation-free traps when no
+  diagnostic message is needed.
 - `std::host_dto::HostDto` has been removed. Host effects declare ordinary
   typed request and result records directly.
 - `std::json::encode_value<T>` produces an explicit `JsonValue` tree from the
@@ -75,7 +77,9 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   typed message values and typed closures; the runtime owns callback
   capabilities and their lifetime.
 - `Html<Msg>`, `Attr<Msg>`, `Program<Model, Msg>`, and `Sub<Msg>` are opaque.
-  Their previous wire payload fields are no longer accessible. HTML, command,
+  The public `HtmlNode` and `HtmlAttr` names and their wire payload fields have
+  been removed. Static HTML and attributes use the message-neutral `void`
+  specialization. HTML, command,
   subscription, program, and canvas composition now retains typed semantic
   plans and creates the private MessagePack renderer wire only at the VX host
   boundary.

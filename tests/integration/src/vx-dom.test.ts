@@ -1347,7 +1347,7 @@ async function waitForText(
   container: Element,
   selector: string,
   expected: string,
-  timeoutMs = 250,
+  timeoutMs = 1_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() <= deadline) {
@@ -1356,13 +1356,16 @@ async function waitForText(
     }
     await wait(5);
   }
+  throw new Error(
+    `timed out waiting for ${selector} to equal ${JSON.stringify(expected)}`,
+  );
 }
 
 async function waitForTextContaining(
   container: Element,
   selector: string,
   expected: string,
-  timeoutMs = 250,
+  timeoutMs = 1_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() <= deadline) {
@@ -1371,6 +1374,9 @@ async function waitForTextContaining(
     }
     await wait(5);
   }
+  throw new Error(
+    `timed out waiting for ${selector} to contain ${JSON.stringify(expected)}`,
+  );
 }
 
 function pageButtonLabels(container: Element): string[] {
@@ -1382,17 +1388,26 @@ function pageButtonLabels(container: Element): string[] {
 async function waitForPageButtonLabels(
   container: Element,
   expected: string[],
-  timeoutMs = 250,
+  timeoutMs = 1_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  let matchedAt: number | undefined;
   while (Date.now() <= deadline) {
     const actual = pageButtonLabels(container);
     if (
       actual.length === expected.length &&
       actual.every((label, index) => label === expected[index])
     ) {
-      return;
+      matchedAt ??= Date.now();
+      if (Date.now() - matchedAt >= 50) {
+        return;
+      }
+    } else {
+      matchedAt = undefined;
     }
     await wait(5);
   }
+  throw new Error(
+    `timed out waiting for page labels ${JSON.stringify(expected)}; received ${JSON.stringify(pageButtonLabels(container))}`,
+  );
 }

@@ -1224,11 +1224,11 @@ pub fn next<Model>(model: Model) -> Program<Model, void>
 pub fn next<Model, Msg>({ model: Model, cmd: Cmd<Msg> }) -> Program<Model, Msg>
   program<Model, Msg>(model: model, commands: cmd)
 
-fn map_model_with_handler_ids<Model, Msg, NextModel>({
-  program: Program<Model, Msg>,
+fn map_model_with_handler_ids({
+  program: ProgramPlan,
   handler_id: i32,
   hydrate_handler_id?: i32
-}) -> Program<NextModel, Msg>
+}) -> ProgramPlan
   program_plan(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("kind", "program_map_model")
@@ -1240,32 +1240,32 @@ fn map_model_with_handler_ids<Model, Msg, NextModel>({
   )
 
 /// Lifts a child program result through a typed model mapper.
-pub fn map_model<Model, NextModel, Msg>(
-  program: Program<Model, Msg>,
+pub fn map_model<Model, NextModel>(
+  program: ProgramPlan,
   handler: fn(Model) -> NextModel
-) -> Program<NextModel, Msg>
-  map_model_with_handler_ids<Model, Msg, NextModel>(
+) -> ProgramPlan
+  map_model_with_handler_ids(
     program: program,
     handler_id: retain_program_callback_id(handler)
   )
 
 /// Lifts a child program through model mappers in both runtime directions.
 /// The hydrate mapper is required when the mapped program adopts an SSR model.
-pub fn map_model<Model, NextModel, Msg>({
-  program: Program<Model, Msg>,
+pub fn map_model<Model, NextModel>({
+  program: ProgramPlan,
   map: fn(Model) -> NextModel,
   hydrate: fn(NextModel) -> Model
-}) -> Program<NextModel, Msg>
-  map_model_with_handler_ids<Model, Msg, NextModel>(
+}) -> ProgramPlan
+  map_model_with_handler_ids(
     program: program,
     handler_id: retain_program_callback_id(map),
     hydrate_handler_id: retain_program_callback_id(hydrate)
   )
 
-fn map_message_with_handler_id<Model, ChildMsg, ParentMsg>({
-  program: Program<Model, ChildMsg>,
+fn map_message_with_handler_id({
+  program: ProgramPlan,
   handler_id: i32
-}) -> Program<Model, ParentMsg>
+}) -> ProgramPlan
   program_plan(() -> MsgPack =>
     let ~out = Dict<String, MsgPack>::init()
     out.set("kind", "program_map_message")
@@ -1275,11 +1275,11 @@ fn map_message_with_handler_id<Model, ChildMsg, ParentMsg>({
   )
 
 /// Lifts a child program result through a typed message mapper.
-pub fn map_message<Model, ChildMsg, ParentMsg>(
-  program: Program<Model, ChildMsg>,
+pub fn map_message<ChildMsg, ParentMsg>(
+  program: ProgramPlan,
   handler: fn(ChildMsg) -> ParentMsg
-) -> Program<Model, ParentMsg>
-  map_message_with_handler_id<Model, ChildMsg, ParentMsg>(
+) -> ProgramPlan
+  map_message_with_handler_id(
     program: program,
     handler_id: retain_program_callback_id(handler)
   )
