@@ -5,7 +5,11 @@ import type {
   HirCallExpr,
 } from "../context.js";
 import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
-import { allocateTempLocal } from "../locals.js";
+import {
+  allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "../locals.js";
 import { ensureLinearMemoryExport } from "../memory-exports.js";
 import { ensureSelectedHostTransportProvider } from "../host-transport/selected-provider.js";
 import { wasmTypeFor, getRequiredExprType } from "../types.js";
@@ -15,17 +19,21 @@ import {
   type BoundarySchema,
 } from "../boundary/schema.js";
 import {
-  writeDtoValueToTree,
-  readDtoValueFromTree,
-} from "../boundary/dto-tree-codec.js";
+  hostStreamWriterResultTypeId,
+  writeDtoValueToHostStream,
+  writeHostStreamEvent,
+} from "../boundary/dto-stream-writer.js";
+import {
+  readDtoValueFromHostStream,
+  readHostStreamValue,
+} from "../boundary/dto-stream-reader.js";
 import type { EffectRegistry } from "../effects/effect-registry.js";
 import { murmurHash3 } from "@voyd-lang/lib/murmur-hash.js";
-import { arrayGet } from "@voyd-lang/lib/binaryen-gc/index.js";
 import {
-  makeSelectedExternalInvocation,
   SELECTED_HOST_FRAME_TAG,
   SELECTED_HOST_FRAME_VERSION,
 } from "../host-transport/frame-codec.js";
+import { emitStringLiteral } from "../expressions/primitives.js";
 
 export const EXTERNAL_IMPORT_MODULE = "voyd.external";
 export const EXTERNAL_REQUIREMENTS_SECTION = "voyd.external_requirements";
@@ -107,71 +115,96 @@ export const compileExternalCall = ({
   const bufferSizeImport = ensureExternalBufferSizeImport(ctx);
   const bufferErrorImport = ensureExternalBufferErrorImport(ctx);
   const provider = ensureSelectedHostTransportProvider(ctx);
-  const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
-  const arrayType = provider.arrayWithCapacity.resultType;
-  const storageType = provider.arrayRawStorage.resultType;
+  const writerType = wasmTypeFor(provider.writerTypeId, ctx);
+  const readerType = wasmTypeFor(provider.readerTypeId, ctx);
   const capacityLocal = allocateTempLocal(binaryen.i32, fnCtx);
   const encodedLengthLocal = allocateTempLocal(binaryen.i32, fnCtx);
   const writtenLocal = allocateTempLocal(binaryen.i32, fnCtx);
-  const decodedLocal = allocateTempLocal(providerValueType, fnCtx);
-  const frameArrayLocal = allocateTempLocal(arrayType, fnCtx);
-  const frameStorageLocal = allocateTempLocal(storageType, fnCtx);
-  const outcomeArrayLocal = allocateTempLocal(arrayType, fnCtx);
-  const outcomeStorageLocal = allocateTempLocal(storageType, fnCtx);
-  const typedPayloadArrayLocal = allocateTempLocal(arrayType, fnCtx);
-  const typedPayloadStorageLocal = allocateTempLocal(storageType, fnCtx);
+  const writerLocal = allocateTempLocal(
+    writerType,
+    fnCtx,
+    provider.writerTypeId,
+    ctx,
+  );
+  const readerLocal = allocateTempLocal(
+    readerType,
+    fnCtx,
+    provider.readerTypeId,
+    ctx,
+  );
+  const resultLocal = allocateTempLocal(
+    wasmTypeFor(resultTypeId, ctx),
+    fnCtx,
+    resultTypeId,
+    ctx,
+  );
   const capacityRef = () =>
     ctx.mod.local.get(capacityLocal.index, binaryen.i32);
   const encodedLengthRef = () =>
     ctx.mod.local.get(encodedLengthLocal.index, binaryen.i32);
   const writtenRef = () => ctx.mod.local.get(writtenLocal.index, binaryen.i32);
-  const frameField = (index: number) =>
-    arrayGet(
-      ctx.mod,
-      ctx.mod.local.get(frameStorageLocal.index, storageType),
-      ctx.mod.i32.const(index),
-      providerValueType,
-      false,
-    );
-  const outcomeField = (index: number) =>
-    arrayGet(
-      ctx.mod,
-      ctx.mod.local.get(outcomeStorageLocal.index, storageType),
-      ctx.mod.i32.const(index),
-      providerValueType,
-      false,
-    );
-  const typedPayloadField = (index: number) =>
-    arrayGet(
-      ctx.mod,
-      ctx.mod.local.get(typedPayloadStorageLocal.index, storageType),
-      ctx.mod.i32.const(index),
-      providerValueType,
-      false,
-    );
-  const invocationFrame = makeSelectedExternalInvocation({
-    ...identity,
-    args: args.map((arg, index) => {
+  const writerRef = () => loadLocalValue(writerLocal, ctx);
+  const readerRef = () => loadLocalValue(readerLocal, ctx);
+  const write = (
+    name: string,
+    writeArgs: readonly binaryen.ExpressionRef[] = [],
+  ) =>
+    writeHostStreamEvent({
+      writer: writerRef(),
+      writerTypeId: provider.writerTypeId,
+      name,
+      args: writeArgs,
+      ctx,
+      fnCtx,
+    });
+  const read = (name: string) =>
+    readHostStreamValue({
+      reader: readerRef(),
+      readerTypeId: provider.readerTypeId,
+      name,
+      ctx,
+      fnCtx,
+    });
+  const dtoWriteResultTypeId = hostStreamWriterResultTypeId({
+    writerTypeId: provider.writerTypeId,
+    ctx,
+  });
+  const writeInvocation = [
+    write("begin_array", [ctx.mod.i32.const(5)]),
+    write("write_i32", [ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION)]),
+    write("write_i32", [
+      ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.externalInvocation),
+    ]),
+    write("write_string", [emitStringLiteral(identity.interfaceId, ctx)]),
+    write("write_string", [emitStringLiteral(identity.functionName, ctx)]),
+    write("begin_array", [ctx.mod.i32.const(args.length)]),
+    ...args.flatMap((arg, index) => {
       const schema = params[index]!;
       if (!schema.fingerprint) {
         throw new Error(
           `missing DTO fingerprint for ${identity.interfaceId}::${identity.functionName} arg${index}`,
         );
       }
-      return {
-        fingerprint: schema.fingerprint,
-        value: packExternalValue({
-          value: arg,
-          schema,
-          ctx,
-          fnCtx,
-        }),
-      };
+      return [
+        write("begin_array", [ctx.mod.i32.const(2)]),
+        write("write_string", [emitStringLiteral(schema.fingerprint, ctx)]),
+        ctx.mod.drop(
+          writeDtoValueToHostStream({
+            writer: writerRef,
+            writerTypeId: provider.writerTypeId,
+            value: arg,
+            schema,
+            resultTypeId: dtoWriteResultTypeId,
+            ctx,
+            fnCtx,
+          }),
+        ),
+        write("end_array"),
+      ];
     }),
-    ctx,
-    fnCtx,
-    provider,
-  });
+    write("end_array"),
+    write("end_array"),
+  ];
 
   const setup: binaryen.ExpressionRef[] = [
     ctx.mod.local.set(
@@ -179,11 +212,20 @@ export const compileExternalCall = ({
       ctx.mod.call(bufferSizeImport, [], binaryen.i32),
     ),
     ctx.mod.local.set(
+      writerLocal.index,
+      ctx.mod.call(
+        provider.createWriter.wasmName,
+        [ctx.mod.i32.const(0), capacityRef()],
+        provider.createWriter.resultType,
+      ),
+    ),
+    ...writeInvocation,
+    ctx.mod.local.set(
       encodedLengthLocal.index,
       ctx.mod.call(
-        provider.encodeValue.wasmName,
-        [invocationFrame, ctx.mod.i32.const(0), capacityRef()],
-        binaryen.i32,
+        provider.finishWriter.wasmName,
+        [writerRef()],
+        provider.finishWriter.resultType,
       ),
     ),
     ctx.mod.if(
@@ -214,98 +256,79 @@ export const compileExternalCall = ({
       ),
     ),
     trapIfNegative(writtenRef(), ctx),
-    ctx.mod.local.set(
-      decodedLocal.index,
-      ctx.mod.call(
-        provider.decodeValue.wasmName,
+    storeLocalValue({
+      binding: readerLocal,
+      value: ctx.mod.call(
+        provider.createReader.wasmName,
         [capacityRef(), writtenRef()],
-        providerValueType,
+        provider.createReader.resultType,
       ),
-    ),
-    ctx.mod.local.set(
-      frameArrayLocal.index,
-      ctx.mod.call(
-        provider.unpackArray.wasmName,
-        [ctx.mod.local.get(decodedLocal.index, providerValueType)],
-        arrayType,
-      ),
-    ),
-    ctx.mod.local.set(
-      frameStorageLocal.index,
-      ctx.mod.call(
-        provider.arrayRawStorage.wasmName,
-        [ctx.mod.local.get(frameArrayLocal.index, arrayType)],
-        storageType,
-      ),
-    ),
+      ctx,
+      fnCtx,
+    }),
     ctx.mod.if(
       ctx.mod.i32.or(
-        ctx.mod.i32.ne(
-          ctx.mod.call(
-            provider.unpackI32.wasmName,
-            [frameField(0)],
-            binaryen.i32,
+        ctx.mod.i32.or(
+          ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(5)),
+          ctx.mod.i32.ne(
+            read("read_i32"),
+            ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
           ),
-          ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
         ),
         ctx.mod.i32.ne(
-          ctx.mod.call(
-            provider.unpackI32.wasmName,
-            [frameField(1)],
-            binaryen.i32,
-          ),
+          read("read_i32"),
           ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.externalCompletion),
         ),
       ),
       ctx.mod.unreachable(),
-      ctx.mod.nop(),
     ),
-    ctx.mod.local.set(
-      outcomeArrayLocal.index,
-      ctx.mod.call(provider.unpackArray.wasmName, [frameField(4)], arrayType),
-    ),
-    ctx.mod.local.set(
-      outcomeStorageLocal.index,
-      ctx.mod.call(
-        provider.arrayRawStorage.wasmName,
-        [ctx.mod.local.get(outcomeArrayLocal.index, arrayType)],
-        storageType,
-      ),
+    ctx.mod.drop(read("read_string")),
+    ctx.mod.drop(read("read_string")),
+    ctx.mod.if(
+      ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(2)),
+      ctx.mod.unreachable(),
     ),
     ctx.mod.if(
-      ctx.mod.i32.ne(
+      ctx.mod.i32.ne(read("read_i32"), ctx.mod.i32.const(0)),
+      ctx.mod.unreachable(),
+    ),
+    ctx.mod.if(
+      ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(2)),
+      ctx.mod.unreachable(),
+    ),
+    ctx.mod.drop(read("read_string")),
+    storeLocalValue({
+      binding: resultLocal,
+      value: readDtoValueFromHostStream({
+        reader: readerRef(),
+        readerTypeId: provider.readerTypeId,
+        schema: result,
+        ctx,
+        fnCtx,
+      }),
+      ctx,
+      fnCtx,
+    }),
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.if(
+      ctx.mod.i32.eqz(
         ctx.mod.call(
-          provider.unpackI32.wasmName,
-          [outcomeField(0)],
-          binaryen.i32,
+          provider.readerComplete.wasmName,
+          [readerRef()],
+          provider.readerComplete.resultType,
         ),
-        ctx.mod.i32.const(0),
       ),
       ctx.mod.unreachable(),
-      ctx.mod.nop(),
-    ),
-    ctx.mod.local.set(
-      typedPayloadArrayLocal.index,
-      ctx.mod.call(provider.unpackArray.wasmName, [outcomeField(1)], arrayType),
-    ),
-    ctx.mod.local.set(
-      typedPayloadStorageLocal.index,
-      ctx.mod.call(
-        provider.arrayRawStorage.wasmName,
-        [ctx.mod.local.get(typedPayloadArrayLocal.index, arrayType)],
-        storageType,
-      ),
     ),
   ];
-
-  const value = unpackExternalValue({
-    value: typedPayloadField(1),
-    schema: result,
-    ctx,
-    fnCtx,
-  });
   const resultType = wasmTypeFor(resultTypeId, ctx);
-  return ctx.mod.block(null, [...setup, value], resultType);
+  return ctx.mod.block(
+    null,
+    [...setup, loadLocalValue(resultLocal, ctx)],
+    resultType,
+  );
 };
 
 export const emitExternalRequirementsSection = ({
@@ -531,36 +554,6 @@ const externalRequirementKey = (
     "interfaceId" | "functionName"
   >,
 ): string => `${requirement.interfaceId}::${requirement.functionName}`;
-
-const packExternalValue = ({
-  value,
-  schema,
-  ctx,
-  fnCtx,
-}: {
-  value: binaryen.ExpressionRef;
-  schema: BoundarySchema;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): binaryen.ExpressionRef => {
-  const provider = ensureSelectedHostTransportProvider(ctx);
-  return writeDtoValueToTree({ value, schema, ctx, fnCtx, provider });
-};
-
-const unpackExternalValue = ({
-  value,
-  schema,
-  ctx,
-  fnCtx,
-}: {
-  value: binaryen.ExpressionRef;
-  schema: BoundarySchema;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): binaryen.ExpressionRef => {
-  const provider = ensureSelectedHostTransportProvider(ctx);
-  return readDtoValueFromTree({ value, schema, ctx, fnCtx, provider });
-};
 
 const trapIfNegative = (
   value: binaryen.ExpressionRef,
