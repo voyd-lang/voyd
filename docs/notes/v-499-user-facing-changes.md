@@ -50,6 +50,9 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - Custom JavaScript host transport adapters must provide `encodedPayloadSize`
   together with frame encoding and decoding. Default adapters use this hook to
   enforce transport buffer limits without depending on a concrete wire format.
+- Host failure frames now preserve direction, frame category, transport phase,
+  failure category, provider error code, and structural path. Custom transport
+  adapters must encode and decode the complete failure record.
 - Web route parameters, query values, headers, and cookies decode through the
   provider-neutral DTO data model. Rejection messages now identify failures
   with rooted DTO paths such as `$.page`.

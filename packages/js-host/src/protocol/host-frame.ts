@@ -2,13 +2,33 @@ export const HOST_FRAME_VERSION = 2;
 
 export type DtoFingerprint = string;
 
+export type HostFailureDirection = "host->vm" | "vm->host" | "vm";
+export type HostFailurePhase =
+  | "encode"
+  | "decode"
+  | "validate"
+  | "dispatch"
+  | "execute"
+  | "cancel";
+export type HostFailureCategory =
+  | "source"
+  | "sink"
+  | "structural"
+  | "custom"
+  | "runtime";
+
 export type TypedHostPayload = {
   fingerprint: DtoFingerprint;
   value: unknown;
 };
 
 export type HostFailure = {
+  direction: HostFailureDirection;
+  frameCategory: HostFrame["kind"];
+  phase: HostFailurePhase;
+  category: HostFailureCategory;
   code: string;
+  providerCode: string;
   message: string;
   path?: readonly (string | number)[];
 };

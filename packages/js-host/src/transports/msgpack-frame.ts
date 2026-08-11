@@ -290,17 +290,27 @@ const outcomeValue = (value: unknown): HostOutcome => {
 };
 
 const toFailure = (failure: HostFailure): unknown[] => [
+  failure.direction,
+  failure.frameCategory,
+  failure.phase,
+  failure.category,
   failure.code,
+  failure.providerCode,
   failure.message,
   failure.path ?? null,
 ];
 
 const failureValue = (value: unknown): HostFailure => {
   const tuple = arrayValue(value, "host failure");
-  const path = tuple[2];
+  const path = tuple[7];
   return {
-    code: stringValue(tuple[0], "host failure code"),
-    message: stringValue(tuple[1], "host failure message"),
+    direction: hostFailureDirection(tuple[0]),
+    frameCategory: hostFrameCategory(tuple[1]),
+    phase: hostFailurePhase(tuple[2]),
+    category: hostFailureCategory(tuple[3]),
+    code: stringValue(tuple[4], "host failure code"),
+    providerCode: stringValue(tuple[5], "host failure provider code"),
+    message: stringValue(tuple[6], "host failure message"),
     ...(path === null || path === undefined
       ? {}
       : {
@@ -315,6 +325,60 @@ const failureValue = (value: unknown): HostFailure => {
         }),
   };
 };
+
+const enumString = <Value extends string>(
+  value: unknown,
+  label: string,
+  allowed: readonly Value[],
+): Value => {
+  const parsed = stringValue(value, label);
+  if (!allowed.includes(parsed as Value)) {
+    throw new Error(`${label} has unknown value '${parsed}'`);
+  }
+  return parsed as Value;
+};
+
+const hostFailureDirection = (
+  value: unknown,
+): HostFailure["direction"] =>
+  enumString(value, "host failure direction", ["host->vm", "vm->host", "vm"]);
+
+const hostFailurePhase = (value: unknown): HostFailure["phase"] =>
+  enumString(value, "host failure phase", [
+    "encode",
+    "decode",
+    "validate",
+    "dispatch",
+    "execute",
+    "cancel",
+  ]);
+
+const hostFailureCategory = (value: unknown): HostFailure["category"] =>
+  enumString(value, "host failure category", [
+    "source",
+    "sink",
+    "structural",
+    "custom",
+    "runtime",
+  ]);
+
+const hostFrameCategory = (value: unknown): HostFrame["kind"] =>
+  enumString(value, "host failure frame category", [
+    "export-invocation",
+    "export-completion",
+    "effect-request",
+    "effect-outcome",
+    "callback-invocation",
+    "callback-completion",
+    "cancellation",
+    "cancellation-acknowledgement",
+    "vx-command",
+    "vx-event",
+    "vx-extension-request",
+    "vx-extension-outcome",
+    "external-invocation",
+    "external-completion",
+  ]);
 
 const arrayValue = (value: unknown, label: string): unknown[] => {
   if (!Array.isArray(value)) throw new Error(`${label} must be an array`);

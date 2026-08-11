@@ -255,7 +255,12 @@ describe("host ABI v2 frames", () => {
         outcome: {
           kind: "failure",
           failure: {
+            direction: "vm->host",
+            frameCategory: "external-completion",
+            phase: "execute",
+            category: "custom",
             code: "example.failure",
+            providerCode: "example.provider.failure",
             message: "failed",
             path: ["field", 1],
           },
