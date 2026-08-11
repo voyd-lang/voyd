@@ -8,7 +8,7 @@ use std::result::types::all
 use std::string::type::String
 
 pub obj Task<T> {
-  api id: i32
+  id: i32
 }
 
 pub obj TaskError {

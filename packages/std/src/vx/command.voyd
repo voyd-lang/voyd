@@ -217,11 +217,6 @@ impl<Msg> Cmd<Msg>
       wire::make_map(out)
     )
 
-  /// Creates a task command envelope for a retained typed result mapper.
-  api fn perform<T>({ task_id: i32, handler: fn(T) -> Msg }) -> Cmd<Msg>
-    let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform_with_ids(task_id: task_id, handler_id: handler_id), handler_id)
-
   /// Creates a task command envelope from a Voyd task and retained result mapper.
   fn perform_task_with_handler_id<T>({ task: Task<T>, handler_id: i32 }) -> Cmd<Msg>
     let task_id = task.id

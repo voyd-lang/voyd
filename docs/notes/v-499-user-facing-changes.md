@@ -120,6 +120,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - `Cmd::task(work:, handler:)` has been removed. Use
   `Cmd::perform(work:, handler:)` or pass an existing `Task<T>` with
   `Cmd::perform(task:, handler:)`.
+- `Task.id` and `Cmd::perform(task_id:, handler:)` have been removed. Task
+  observation accepts only task capabilities created by `spawn` or `detach`.
 - `std::web::render` and `render_static` accept typed VX HTML only; the raw
   MessagePack overloads have been removed.
 
