@@ -96,10 +96,12 @@ saved-scorecard workflows.
 The PR workflow currently gives cold compile time and incremental RSS a bounded
 70% relative allowance. V-499 expands the always-loaded standard-library codec
 graph; paired, reversed-order CI measurements recorded a 64.91% compile-time
-and 62.96% incremental-RSS baseline shift while runtime and artifact-size gates
-remained green. The whole-Web absolute time and memory gates continue to cap
-package-scale cost. This temporary relative allowance should be tightened after
-the cold semantic-analysis and standard-library loading work tracked by V-468.
+and 62.96% incremental-RSS baseline shift while runtime remained green. The
+vtrace artifact also shifted by 1,987 raw bytes and 783 gzip bytes, so the PR
+lane uses 2 KiB and 1 KiB absolute floors while retaining the 5% relative size
+gates. The whole-Web absolute time and memory gates continue to cap package-scale
+cost. These temporary allowances should be tightened after the cold
+semantic-analysis and standard-library loading work tracked by V-468.
 
 Compiler perf summaries are versioned and enabled with
 `VOYD_COMPILER_PERF=1`. Optimizer passes emit both aggregate and canonical

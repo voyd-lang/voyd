@@ -546,6 +546,8 @@ jobs:
           OPTIMIZER_BENCH_RUNTIME_MAX_PCT: "20"
           OPTIMIZER_BENCH_RSS_MAX_PCT: "70"
           OPTIMIZER_BENCH_WASM_MAX_PCT: "5"
+          OPTIMIZER_BENCH_WASM_MIN_BYTES: "2048"
           OPTIMIZER_BENCH_GZIP_MAX_PCT: "5"
+          OPTIMIZER_BENCH_GZIP_MIN_BYTES: "1024"
           OPTIMIZER_BENCH_SCENARIOS: ${{ steps.changes.outputs.web == 'true' && matrix.scenarios_with_web || matrix.scenarios_without_web }}
         run: npm run bench:optimizer:compare -- --scenarios "$OPTIMIZER_BENCH_SCENARIOS"
