@@ -233,21 +233,28 @@ impl RequestBody
   /// Reads the next body chunk, or `None` after end-of-stream.
   api fn next(self): HttpServer -> Result<Option<Bytes>, HostError>
     let plan = self.state.with_mut((~state) =>
+      let buffered = Bytes::copied(from: state.buffered)
       if state.done:
-        RequestBodyReadPlan { kind: 0, buffered: state.buffered.copied() }
+        RequestBodyReadPlan { kind: 0, buffered: buffered }
       else:
-        if not state.emitted_buffer and not state.buffered.is_empty():
+        if not state.emitted_buffer and not buffered.is_empty():
           state.emitted_buffer = true
           if not state.streaming:
             state.done = true
-          RequestBodyReadPlan { kind: 1, buffered: state.buffered.copied() }
+          RequestBodyReadPlan { kind: 1, buffered: buffered }
         else:
           state.emitted_buffer = true
           if not state.streaming:
             state.done = true
-            RequestBodyReadPlan { kind: 0, buffered: state.buffered.copied() }
+            RequestBodyReadPlan {
+              kind: 0,
+              buffered: buffered
+            }
           else:
-            RequestBodyReadPlan { kind: 2, buffered: state.buffered.copied() }
+            RequestBodyReadPlan {
+              kind: 2,
+              buffered: buffered
+            }
     )
     if plan.kind == 0:
       return Ok<Option<Bytes>> { value: None {} }
@@ -258,8 +265,9 @@ impl RequestBody
       Err<HostError> { error }:
         Err<HostError> { error: error }
       Ok<wire::RequestChunkDto> { value }:
+        let done = value.done
         self.state.with_mut((~state) =>
-          state.done = value.done
+          state.done = done
         )
         if value.chunk.is_empty() and value.done:
           Ok<Option<Bytes>> { value: None {} }

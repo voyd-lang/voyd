@@ -47,6 +47,7 @@ import {
   createAutoDtoPlanIndex,
   type AutoDtoPlanIndex,
 } from "./auto-dto-plan.js";
+import { createExactCallOptimizationIndex } from "./exact-call-optimization.js";
 
 export type {
   AutoDtoFieldPlan,
@@ -54,6 +55,11 @@ export type {
   AutoDtoPlanIndex,
   AutoDtoPrimitivePlan,
 } from "./auto-dto-plan.js";
+export {
+  EXACT_CALL_OPTIMIZATION_CACHE_BUDGET_BYTES,
+  EXACT_CALL_OPTIMIZATION_FACT_BUDGET_BYTES,
+  EXACT_CALL_OPTIMIZATION_WORK_BUDGET,
+} from "./exact-call-optimization.js";
 import { cloneNestedMap } from "../typing/call-resolution.js";
 import {
   getOptionalInfo,
@@ -63,6 +69,7 @@ import { buildProgramSymbolArena } from "../program-symbol-arena.js";
 import type { ProgramSymbolArena, SymbolRef } from "../program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "../canonical-symbol-ref.js";
 import { parseSymbolRefKey } from "../typing/symbol-ref-utils.js";
+import type { PlaceProjection } from "../borrowing/model.js";
 
 export type { SymbolRef } from "../program-symbol-arena.js";
 
@@ -242,7 +249,6 @@ export type CallLoweringInfo = {
       allocationPath?: readonly CodegenPlaceProjection[];
     };
     afterDefaults: boolean;
-    defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
     omittedParameters: readonly number[];
     diagnosticId?: number;
   }[];
@@ -379,24 +385,66 @@ export type CallLoweringIndex = {
   }[];
 };
 
-export type CodegenCallableAccessFootprint = {
-  parameters: readonly {
-    readPaths: readonly (readonly CodegenPlaceProjection[])[];
-    writePaths: readonly (readonly CodegenPlaceProjection[])[];
-    runtimeCheckedWrites: boolean;
-    retained: boolean;
-    returned: boolean;
-    returnedProvenance: boolean;
-  }[];
+export type CodegenOrdinaryMutationSummary = {
+  parameterAccesses: readonly ("unused" | "read" | "write")[];
+  ambientObjectAccess: boolean;
+  invokesUnknownCallback: boolean;
   maySuspend: boolean;
-  externalRead: boolean;
-  externalWrite: boolean;
 };
 
-export type CallableAccessIndex = {
-  getFootprint(
+export type OrdinaryMutationIndex = {
+  /** Finite whole-parameter summary; absence requires conservative fallback. */
+  getSummary(
     target: ProgramFunctionId,
-  ): CodegenCallableAccessFootprint | undefined;
+  ): CodegenOrdinaryMutationSummary | undefined;
+};
+
+export type ExactCallOptimizationParameterFact = {
+  readFields: readonly string[];
+  writeFields: readonly string[];
+  readsWholeValue: boolean;
+  writesWholeValue: boolean;
+  indirectAccess: boolean;
+  escapes: boolean;
+  retained: boolean;
+  resultAliases: boolean;
+};
+
+export type ExactCallOptimizationFact = {
+  parameters: readonly ExactCallOptimizationParameterFact[];
+  explicitReturn: boolean;
+  nestedCall: boolean;
+  recursiveCall: boolean;
+  dynamicCall: boolean;
+  unresolvedCall: boolean;
+  identityGuard: boolean;
+  externalAccess: boolean;
+  maySuspend: boolean;
+};
+
+export type ExactCallOptimizationFallbackReason =
+  | "missing-body"
+  | "work-budget"
+  | "memory-budget"
+  | "unsupported-alias";
+
+export type ExactCallOptimizationDecision =
+  | { kind: "available"; fact: ExactCallOptimizationFact }
+  | { kind: "fallback"; reason: ExactCallOptimizationFallbackReason };
+
+export type ExactCallOptimizationMetrics = {
+  requests: number;
+  cacheHits: number;
+  acceptedFacts: number;
+  fallbacks: number;
+  workUnits: number;
+  retainedBytes: number;
+};
+
+export type ExactCallOptimizationIndex = {
+  /** Scans and caches the exact callable body only when an optimization asks. */
+  getFact(target: ProgramFunctionId): ExactCallOptimizationDecision;
+  getMetrics(): ExactCallOptimizationMetrics;
 };
 
 export type MonomorphizedInstanceIndex = {
@@ -436,20 +484,10 @@ export type CodegenSourceLocation = {
   endColumn?: number;
 };
 
-export type CodegenCallableRuntimeProtocol = {
-  defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
-};
-
 export type CodegenPlaceProjection =
   | { kind: "field"; name: string }
   | { kind: "tuple"; index: number }
   | { kind: "index"; constant?: number; stable: boolean }
-  | {
-      kind: "region";
-      scope: string;
-      name: string;
-      disjoint: readonly string[];
-    }
   | { kind: "discriminant" }
   | { kind: "dereference" }
   | { kind: "identity" };
@@ -464,10 +502,7 @@ export type ModuleCodegenView = {
   effectsIr: EffectsIr;
   bindingKinds: ReadonlyMap<SymbolId, HirBindingKind>;
   mutableStorageSymbols: ReadonlySet<SymbolId>;
-  callableRuntimeProtocols: ReadonlyMap<
-    SymbolId,
-    CodegenCallableRuntimeProtocol
-  >;
+  defaultIdentityGuardTargets: ReadonlySet<SymbolId>;
   functionLocations: ReadonlyMap<SymbolId, CodegenSourceLocation>;
 };
 
@@ -511,7 +546,8 @@ export type ProgramCodegenView = {
   objects: ObjectLayoutIndex;
   traits: TraitDispatchIndex;
   calls: CallLoweringIndex;
-  callableAccesses: CallableAccessIndex;
+  ordinaryMutations: OrdinaryMutationIndex;
+  exactCallOptimizations: ExactCallOptimizationIndex;
   instances: MonomorphizedInstanceIndex;
   imports: ImportWiringIndex;
   dtoPlans: AutoDtoPlanIndex;
@@ -601,15 +637,36 @@ const buildMutableStorageSymbolIndex = (
 };
 
 const copyAccessPaths = (
-  paths: readonly (readonly CodegenPlaceProjection[])[] | undefined,
+  paths: readonly (readonly PlaceProjection[])[] | undefined,
 ): readonly (readonly CodegenPlaceProjection[])[] =>
-  paths?.map((path) =>
-    path.map((projection) =>
-      projection.kind === "region"
-        ? { ...projection, disjoint: [...projection.disjoint] }
-        : { ...projection },
-    ),
-  ) ?? [];
+  paths?.map((path) => path.map(copyAccessProjection)) ?? [];
+
+const copyAccessProjection = (
+  projection: PlaceProjection,
+): CodegenPlaceProjection => {
+  switch (projection.kind) {
+    case "field":
+      return { kind: projection.kind, name: projection.name };
+    case "tuple":
+      return { kind: projection.kind, index: projection.index };
+    case "index":
+      return {
+        kind: projection.kind,
+        stable: projection.stable,
+        ...(typeof projection.constant === "number"
+          ? { constant: projection.constant }
+          : {}),
+      };
+    case "discriminant":
+    case "dereference":
+    case "identity":
+      return { kind: projection.kind };
+    default:
+      throw new Error(
+        `codegen cannot lower ${(projection as { kind: string }).kind} place projections`,
+      );
+  }
+};
 
 export type CodegenObjectTemplate = {
   symbol: ProgramSymbolId;
@@ -2504,12 +2561,6 @@ export const buildProgramCodegenView = (
               : {}),
           },
           afterDefaults: guard.afterDefaults === true,
-          ...(guard.defaultIdentityGuardProtocol
-            ? {
-                defaultIdentityGuardProtocol:
-                  guard.defaultIdentityGuardProtocol,
-              }
-            : {}),
           omittedParameters: guard.omittedParameters ?? [],
           ...(guard.afterDefaults
             ? {
@@ -2524,37 +2575,20 @@ export const buildProgramCodegenView = (
       defaultIdentityGuardDiagnosticsByTarget.get(target) ?? [],
   };
 
-  const callableAccesses: CallableAccessIndex = {
-    getFootprint: (target) => {
+  const ordinaryMutations: OrdinaryMutationIndex = {
+    getSummary: (target) => {
       const ref = symbols.refOf(target);
-      const contract = modulesById
+      const summary = modulesById
         .get(ref.moduleId)
-        ?.borrowing.callables.get(ref.symbol);
-      if (!contract) {
-        return undefined;
-      }
+        ?.borrowing.ordinaryMutationSummaries?.get(ref.symbol);
+      if (!summary) return undefined;
       return {
-        parameters: contract.parameters.map((parameter) => ({
-          readPaths: copyAccessPaths(parameter.readPaths),
-          writePaths: copyAccessPaths(parameter.writePaths),
-          runtimeCheckedWrites: parameter.runtimeCheckedWrites === true,
-          retained:
-            parameter.retained === true ||
-            parameter.retainedUnlessBorrowed === true ||
-            (parameter.retainedPaths?.length ?? 0) > 0 ||
-            (parameter.externalRetainedPaths?.length ?? 0) > 0 ||
-            (parameter.borrowedRetainedPaths?.length ?? 0) > 0,
-          returned: parameter.returned === true,
-          returnedProvenance:
-            parameter.returnedAggregate === true ||
-            (parameter.returnedPaths?.length ?? 0) > 0 ||
-            (parameter.returnedOrigins?.length ?? 0) > 0 ||
-            (parameter.returnedSharedOrigins?.length ?? 0) > 0 ||
-            (parameter.returnedTypeMatchingOrigins?.length ?? 0) > 0,
-        })),
-        maySuspend: contract.maySuspend,
-        externalRead: contract.externalRead === true,
-        externalWrite: contract.externalWrite === true,
+        parameterAccesses: summary.parameterAccesses.map((access) =>
+          access === 0 ? "unused" : access === 1 ? "read" : "write",
+        ),
+        ambientObjectAccess: summary.ambientObjectAccess,
+        invokesUnknownCallback: summary.invokesUnknownCallback,
+        maySuspend: summary.maySuspend,
       };
     },
   };
@@ -2718,20 +2752,8 @@ export const buildProgramCodegenView = (
       effectsIr: buildEffectsIr({ hir: mod.hir, info: effectsInfo }),
       bindingKinds: buildBindingKindIndex(mod.hir),
       mutableStorageSymbols: buildMutableStorageSymbolIndex(mod),
-      callableRuntimeProtocols: new Map(
-        Array.from(mod.borrowing.callables).flatMap(([symbol, contract]) =>
-          contract.defaultIdentityGuardProtocol
-            ? [
-                [
-                  symbol,
-                  {
-                    defaultIdentityGuardProtocol:
-                      contract.defaultIdentityGuardProtocol,
-                  },
-                ] as const,
-              ]
-            : [],
-        ),
+      defaultIdentityGuardTargets: new Set(
+        mod.borrowing.defaultIdentityGuardTargets,
       ),
       functionLocations,
     });
@@ -2739,6 +2761,9 @@ export const buildProgramCodegenView = (
 
   let program!: ProgramCodegenView;
   const dtoPlans = createAutoDtoPlanIndex(() => program);
+  const exactCallOptimizations = createExactCallOptimizationIndex(
+    () => program,
+  );
   program = {
     effects,
     primitives: {
@@ -2761,7 +2786,8 @@ export const buildProgramCodegenView = (
     objects,
     traits,
     calls,
-    callableAccesses,
+    ordinaryMutations,
+    exactCallOptimizations,
     instances,
     imports,
     dtoPlans,

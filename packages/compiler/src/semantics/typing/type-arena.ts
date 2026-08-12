@@ -2215,7 +2215,7 @@ export const typeDescriptorToUserString = (
 ): string => {
   switch (type.kind) {
     case "borrowed":
-      return `borrow ${typeDescriptorToUserString(arena.get(type.inner), arena)}`;
+      return `Borrow<${typeDescriptorToUserString(arena.get(type.inner), arena)}>`;
     case "primitive":
       return type.name;
     case "trait":

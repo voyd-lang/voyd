@@ -101,29 +101,17 @@ summary schema and `ProgramCodegenView` boundary.
 ## Source-compilation behavior
 
 Fresh SDK instances still load and type the standard library from source.
-Borrow analysis for unchanged dependencies can be restored from the versioned
-`voyd.compiler-dependency-borrow-cache` artifact without restoring a
-compiler-private type arena or `SemanticsPipelineResult`. Against the original V-448 baseline medians of 907.00 ms
+Against the original V-448 baseline medians of 907.00 ms
 unoptimized and 1,108.87 ms in release mode, the later seven-sample source
 measurements were 2,097.13 ms and 2,513.49 ms respectively: 131.22% and 126.67%
 slower. The source-analysis regression remains the representative cold-compile
 behavior for default-prelude, package-heavy, and test-enabled workflows.
 
-A reused SDK instance keeps the optional compiler-private typing/codegen
-snapshot in process. Across processes, callers can persist
-`sdk.exportCompilerArtifact()` and pass it to
-`createSdk({ compilerArtifact })`. Per-module source fingerprints and reverse
-dependency invalidation select reusable borrowing results; exact in-process
-query inputs and SHA-256-compacted persisted inputs/dependency outputs handle
-edits within a recomputed module. Public
-exports use a separate `voyd.package-semantic-interface` contract table, so
-re-exports reference canonical summary ids instead of owning another summary.
-
-On the report machine, a JSON-round-tripped artifact reduced the focused fresh
-SDK compile from 1,967 ms to 1,003 ms (49.0%); exporting it took 5.8 ms and the
-artifact was 3.05 MB. This is
-the supported durable boundary. The removed 5.2 MB full semantic snapshot is
-not restored as a package ABI.
+A reused SDK instance keeps the optional compiler-private typing and dependency
+semantics snapshot in process. Per-module source fingerprints determine whether
+that complete in-memory snapshot can be reused. Compiler borrowing results are
+not serialized or accepted as a cross-process SDK input. Public exports use the
+separate `voyd.package-semantic-interface` contract table.
 
 ### Cache lifetime
 
@@ -134,11 +122,10 @@ const oneShot = createSdk({ compilerCache: "none" });
 const incremental = createSdk({ compilerCache: "memory" }); // default
 ```
 
-`none` skips dependency-snapshot capture and cannot export a compiler artifact.
-The default remains `memory` for compatibility and for watch, language-server,
-and repeated SDK workloads. In-memory snapshot commit transfers the already
-isolated dependency clone into the cache instead of cloning it a second time.
-Borrow-artifact serialization is deferred until `exportCompilerArtifact()`.
+`none` skips dependency-snapshot capture. The default remains `memory` for
+compatibility and for watch, language-server, and repeated SDK workloads.
+In-memory snapshot commit transfers the already isolated dependency clone into
+the cache instead of cloning it a second time.
 
 The cache-disabled whole-web gate had a 60.2-second median after this change,
 down from 66.0 seconds. Peak RSS remained approximately 4.29 GB, so this work

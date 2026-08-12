@@ -59,18 +59,23 @@ export const lowerTypeExpr = (
     };
   }
 
+  if (isIdentifierAtom(expr) && !expr.isQuoted && expr.value === "Borrow") {
+    throw new Error("Borrow type expects exactly one type argument");
+  }
+
   if (isIdentifierAtom(expr)) {
     return lowerNamedType(expr, ctx, currentScope);
   }
 
-  if (isForm(expr) && expr.calls("borrow")) {
-    const innerExpr = expr.at(1);
-    if (!innerExpr || expr.length !== 2) {
-      throw new Error("borrow type expects exactly one inner type");
+  if (isForm(expr) && isBorrowTypeForm(expr)) {
+    const genericArgs = expr.at(1);
+    if (!isForm(genericArgs) || genericArgs.rest.length !== 1) {
+      throw new Error("Borrow type expects exactly one type argument");
     }
+    const innerExpr = genericArgs.rest[0];
     const inner = lowerTypeExpr(innerExpr, ctx, currentScope);
     if (!inner) {
-      throw new Error("borrow type missing inner type");
+      throw new Error("Borrow type expects exactly one type argument");
     }
     return {
       typeKind: "borrowed",
@@ -111,6 +116,19 @@ export const lowerTypeExpr = (
   }
 
   throw new Error(`unsupported type expression: ${JSON.stringify(expr)}`);
+};
+
+const isBorrowTypeForm = (expr: Form): boolean => {
+  const name = expr.at(0);
+  const generics = expr.at(1);
+  return (
+    expr.length === 2 &&
+    isIdentifierAtom(name) &&
+    !name.isQuoted &&
+    name.value === "Borrow" &&
+    isForm(generics) &&
+    generics.callsInternal("generics")
+  );
 };
 
 const lowerNamedType = (

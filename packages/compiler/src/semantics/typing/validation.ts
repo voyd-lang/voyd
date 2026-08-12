@@ -7,7 +7,8 @@ import type {
   HirTypeExpr,
   HirTypeParameter,
 } from "../hir/index.js";
-import type { TypeId, TypeParamId } from "../ids.js";
+import type { SourceSpan, TypeId, TypeParamId } from "../ids.js";
+import { emitDiagnostic } from "../../diagnostics/index.js";
 import { getSymbolName } from "./type-system.js";
 import type { ObjectField, TypingContext } from "./types.js";
 
@@ -16,12 +17,539 @@ type TypeValidator = (typeId: TypeId, context: string) => void;
 export const validateTypedProgram = (ctx: TypingContext): void => {
   const ensureKnownType = createTypeValidator(ctx);
 
+  validateBorrowTypePositions(ctx);
   validateObjectTemplates(ctx, ensureKnownType);
   validateObjectInstances(ctx, ensureKnownType);
   validateTypeAliasInstances(ctx, ensureKnownType);
   validateTypeTable(ctx, ensureKnownType);
   validateValueTypes(ctx, ensureKnownType);
   validateHirTypeExprs(ctx.hir, ensureKnownType);
+};
+
+const validateBorrowTypePositions = (ctx: TypingContext): void => {
+  for (const [symbol, signature] of ctx.functions.signatures) {
+    const record = ctx.symbolTable.getSymbol(symbol);
+    const metadata = (record.metadata ?? {}) as {
+      externalFunction?: unknown;
+    };
+    const context = `${record.name} signature`;
+    const span =
+      ctx.functions.getFunction(symbol)?.span ??
+      signature.parameters[0]?.span ??
+      ctx.hir.module.span;
+
+    if (
+      (record.kind === "effect-op" ||
+        metadata.externalFunction !== undefined) &&
+      signatureContainsBorrow(signature.typeId, ctx)
+    ) {
+      const boundary =
+        record.kind === "effect-op" ? "effect operation" : "external function";
+      emitDiagnostic({
+        ctx,
+        code: "TY0051",
+        params: { kind: "borrow-signature-boundary", boundary },
+        span,
+      });
+    }
+
+    signature.parameters.forEach((parameter, index) =>
+      validateBorrowType({
+        type: parameter.type,
+        allowBorrowRoot: true,
+        context: `${context} parameter ${index + 1}`,
+        ctx,
+        span,
+      }),
+    );
+    validateBorrowType({
+      type: signature.returnType,
+      allowBorrowRoot: false,
+      context: `${context} return type`,
+      ctx,
+      span,
+    });
+    ensureBorrowCallableIsPure({
+      parameters: signature.parameters.map((parameter) => parameter.type),
+      effectRow: signature.effectRow,
+      context,
+      ctx,
+      span,
+    });
+  }
+
+  for (const template of ctx.objects.templates()) {
+    template.fields.forEach((field) =>
+      validateBorrowType({
+        type: field.type,
+        allowBorrowRoot: false,
+        context: `object field ${field.name}`,
+        ctx,
+        span: ctx.hir.module.span,
+      }),
+    );
+  }
+
+  for (const [, instance] of ctx.objects.instanceEntries()) {
+    instance.fields.forEach((field) =>
+      validateBorrowType({
+        type: field.type,
+        allowBorrowRoot: false,
+        context: `object field ${field.name}`,
+        ctx,
+        span: ctx.hir.module.span,
+      }),
+    );
+  }
+
+  const functionInstanceExprTypes = Array.from(
+    ctx.functions.snapshotInstanceExprTypes().values(),
+  );
+  for (const expression of ctx.hir.expressions.values()) {
+    if (expression.exprKind !== "lambda") continue;
+    const lambdaTypes = new Set(
+      [
+        ctx.resolvedExprTypes.get(expression.id),
+        ctx.borrowResolvedExprTypes.get(expression.id),
+        ...functionInstanceExprTypes.map((types) => types.get(expression.id)),
+      ].filter((type): type is TypeId => typeof type === "number"),
+    );
+    lambdaTypes.forEach((lambdaType) =>
+      validateBorrowType({
+        type: lambdaType,
+        allowBorrowRoot: false,
+        context: "lambda signature",
+        ctx,
+        span: expression.span,
+      }),
+    );
+    const capturedBorrow = expression.captures.find(({ symbol }) => {
+      const type = ctx.valueTypes.get(symbol);
+      return typeof type === "number" && typeRootIsBorrowed(type, ctx);
+    });
+    if (capturedBorrow) {
+      const name = ctx.symbolTable.getSymbol(capturedBorrow.symbol).name;
+      emitDiagnostic({
+        ctx,
+        code: "TY0051",
+        params: { kind: "borrow-capture", binding: name },
+        span: expression.span,
+      });
+    }
+  }
+
+  for (const item of ctx.hir.items.values()) {
+    if (item.kind === "module-let") {
+      const type =
+        ctx.valueTypes.get(item.symbol) ?? item.typeAnnotation?.typeId;
+      if (typeof type === "number") {
+        validateBorrowType({
+          type,
+          allowBorrowRoot: false,
+          context: "module value",
+          ctx,
+          span: item.span,
+        });
+      }
+      validateBorrowTypeExprSyntax(
+        item.typeAnnotation,
+        false,
+        "module value",
+        ctx,
+        item.span,
+      );
+      continue;
+    }
+    if (item.kind === "object") {
+      item.fields.forEach((field) =>
+        validateBorrowTypeExprSyntax(
+          field.type,
+          false,
+          `object field ${field.name}`,
+          ctx,
+          item.span,
+        ),
+      );
+      continue;
+    }
+    if (item.kind === "trait") {
+      item.methods.forEach((method) => {
+        method.parameters.forEach((parameter, index) =>
+          validateBorrowTypeExprSyntax(
+            parameter.type,
+            true,
+            `trait method parameter ${index + 1}`,
+            ctx,
+            method.span,
+          ),
+        );
+        validateBorrowTypeExprSyntax(
+          method.returnType,
+          false,
+          "trait method return type",
+          ctx,
+          method.span,
+        );
+      });
+      continue;
+    }
+    if (item.kind === "effect") {
+      item.operations.forEach((operation) => {
+        operation.parameters.forEach((parameter) => {
+          if (typeExprContainsBorrow(parameter.type)) {
+            emitDiagnostic({
+              ctx,
+              code: "TY0051",
+              params: {
+                kind: "borrow-signature-boundary",
+                boundary: "effect operation",
+              },
+              span: operation.span,
+            });
+          }
+        });
+        if (typeExprContainsBorrow(operation.returnType)) {
+          emitDiagnostic({
+            ctx,
+            code: "TY0051",
+            params: {
+              kind: "borrow-signature-boundary",
+              boundary: "effect operation",
+            },
+            span: operation.span,
+          });
+        }
+      });
+    }
+  }
+};
+
+const validateBorrowType = ({
+  type,
+  allowBorrowRoot,
+  context,
+  ctx,
+  span,
+  seen = new Set<string>(),
+}: {
+  type: TypeId;
+  allowBorrowRoot: boolean;
+  context: string;
+  ctx: TypingContext;
+  span: SourceSpan;
+  seen?: Set<string>;
+}): void => {
+  const seenKey = `${type}:${allowBorrowRoot ? "parameter" : "stored"}`;
+  if (seen.has(seenKey)) {
+    return;
+  }
+  seen.add(seenKey);
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "borrowed":
+      if (!allowBorrowRoot) {
+        emitDiagnostic({
+          ctx,
+          code: "TY0051",
+          params: { kind: "invalid-borrow-position", context },
+          span,
+        });
+      }
+      if (ctx.arena.get(desc.inner).kind === "borrowed") {
+        emitDiagnostic({
+          ctx,
+          code: "TY0051",
+          params: { kind: "nested-borrow" },
+          span,
+        });
+      }
+      validateBorrowType({
+        type: desc.inner,
+        allowBorrowRoot: false,
+        context: `${context} inner type`,
+        ctx,
+        span,
+        seen,
+      });
+      return;
+    case "function":
+      desc.parameters.forEach((parameter, index) =>
+        validateBorrowType({
+          type: parameter.type,
+          allowBorrowRoot: true,
+          context: `${context} nested callable parameter ${index + 1}`,
+          ctx,
+          span,
+          seen,
+        }),
+      );
+      validateBorrowType({
+        type: desc.returnType,
+        allowBorrowRoot: false,
+        context: `${context} nested callable return type`,
+        ctx,
+        span,
+        seen,
+      });
+      ensureBorrowCallableIsPure({
+        parameters: desc.parameters.map((parameter) => parameter.type),
+        effectRow: desc.effectRow,
+        context: `${context} nested callable`,
+        ctx,
+        span,
+      });
+      return;
+    case "recursive":
+      validateBorrowType({
+        type: desc.body,
+        allowBorrowRoot,
+        context,
+        ctx,
+        span,
+        seen,
+      });
+      return;
+    case "trait":
+    case "nominal-object":
+    case "value-object":
+      desc.typeArgs.forEach((argument, index) =>
+        validateBorrowType({
+          type: argument,
+          allowBorrowRoot: false,
+          context: `${context} type argument ${index + 1}`,
+          ctx,
+          span,
+          seen,
+        }),
+      );
+      return;
+    case "structural-object":
+      desc.fields.forEach((field) =>
+        validateBorrowType({
+          type: field.type,
+          allowBorrowRoot: false,
+          context: `${context} field ${field.name}`,
+          ctx,
+          span,
+          seen,
+        }),
+      );
+      return;
+    case "fixed-array":
+      validateBorrowType({
+        type: desc.element,
+        allowBorrowRoot: false,
+        context: `${context} element type`,
+        ctx,
+        span,
+        seen,
+      });
+      return;
+    case "union":
+      desc.members.forEach((member, index) =>
+        validateBorrowType({
+          type: member,
+          allowBorrowRoot: false,
+          context: `${context} union member ${index + 1}`,
+          ctx,
+          span,
+          seen,
+        }),
+      );
+      return;
+    case "intersection":
+      [desc.nominal, desc.structural, ...(desc.traits ?? [])]
+        .filter((member): member is TypeId => typeof member === "number")
+        .forEach((member) =>
+          validateBorrowType({
+            type: member,
+            allowBorrowRoot: false,
+            context: `${context} intersection member`,
+            ctx,
+            span,
+            seen,
+          }),
+        );
+      return;
+    case "primitive":
+    case "type-param-ref":
+      return;
+  }
+};
+
+const ensureBorrowCallableIsPure = ({
+  parameters,
+  effectRow,
+  context,
+  ctx,
+  span,
+}: {
+  parameters: readonly TypeId[];
+  effectRow: number;
+  context: string;
+  ctx: TypingContext;
+  span: SourceSpan;
+}): void => {
+  if (
+    parameters.some((parameter) => typeRootIsBorrowed(parameter, ctx)) &&
+    !ctx.effects.isEmpty(effectRow)
+  ) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0051",
+      params: { kind: "borrowed-callable-effect", context },
+      span,
+    });
+  }
+};
+
+const typeRootIsBorrowed = (
+  type: TypeId,
+  ctx: TypingContext,
+  seen = new Set<TypeId>(),
+): boolean => {
+  if (seen.has(type)) return false;
+  seen.add(type);
+  const desc = ctx.arena.get(type);
+  return desc.kind === "borrowed"
+    ? true
+    : desc.kind === "recursive"
+      ? typeRootIsBorrowed(desc.body, ctx, seen)
+      : false;
+};
+
+const signatureContainsBorrow = (
+  type: TypeId,
+  ctx: TypingContext,
+  seen = new Set<TypeId>(),
+): boolean => {
+  if (seen.has(type)) return false;
+  seen.add(type);
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "borrowed":
+      return true;
+    case "recursive":
+      return signatureContainsBorrow(desc.body, ctx, seen);
+    case "function":
+      return (
+        desc.parameters.some((parameter) =>
+          signatureContainsBorrow(parameter.type, ctx, seen),
+        ) || signatureContainsBorrow(desc.returnType, ctx, seen)
+      );
+    case "trait":
+    case "nominal-object":
+    case "value-object":
+      return desc.typeArgs.some((argument) =>
+        signatureContainsBorrow(argument, ctx, seen),
+      );
+    case "structural-object":
+      return desc.fields.some((field) =>
+        signatureContainsBorrow(field.type, ctx, seen),
+      );
+    case "fixed-array":
+      return signatureContainsBorrow(desc.element, ctx, seen);
+    case "union":
+      return desc.members.some((member) =>
+        signatureContainsBorrow(member, ctx, seen),
+      );
+    case "intersection":
+      return [desc.nominal, desc.structural, ...(desc.traits ?? [])]
+        .filter((member): member is TypeId => typeof member === "number")
+        .some((member) => signatureContainsBorrow(member, ctx, seen));
+    case "primitive":
+    case "type-param-ref":
+      return false;
+  }
+};
+
+const validateBorrowTypeExprSyntax = (
+  expr: HirTypeExpr | undefined,
+  allowBorrowRoot: boolean,
+  context: string,
+  ctx: TypingContext,
+  span: SourceSpan,
+): void => {
+  if (!expr) return;
+  if (expr.typeKind === "borrowed") {
+    if (!allowBorrowRoot) {
+      emitDiagnostic({
+        ctx,
+        code: "TY0051",
+        params: { kind: "invalid-borrow-position", context },
+        span,
+      });
+    }
+    if (expr.inner.typeKind === "borrowed") {
+      emitDiagnostic({
+        ctx,
+        code: "TY0051",
+        params: { kind: "nested-borrow" },
+        span,
+      });
+    }
+    validateBorrowTypeExprSyntax(
+      expr.inner,
+      false,
+      `${context} inner type`,
+      ctx,
+      span,
+    );
+    return;
+  }
+  if (expr.typeKind === "function") {
+    expr.parameters.forEach((parameter, index) =>
+      validateBorrowTypeExprSyntax(
+        parameter.type,
+        true,
+        `${context} nested callable parameter ${index + 1}`,
+        ctx,
+        span,
+      ),
+    );
+    validateBorrowTypeExprSyntax(
+      expr.returnType,
+      false,
+      `${context} nested callable return type`,
+      ctx,
+      span,
+    );
+    return;
+  }
+  childTypeExprs(expr).forEach((child) =>
+    validateBorrowTypeExprSyntax(child, false, context, ctx, span),
+  );
+};
+
+const typeExprContainsBorrow = (expr: HirTypeExpr | undefined): boolean =>
+  Boolean(
+    expr &&
+    (expr.typeKind === "borrowed" ||
+      childTypeExprs(expr).some(typeExprContainsBorrow)),
+  );
+
+const childTypeExprs = (expr: HirTypeExpr): readonly HirTypeExpr[] => {
+  switch (expr.typeKind) {
+    case "borrowed":
+      return [expr.inner];
+    case "named":
+      return expr.typeArguments ?? [];
+    case "object":
+      return expr.fields.map((field) => field.type);
+    case "tuple":
+      return expr.elements;
+    case "union":
+    case "intersection":
+      return expr.members;
+    case "function":
+      return [
+        ...expr.parameters.map((parameter) => parameter.type),
+        expr.returnType,
+      ];
+    case "self":
+      return [];
+  }
 };
 
 const createTypeValidator = (ctx: TypingContext): TypeValidator => {

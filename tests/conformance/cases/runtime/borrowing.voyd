@@ -47,22 +47,6 @@ trait Replaceable
 trait PairReplaceable
   fn replace_and_report(~self) -> (i32, i32)
 
-obj ContractViewState {
-  cursor: i32,
-  source: Box
-}
-
-trait ContractView
-  region cursor
-  region source
-  disjoint cursor, source
-
-  @borrow_contract(
-    mutates: cursor,
-    returns_from: source
-  )
-  fn next(~self) -> Optional<borrow Box>
-
 impl Replaceable for Box
   fn replace(~self) -> void
     self = Box { value: 23 }
@@ -72,25 +56,20 @@ impl PairReplaceable for Box
     self = Box { value: 30 }
     (4, 5)
 
-impl ContractView for ContractViewState
-  region cursor = self.cursor
-  region source = deref(self.source)
-
-  fn next(~self) -> Optional<borrow Box>
-    self.cursor = self.cursor + 1
-    Some<borrow Box> { value: self.source }
-
 fn increment(~value: Box) -> void
   value.value = value.value + 1
 
 fn identity(value: Box) -> Box
   value
 
-fn view(value: Box) -> borrow Box
-  value
+fn read_borrow(value: Borrow<Box>) -> i32
+  value.value
 
-fn optional_view(value: Box) -> Optional<borrow Box>
-  Some<borrow Box> { value }
+fn read_borrow_twice(value: Borrow<Box>) -> i32
+  read_borrow(value) + read_borrow(value)
+
+fn increment_borrow(~value: Borrow<Box>) -> void
+  value.value = value.value + 1
 
 fn replace_dynamic(~value: Replaceable) -> void
   value.replace()
@@ -176,29 +155,19 @@ pub fn plain_values_do_not_borrow_source_slots() -> i32
   let assigned = source
   let returned = identity(source)
   let stored = Holder { child: source, count: 0 }
-  let captured = () => source.value
+  let captured_source = source
+  let captured = () => captured_source.value
   increment(~source)
   assigned.value + returned.value + stored.child.value + captured()
 
-pub fn explicit_borrowed_result_reads_source() -> i32
-  let value = Box { value: 21 }
-  let borrowed = view(value)
-  borrowed.value
+pub fn scoped_borrow_inputs() -> i32
+  let ~value = Box { value: 10 }
+  let initial = read_borrow(value)
+  increment_borrow(~value)
+  initial + read_borrow_twice(value)
 
-pub fn nested_explicit_borrow_preserves_payload() -> i32
-  let value = Box { value: 34 }
-  match(optional_view(value))
-    Some<borrow Box> { value: borrowed }: borrowed.value
-    None: 0
-
-pub fn checked_borrow_contract_view() -> i32
-  let ~view = ContractViewState {
-    cursor: 0,
-    source: Box { value: 41 }
-  }
-  match(view.next())
-    Some<borrow Box> { value }: value.value + view.cursor
-    None: 0
+pub fn scoped_borrow_temporary() -> i32
+  read_borrow(Box { value: 17 })
 
 pub fn handle_slots_are_distinct_from_allocations() -> i32
   let ~holder = Holder {
@@ -225,7 +194,7 @@ pub fn shared_cell_mutation() -> i32
   cell.with_mut((~value) =>
     value.value = value.value + 4
   )
-  cell.with((value) => value.value)
+  cell.with((value) => read_borrow(value))
 
 pub fn shared_cell_replacement() -> i32
   let cell = SharedCell(Box { value: 2 })
@@ -233,15 +202,17 @@ pub fn shared_cell_replacement() -> i32
     value = Box { value: 8 }
     void
   )
-  cell.with((value) => value.value)
+  cell.with((value) => read_borrow(value))
 
 pub fn mutable_capture_replacement() -> i32
-  let ~value = Box { value: 3 }
+  let value = SharedCell(Box { value: 3 })
   let replace = () =>
-    value = Box { value: 7 }
-    void
+    value.with_mut((~current) =>
+      current = Box { value: 7 }
+      void
+    )
   replace()
-  value.value
+  value.with((current) => read_borrow(current))
 
 pub fn mutable_alias_replacement() -> i32
   let ~value = Box { value: 3 }

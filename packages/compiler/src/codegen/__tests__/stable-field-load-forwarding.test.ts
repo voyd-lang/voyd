@@ -1,14 +1,29 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { monomorphizeProgram } from "../../semantics/linking.js";
-import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
+import {
+  buildProgramCodegenView,
+  type ExactCallOptimizationFact,
+} from "../../semantics/codegen-view/index.js";
 import { optimizeProgram } from "../../optimize/pipeline.js";
 import { codegenProgram } from "../index.js";
 import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
 
-const compile = (source: string) => {
+const perf = vi.hoisted(() => ({ increment: vi.fn() }));
+vi.mock("../../perf.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../perf.js")>()),
+  incrementCompilerPerfCounter: perf.increment,
+}));
+
+const recordedCounters = (): string[] =>
+  perf.increment.mock.calls.map(([name]) => String(name));
+
+const compile = (
+  source: string,
+  exactFactOverride?: ExactCallOptimizationFact,
+) => {
   const ast = parse(source, "stable_field_load_forwarding.voyd");
   const moduleNode: ModuleNode = {
     id: "std::stable_field_load_forwarding",
@@ -33,6 +48,31 @@ const compile = (source: string) => {
     instances: monomorphized.instances,
     moduleTyping: monomorphized.moduleTyping,
   });
+  if (exactFactOverride) {
+    const bump = Array.from(semantics.hir.items.values()).find(
+      (item) =>
+        item.kind === "function" &&
+        semantics.binding.symbolTable.getSymbol(item.symbol).name === "bump",
+    );
+    if (bump?.kind !== "function") {
+      throw new Error("missing bump function in stable-field fixture");
+    }
+    const bumpTarget = program.functions.getFunctionId({
+      moduleId: moduleNode.id,
+      symbol: bump.symbol,
+    });
+    expect(bumpTarget).toBeDefined();
+    const exactCallOptimizations = program.exactCallOptimizations;
+    program.exactCallOptimizations = {
+      getFact: (target) =>
+        target === bumpTarget
+          ? { kind: "available", fact: exactFactOverride }
+          : exactCallOptimizations.getFact(target),
+      getMetrics: () => exactCallOptimizations.getMetrics(),
+    };
+  }
+  const exactMetricsBeforeOptimization =
+    program.exactCallOptimizations.getMetrics();
   const optimized = optimizeProgram({
     program,
     modules: [semantics],
@@ -52,7 +92,14 @@ const compile = (source: string) => {
   if (generated.diagnostics.length > 0) {
     throw new Error(JSON.stringify(generated.diagnostics, null, 2));
   }
-  return { optimized, generated, baseline, moduleId: moduleNode.id };
+  return {
+    optimized,
+    generated,
+    baseline,
+    program,
+    exactMetricsBeforeOptimization,
+    moduleId: moduleNode.id,
+  };
 };
 
 const source = ({ mutation }: { mutation: "sibling" | "same" | "root" }) => `
@@ -82,9 +129,14 @@ pub fn main() -> i32
 
 describe("stable field load forwarding", () => {
   it("forwards a fixed field load across a resolved disjoint call", () => {
-    const { optimized, generated, baseline, moduleId } = compile(
-      source({ mutation: "sibling" }),
-    );
+    const {
+      optimized,
+      generated,
+      baseline,
+      program,
+      exactMetricsBeforeOptimization,
+      moduleId,
+    } = compile(source({ mutation: "sibling" }));
     const instance = getWasmInstance(generated.module);
     expect((instance.exports.main as () => number)()).toBe(70);
     expect(optimized.facts.stableFieldLoadForwarding.get(moduleId)?.size).toBe(
@@ -94,6 +146,83 @@ describe("stable field load forwarding", () => {
       Array.from(text.matchAll(/\(struct\.get\b/g)).length;
     expect(structGets(generated.module.emitText())).toBeLessThan(
       structGets(baseline.module.emitText()),
+    );
+    expect(exactMetricsBeforeOptimization.requests).toBe(0);
+    expect(program.exactCallOptimizations.getMetrics()).toMatchObject({
+      acceptedFacts: 1,
+      fallbacks: 0,
+    });
+    expect(
+      program.exactCallOptimizations.getMetrics().cacheHits,
+    ).toBeGreaterThan(0);
+    expect(recordedCounters()).toContain(
+      "optimize.pass.stable-field-load-forwarding.accepted",
+    );
+  });
+
+  it("bails out when an otherwise disjoint callee has a nested call", () => {
+    const { optimized, moduleId } = compile(`
+obj Record { stable: i32, changing: i32 }
+
+fn increment(value: i32) -> i32
+  value + 1
+
+fn bump(~value: Record) -> void
+  value.changing = increment(value.changing)
+
+pub fn main() -> i32
+  let ~value = Record { stable: 3, changing: 0 }
+  let alias = value
+  var iteration = 0
+  var total = 0
+  while iteration < 10:
+    total = total + alias.stable
+    bump(~value)
+    total = total + alias.stable
+    iteration = iteration + 1
+  total
+`);
+    expect(
+      optimized.facts.stableFieldLoadForwarding.get(moduleId)?.size ?? 0,
+    ).toBe(0);
+    expect(recordedCounters()).toContain(
+      "optimize.pass.stable-field-load-forwarding.fallback.unsafe-boundary",
+    );
+  });
+
+  it.each([
+    ["escape", { escapes: true }],
+    ["retention", { retained: true }],
+    ["result-alias", { resultAliases: true }],
+  ] as const)("records the bounded %s fallback", (reason, override) => {
+    const parameter = {
+      readFields: ["changing"],
+      writeFields: ["changing"],
+      readsWholeValue: false,
+      writesWholeValue: false,
+      indirectAccess: false,
+      escapes: false,
+      retained: false,
+      resultAliases: false,
+      ...override,
+    };
+    const { optimized, moduleId } = compile(source({ mutation: "sibling" }), {
+      parameters: [parameter],
+      explicitReturn: false,
+      nestedCall: false,
+      recursiveCall: false,
+      dynamicCall: false,
+      unresolvedCall: false,
+      identityGuard: false,
+      externalAccess: false,
+      maySuspend: false,
+    });
+
+    expect(
+      optimized.facts.stableFieldLoadForwarding.get(moduleId)?.size ?? 0,
+    ).toBe(0);
+    expect(recordedCounters()).toContain(
+      `optimize.pass.stable-field-load-forwarding.fallback.${reason}`,
     );
   });
 
@@ -110,10 +239,9 @@ describe("stable field load forwarding", () => {
   it("bails out when a prior call returns provenance from the candidate root", () => {
     const { optimized, moduleId } = compile(`
 obj Record { stable: i32, changing: i32 }
-obj Saved { value: Record }
 
-fn save(value: Record) -> Saved
-  Saved { value }
+fn save(value: Record) -> Record
+  value
 
 fn bump(~value: Record) -> void
   value.changing = value.changing + 1
@@ -129,11 +257,14 @@ pub fn main() -> i32
     bump(~value)
     total = total + alias.stable
     iteration = iteration + 1
-  total + saved.value.changing
+  total + saved.changing
 `);
     expect(
       optimized.facts.stableFieldLoadForwarding.get(moduleId)?.size ?? 0,
     ).toBe(0);
+    expect(recordedCounters()).toContain(
+      "optimize.pass.stable-field-load-forwarding.fallback.result-alias",
+    );
   });
 
   it("bails out for dynamic method dispatch", () => {

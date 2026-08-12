@@ -45,6 +45,7 @@ use std::data::{
   write as write_dto
 }
 use std::dict::Dict
+use std::fixed_array::fns::new_fixed_array
 use std::meta::{
   ArrayShape,
   BoolShape,
@@ -324,8 +325,17 @@ impl JsonDtoReader
     JsonDtoReader::init(source, limits: default_decode_limits())
 
   fn init(source: StringSlice, { limits: DecodeLimits }) -> JsonDtoReader
+    let source_count = source.byte_count
+    let source_bytes = new_fixed_array<i32>(source_count)
+    __array_copy(source_bytes, {
+      from: source.source.bytes,
+      to_index: 0,
+      from_index: source.start,
+      count: source_count
+    })
+    let stable_source = new_string(source_bytes).as_slice()
     JsonDtoReader {
-      reader: JsonReader::init(source, limits: limits),
+      reader: JsonReader::init(stable_source, limits: limits),
       path: "$".to_string(),
       parents: Array<String>::init(),
       limits: limits
@@ -568,8 +578,17 @@ impl JsonReader
     JsonReader::init(source, limits: default_decode_limits())
 
   fn init(source: StringSlice, { limits: DecodeLimits }) -> JsonReader
+    let source_count = source.byte_count
+    let source_bytes = new_fixed_array<i32>(source_count)
+    __array_copy(source_bytes, {
+      from: source.source.bytes,
+      to_index: 0,
+      from_index: source.start,
+      count: source_count
+    })
+    let stable_source = new_string(source_bytes).as_slice()
     JsonReader {
-      parser: JsonParser { source, index: 0 },
+      parser: JsonParser { source: stable_source, index: 0 },
       container_kinds: Array<i32>::init(),
       consumed_values: Array<i32>::init(),
       pending_fields: Array<i32>::init(),
@@ -597,45 +616,49 @@ impl JsonReader
     self.failed = true
     json_reader_failure<T>(message)
 
-  fn prepare_value(~self) -> Result<Unit, JsonError>
+  fn prepare_value(~self) -> i32
     if self.failed:
-      return json_reader_failure<Unit>("json reader session has failed")
+      return 1
     skip_whitespace(self.parser)
     if self.container_kinds.is_empty():
       if self.root_consumed:
-        return self.fail<Unit>("json reader received more than one root value")
+        self.failed = true
+        return 2
       self.root_consumed = true
-      return json_reader_success()
+      return 0
     let index = self.container_kinds.len() - 1
     let kind = self.container_kinds.at(index)
     let consumed = self.consumed_values.at(index)
     if kind == 0:
       if consumed > 0:
         if consume_byte(self.parser, 44) == false:
-          return self.fail<Unit>("json reader expected ',' between array values")
+          self.failed = true
+          return 3
         skip_whitespace(self.parser)
       self.consumed_values.replace(index, with: consumed + 1)
-      return json_reader_success()
+      return 0
     if self.pending_fields.at(index) == 0:
-      return self.fail<Unit>("json reader field is missing its descriptor")
+      self.failed = true
+      return 4
     self.pending_fields.replace(index, with: 0)
     self.consumed_values.replace(index, with: consumed + 1)
-    json_reader_success()
+    0
 
-  fn begin_container(~self, { kind: i32 }) -> Result<Unit, JsonError>
+  fn begin_container(~self, { kind: i32 }) -> i32
     if self.container_kinds.len() >= self.limits.max_depth:
-      return self.fail<Unit>("json nesting exceeds configured depth limit")
-    match(self.prepare_value())
-      Err<JsonError> { error }:
-        Err<JsonError> { error }
-      Ok<Unit>:
-        let opening = if kind == 0 then: 91 else: 123
-        if consume_byte(self.parser, opening) == false:
-          return self.fail<Unit>("json reader expected a container")
-        self.container_kinds.push(kind)
-        self.consumed_values.push(0)
-        self.pending_fields.push(0)
-        json_reader_success()
+      self.failed = true
+      return 5
+    let prepare_status = self.prepare_value()
+    if prepare_status != 0:
+      return prepare_status
+    let opening = if kind == 0 then: 91 else: 123
+    if consume_byte(self.parser, opening) == false:
+      self.failed = true
+      return 6
+    self.container_kinds.push(kind)
+    self.consumed_values.push(0)
+    self.pending_fields.push(0)
+    0
 
   fn end_container(~self, { kind: i32 }) -> Result<Unit, JsonError>
     if self.container_kinds.is_empty():
@@ -655,20 +678,19 @@ impl JsonReader
     json_reader_success()
 
   fn read_number_value(~self) -> Result<f64, JsonError>
-    match(self.prepare_value())
+    let prepare_status = self.prepare_value()
+    if prepare_status != 0:
+      return json_reader_status_failure<f64>(prepare_status)
+    match(parse_number(self.parser))
       Err<JsonError> { error }:
+        self.failed = true
         Err<JsonError> { error }
-      Ok<Unit>:
-        match(parse_number(self.parser))
-          Err<JsonError> { error }:
-            self.failed = true
-            Err<JsonError> { error }
-          Ok<JsonValue> { value }:
-            value.match(number)
-              JsonNumber:
-                Ok<f64> { value: number.value }
-              else:
-                self.fail<f64>("json reader expected number")
+      Ok<JsonValue> { value }:
+        value.match(number)
+          JsonNumber:
+            Ok<f64> { value: number.value }
+          else:
+            self.fail<f64>("json reader expected number")
 
 impl DataReader<JsonError> for JsonReader
   fn reject(~self, message: String) -> Result<Unit, JsonError>
@@ -745,24 +767,22 @@ impl DataReader<JsonError> for JsonReader
                 json_reader_failure<DataKind>("json reader expected a value")
 
   fn read_null(~self) -> Result<Unit, JsonError>
-    match(self.prepare_value())
-      Err<JsonError> { error }:
-        Err<JsonError> { error }
-      Ok<Unit>:
-        if consume_literal(self.parser, "null".as_slice()):
-          return json_reader_success()
-        self.fail<Unit>("json reader expected null")
+    let prepare_status = self.prepare_value()
+    if prepare_status != 0:
+      return json_reader_status_failure<Unit>(prepare_status)
+    if consume_literal(self.parser, "null".as_slice()):
+      return json_reader_success()
+    self.fail<Unit>("json reader expected null")
 
   fn read_bool(~self) -> Result<bool, JsonError>
-    match(self.prepare_value())
-      Err<JsonError> { error }:
-        Err<JsonError> { error }
-      Ok<Unit>:
-        if consume_literal(self.parser, "true".as_slice()):
-          return Ok<bool> { value: true }
-        if consume_literal(self.parser, "false".as_slice()):
-          return Ok<bool> { value: false }
-        self.fail<bool>("json reader expected bool")
+    let prepare_status = self.prepare_value()
+    if prepare_status != 0:
+      return json_reader_status_failure<bool>(prepare_status)
+    if consume_literal(self.parser, "true".as_slice()):
+      return Ok<bool> { value: true }
+    if consume_literal(self.parser, "false".as_slice()):
+      return Ok<bool> { value: false }
+    self.fail<bool>("json reader expected bool")
 
   fn read_i32(~self) -> Result<i32, JsonError>
     match(self.read_number_value())
@@ -804,39 +824,37 @@ impl DataReader<JsonError> for JsonReader
     self.read_number_value()
 
   fn read_string(~self) -> Result<String, JsonError>
-    match(self.prepare_value())
+    let prepare_status = self.prepare_value()
+    if prepare_status != 0:
+      return json_reader_status_failure<String>(prepare_status)
+    match(parse_string(self.parser))
       Err<JsonError> { error }:
+        self.failed = true
         Err<JsonError> { error }
-      Ok<Unit>:
-        match(parse_string(self.parser))
-          Err<JsonError> { error }:
-            self.failed = true
-            Err<JsonError> { error }
-          Ok<String> { value }:
-            Ok<String> { value }
+      Ok<String> { value }:
+        Ok<String> { value }
 
   fn read_bytes(~self) -> Result<Bytes, JsonError>
     self.fail<Bytes>("json reader bytes require an explicit representation")
 
   fn begin_array(~self) -> Result<i32, JsonError>
-    match(self.begin_container(kind: 0))
+    let begin_status = self.begin_container(kind: 0)
+    if begin_status != 0:
+      return json_reader_status_failure<i32>(begin_status)
+    let ~probe = JsonParser {
+      source: self.parser.source,
+      index: self.parser.index
+    }
+    match(count_json_array_values(
+      probe,
+      depth: self.container_kinds.len(),
+      limits: self.limits
+    ))
       Err<JsonError> { error }:
+        self.failed = true
         Err<JsonError> { error }
-      Ok<Unit>:
-        let ~probe = JsonParser {
-          source: self.parser.source,
-          index: self.parser.index
-        }
-        match(count_json_array_values(
-          probe,
-          depth: self.container_kinds.len(),
-          limits: self.limits
-        ))
-          Err<JsonError> { error }:
-            self.failed = true
-            Err<JsonError> { error }
-          Ok<i32> { value }:
-            Ok<i32> { value }
+      Ok<i32> { value }:
+        Ok<i32> { value }
 
   fn has_next_element(self) -> Result<bool, JsonError>
     if self.container_kinds.is_empty():
@@ -859,7 +877,10 @@ impl DataReader<JsonError> for JsonReader
     self.end_container(kind: 0)
 
   fn begin_record(~self) -> Result<Unit, JsonError>
-    self.begin_container(kind: 1)
+    let begin_status = self.begin_container(kind: 1)
+    if begin_status != 0:
+      return json_reader_status_failure<Unit>(begin_status)
+    json_reader_success()
 
   fn next_field(~self) -> Result<Option<String>, JsonError>
     if self.container_kinds.is_empty():
@@ -886,27 +907,32 @@ impl DataReader<JsonError> for JsonReader
         self.failed = true
         Err<JsonError> { error }
       Ok<String> { value: name }:
+        let name_slice = name.as_slice()
+        let ~name_bytes = Array<i32>::with_capacity(name_slice.byte_len())
+        var name_index = 0
+        while name_index < name_slice.byte_len():
+          name_bytes.push(byte_at_or(name_slice, name_index, 0))
+          name_index = name_index + 1
+        let stable_name = new_string(name_bytes.to_fixed_array())
         skip_whitespace(self.parser)
         if consume_byte(self.parser, 58) == false:
           return self.fail<Option<String>>("json reader expected ':' after a field")
         self.pending_fields.replace(index, with: 1)
-        Ok<Option<String>> { value: Some<String> { value: name } }
+        Ok<Option<String>> { value: Some<String> { value: stable_name } }
 
   fn skip_value(~self) -> Result<Unit, JsonError>
-    match(self.prepare_value())
-      Err<JsonError> { error }:
-        Err<JsonError> { error }
-      Ok<Unit>:
-        match(skip_json_value(
-          self.parser,
-          depth: self.container_kinds.len(),
-          limits: self.limits
-        ))
-          Err<JsonError> { error }:
-            self.failed = true
-            Err<JsonError> { error }
-          Ok<Unit>:
-            json_reader_success()
+    let prepare_status = self.prepare_value()
+    if prepare_status != 0:
+      return json_reader_status_failure<Unit>(prepare_status)
+    let skip_status = skip_json_value(
+      self.parser,
+      depth: self.container_kinds.len(),
+      limits: self.limits
+    )
+    if skip_status != 0:
+      self.failed = true
+      return json_skip_status_failure<Unit>(skip_status)
+    json_reader_success()
 
   fn end_record(~self) -> Result<Unit, JsonError>
     self.end_container(kind: 1)
@@ -918,34 +944,39 @@ impl DataReader<JsonError> for JsonReader
     }
     skip_whitespace(probe)
     if peek_byte_or(probe, -1) == 34:
-      match(self.prepare_value())
+      let prepare_status = self.prepare_value()
+      if prepare_status != 0:
+        return json_reader_status_failure<String>(prepare_status)
+      match(parse_string(self.parser))
         Err<JsonError> { error }:
+          self.failed = true
           return Err<JsonError> { error }
-        Ok<Unit>:
-          match(parse_string(self.parser))
-            Err<JsonError> { error }:
-              self.failed = true
-              return Err<JsonError> { error }
-            Ok<String> { value }:
-              self.container_kinds.push(3)
-              self.consumed_values.push(0)
-              self.pending_fields.push(0)
-              return Ok<String> { value }
-    match(self.begin_container(kind: 2))
+        Ok<String> { value }:
+          let value_slice = value.as_slice()
+          let ~value_bytes = Array<i32>::with_capacity(value_slice.byte_len())
+          var value_index = 0
+          while value_index < value_slice.byte_len():
+            value_bytes.push(byte_at_or(value_slice, value_index, 0))
+            value_index = value_index + 1
+          let stable_value = new_string(value_bytes.to_fixed_array())
+          self.container_kinds.push(3)
+          self.consumed_values.push(0)
+          self.pending_fields.push(0)
+          return Ok<String> { value: stable_value }
+    let begin_status = self.begin_container(kind: 2)
+    if begin_status != 0:
+      return json_reader_status_failure<String>(begin_status)
+    match(self.next_field())
       Err<JsonError> { error }:
         Err<JsonError> { error }
-      Ok<Unit>:
-        match(self.next_field())
-          Err<JsonError> { error }:
-            Err<JsonError> { error }
-          Ok<Option<String>> { value }:
-            value.match(field)
-              None:
-                self.fail<String>("json reader variant discriminator is missing")
-              Some<String>:
-                if field.value != "$variant":
-                  return self.fail<String>("json reader expected the variant tag first")
-                self.read_string()
+      Ok<Option<String>> { value }:
+        value.match(field)
+          None:
+            self.fail<String>("json reader variant discriminator is missing")
+          Some<String>:
+            if field.value != "$variant":
+              return self.fail<String>("json reader expected the variant tag first")
+            self.read_string()
 
   fn end_variant(~self) -> Result<Unit, JsonError>
     if self.container_kinds.is_empty() == false:
@@ -959,6 +990,19 @@ impl DataReader<JsonError> for JsonReader
 
 fn json_reader_success() -> Result<Unit, JsonError>
   Ok<Unit> { value: Unit {} }
+
+fn json_reader_status_failure<T>(status: i32) -> Result<T, JsonError>
+  if status == 1:
+    return json_reader_failure<T>("json reader session has failed")
+  if status == 2:
+    return json_reader_failure<T>("json reader received more than one root value")
+  if status == 3:
+    return json_reader_failure<T>("json reader expected ',' between array values")
+  if status == 4:
+    return json_reader_failure<T>("json reader field is missing its descriptor")
+  if status == 5:
+    return json_reader_failure<T>("json nesting exceeds configured depth limit")
+  json_reader_failure<T>("json reader expected a container")
 
 fn json_reader_failure<T>(message: String) -> Result<T, JsonError>
   Err<JsonError> { error: json_parse_error(message) }
@@ -982,7 +1026,16 @@ pub fn parse(source: String) -> Result<JsonValue, JsonError>
   parse(source.as_slice())
 
 pub fn parse(source: StringSlice) -> Result<JsonValue, JsonError>
-  let ~parser = JsonParser { source: source, index: 0 }
+  let source_count = source.byte_count
+  let source_bytes = new_fixed_array<i32>(source_count)
+  __array_copy(source_bytes, {
+    from: source.source.bytes,
+    to_index: 0,
+    from_index: source.start,
+    count: source_count
+  })
+  let stable_source = new_string(source_bytes).as_slice()
+  let ~parser = JsonParser { source: stable_source, index: 0 }
   skip_whitespace(parser)
   let value_result = parse_value(parser)
   match(value_result)
@@ -1092,7 +1145,16 @@ pub fn decode<T>(
       "$",
       "json source exceeds configured limits"
     )
-  let ~reader = JsonDtoReader::init(source, limits: options.limits)
+  let source_count = source.byte_count
+  let source_bytes = new_fixed_array<i32>(source_count)
+  __array_copy(source_bytes, {
+    from: source.source.bytes,
+    to_index: 0,
+    from_index: source.start,
+    count: source_count
+  })
+  let stable_source = new_string(source_bytes).as_slice()
+  let ~reader = JsonDtoReader::init(stable_source, limits: options.limits)
   match(read_dto<T, JsonDecodeError, JsonDtoReader>(
     reader,
     rejects_unknown_fields(options.unknown_fields)
@@ -1801,11 +1863,10 @@ fn count_json_array_values(
   while true:
     if count >= limits.max_collection_length:
       return json_reader_failure<i32>("json array exceeds configured collection limit")
-    match(skip_json_value(parser, depth: depth, limits: limits))
-      Err<JsonError> { error }:
-        return Err<JsonError> { error }
-      Ok<Unit>:
-        count = count + 1
+    let skip_status = skip_json_value(parser, depth: depth, limits: limits)
+    if skip_status != 0:
+      return json_skip_status_failure<i32>(skip_status)
+    count = count + 1
     skip_whitespace(parser)
     if consume_byte(parser, 93):
       return Ok<i32> { value: count }
@@ -1817,87 +1878,136 @@ fn count_json_array_values(
 fn skip_json_value(
   ~parser: JsonParser,
   { depth: i32, limits: DecodeLimits }
-) -> Result<Unit, JsonError>
+) -> i32
   skip_whitespace(parser)
-  match(peek(parser))
-    None:
-      json_reader_failure<Unit>("json reader found an incomplete value")
-    Some<i32> { value: byte }:
-      if byte == 110:
-        if consume_literal(parser, "null".as_slice()):
-          return json_reader_success()
-        return json_reader_failure<Unit>("json reader found an invalid literal")
-      if byte == 116:
-        if consume_literal(parser, "true".as_slice()):
-          return json_reader_success()
-        return json_reader_failure<Unit>("json reader found an invalid literal")
-      if byte == 102:
-        if consume_literal(parser, "false".as_slice()):
-          return json_reader_success()
-        return json_reader_failure<Unit>("json reader found an invalid literal")
-      if byte == 34:
-        match(parse_string(parser))
-          Err<JsonError> { error }:
-            return Err<JsonError> { error }
-          Ok<String>:
-            return json_reader_success()
-      if byte == 91:
-        if depth >= limits.max_depth:
-          return json_reader_failure<Unit>("json nesting exceeds configured depth limit")
-        parser.index = parser.index + 1
-        skip_whitespace(parser)
-        if consume_byte(parser, 93):
-          return json_reader_success()
-        var count = 0
-        while true:
-          if count >= limits.max_collection_length:
-            return json_reader_failure<Unit>("json array exceeds configured collection limit")
-          match(skip_json_value(parser, depth: depth + 1, limits: limits))
-            Err<JsonError> { error }:
-              return Err<JsonError> { error }
-            Ok<Unit>:
-              count = count + 1
-          skip_whitespace(parser)
-          if consume_byte(parser, 93):
-            return json_reader_success()
-          if consume_byte(parser, 44) == false:
-            return json_reader_failure<Unit>("json reader expected ',' or ']' in array")
-          skip_whitespace(parser)
-      if byte == 123:
-        if depth >= limits.max_depth:
-          return json_reader_failure<Unit>("json nesting exceeds configured depth limit")
-        parser.index = parser.index + 1
-        skip_whitespace(parser)
-        if consume_byte(parser, 125):
-          return json_reader_success()
-        var count = 0
-        while true:
-          if count >= limits.max_collection_length:
-            return json_reader_failure<Unit>("json object exceeds configured collection limit")
-          match(parse_string(parser))
-            Err<JsonError> { error }:
-              return Err<JsonError> { error }
-            Ok<String>:
-              void
-          skip_whitespace(parser)
-          if consume_byte(parser, 58) == false:
-            return json_reader_failure<Unit>("json reader expected ':' after a field")
-          match(skip_json_value(parser, depth: depth + 1, limits: limits))
-            Err<JsonError> { error }:
-              return Err<JsonError> { error }
-            Ok<Unit>:
-              count = count + 1
-          skip_whitespace(parser)
-          if consume_byte(parser, 125):
-            return json_reader_success()
-          if consume_byte(parser, 44) == false:
-            return json_reader_failure<Unit>("json reader expected ',' or '}' in object")
-          skip_whitespace(parser)
-      match(parse_number(parser))
-        Err<JsonError> { error }:
-          Err<JsonError> { error }
-        Ok<JsonValue>:
-          json_reader_success()
+  let byte = next_byte_or(parser, -1)
+  if byte < 0:
+    return 1
+  parser.index = parser.index - 1
+  if byte == 110:
+    if consume_literal(parser, "null".as_slice()):
+      return 0
+    return 2
+  if byte == 116:
+    if consume_literal(parser, "true".as_slice()):
+      return 0
+    return 2
+  if byte == 102:
+    if consume_literal(parser, "false".as_slice()):
+      return 0
+    return 2
+  if byte == 34:
+    return skip_json_string_status(parser)
+  if byte == 91:
+    if depth >= limits.max_depth:
+      return 3
+    parser.index = parser.index + 1
+    skip_whitespace(parser)
+    if consume_byte(parser, 93):
+      return 0
+    var count = 0
+    while true:
+      if count >= limits.max_collection_length:
+        return 4
+      let skip_status = skip_json_value(parser, depth: depth + 1, limits: limits)
+      if skip_status != 0:
+        return skip_status
+      count = count + 1
+      skip_whitespace(parser)
+      if consume_byte(parser, 93):
+        return 0
+      if consume_byte(parser, 44) == false:
+        return 5
+      skip_whitespace(parser)
+  if byte == 123:
+    if depth >= limits.max_depth:
+      return 3
+    parser.index = parser.index + 1
+    skip_whitespace(parser)
+    if consume_byte(parser, 125):
+      return 0
+    var count = 0
+    while true:
+      if count >= limits.max_collection_length:
+        return 6
+      let string_status = skip_json_string_status(parser)
+      if string_status != 0:
+        return string_status
+      skip_whitespace(parser)
+      if consume_byte(parser, 58) == false:
+        return 7
+      let skip_status = skip_json_value(parser, depth: depth + 1, limits: limits)
+      if skip_status != 0:
+        return skip_status
+      count = count + 1
+      skip_whitespace(parser)
+      if consume_byte(parser, 125):
+        return 0
+      if consume_byte(parser, 44) == false:
+        return 8
+      skip_whitespace(parser)
+  match(parse_number(parser))
+    Err<JsonError> { error }:
+      json_skip_parse_error_status(error.message)
+    Ok<JsonValue>:
+      0
+
+fn skip_json_string_status(~parser: JsonParser) -> i32
+  match(parse_string(parser))
+    Err<JsonError> { error }:
+      json_skip_parse_error_status(error.message)
+    Ok<String>:
+      0
+
+fn json_skip_parse_error_status(message: String) -> i32
+  if message == "json parse error: expected string":
+    return 9
+  if message == "json parse error: unterminated string":
+    return 10
+  if message == "json parse error: unterminated escape":
+    return 11
+  if message == "json parse error: invalid string escape":
+    return 12
+  if message == "json parse error: unescaped control character in string":
+    return 13
+  if message == "json parse error: invalid fraction":
+    return 15
+  if message == "json parse error: invalid exponent":
+    return 16
+  14
+
+fn json_skip_status_failure<T>(status: i32) -> Result<T, JsonError>
+  if status == 1:
+    return json_reader_failure<T>("json reader found an incomplete value")
+  if status == 2:
+    return json_reader_failure<T>("json reader found an invalid literal")
+  if status == 3:
+    return json_reader_failure<T>("json nesting exceeds configured depth limit")
+  if status == 4:
+    return json_reader_failure<T>("json array exceeds configured collection limit")
+  if status == 5:
+    return json_reader_failure<T>("json reader expected ',' or ']' in array")
+  if status == 6:
+    return json_reader_failure<T>("json object exceeds configured collection limit")
+  if status == 7:
+    return json_reader_failure<T>("json reader expected ':' after a field")
+  if status == 8:
+    return json_reader_failure<T>("json reader expected ',' or '}' in object")
+  if status == 9:
+    return json_reader_failure<T>("json parse error: expected string")
+  if status == 10:
+    return json_reader_failure<T>("json parse error: unterminated string")
+  if status == 11:
+    return json_reader_failure<T>("json parse error: unterminated escape")
+  if status == 12:
+    return json_reader_failure<T>("json parse error: invalid string escape")
+  if status == 13:
+    return json_reader_failure<T>("json parse error: unescaped control character in string")
+  if status == 15:
+    return json_reader_failure<T>("json parse error: invalid fraction")
+  if status == 16:
+    return json_reader_failure<T>("json parse error: invalid exponent")
+  json_reader_failure<T>("json parse error: invalid number")
 
 fn parse_value(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   skip_whitespace(parser)

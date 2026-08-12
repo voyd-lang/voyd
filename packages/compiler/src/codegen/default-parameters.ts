@@ -213,10 +213,7 @@ const compileDefaultIdentityGuards = ({
   ) {
     return [];
   }
-  const protocol = ctx.module.callableRuntimeProtocols.get(
-    fn.symbol,
-  )?.defaultIdentityGuardProtocol;
-  if (protocol !== "presence-conflict-bit-v1") {
+  if (!ctx.module.defaultIdentityGuardTargets.has(fn.symbol)) {
     throw new Error(`missing default identity-guard protocol for ${fn.symbol}`);
   }
   const rawGuardMask = (): binaryen.ExpressionRef =>

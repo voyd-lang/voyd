@@ -1,5 +1,5 @@
 use std::array::Array
-use std::traits::sequence::Sequence
+use std::traits::sequence::Iterator
 use std::result::types::{ Result, Ok, Err }
 use std::test::assertions::all
 use std::traits::clone::{ Clone, Copy }
@@ -100,9 +100,14 @@ obj IntBag {
 }
 
 impl Collect<i32> for IntBag
-  fn from_sequence({ items: Sequence<i32> }) -> IntBag
-    let ~out = Array<i32>::init()
-    out.extend(items: items)
+  fn from_iterator({ ~items: Iterator<i32> }) -> IntBag
+    var out = Array<i32>::init()
+    while true:
+      match(items.next())
+        Some<i32> { value }:
+          out = out.pushed(value)
+        None:
+          break
     IntBag { items: out }
 
 obj NoopHasher {}

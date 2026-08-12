@@ -32,6 +32,10 @@ import {
 } from "../types.js";
 import { compileCallArgExpressionsWithTemps } from "../expressions/call/shared.js";
 import { incrementCompilerPerfCounter } from "../../perf.js";
+import type {
+  ScalarAggregateInitializerDecision,
+  ScalarAggregateParameterDecision,
+} from "../../perf-counter-schema.js";
 import { walkHirExpression } from "../hir-walk.js";
 import { getFunctionMetadataForCall } from "../expressions/call/metadata.js";
 import { receiverSpecializedMetaForCall } from "../receiver-specialization.js";
@@ -39,6 +43,10 @@ import {
   mutableScalarAggregateCalleeCanUseLaneAbi,
   tryReserveMutableScalarAggregateSpecialization,
 } from "./mutable-scalar-aggregate-calls.js";
+import {
+  isStdIntrinsicNominalType,
+  STD_INTRINSIC_TYPE,
+} from "../../compiler-contracts/index.js";
 
 const SCALAR_AGGREGATE_MATERIALIZATION_BOUNDARY_REASONS = new Set([
   "assignment",
@@ -52,11 +60,22 @@ const MUTABLE_SCALAR_AGGREGATE_BOUNDARY_REASONS = new Set([
   "unknown",
 ]);
 
-const recordScalarAggregateDecision = (
+function recordScalarAggregateDecision(
+  kind: "initializer",
+  decision: ScalarAggregateInitializerDecision,
+): void;
+function recordScalarAggregateDecision(
+  kind: "parameter",
+  decision: ScalarAggregateParameterDecision,
+): void;
+function recordScalarAggregateDecision(
   kind: "initializer" | "parameter",
-  decision: string,
-): void =>
+  decision:
+    | ScalarAggregateInitializerDecision
+    | ScalarAggregateParameterDecision,
+): void {
   incrementCompilerPerfCounter(`codegen.scalar_aggregate.${kind}.${decision}`);
+}
 
 export type ScalarAggregateStatementCompiler = (
   stmtId: number,
@@ -144,9 +163,12 @@ const symbolIsUsedAsMutableAliasInitializer = ({
       return false;
     }
     const initializer = ctx.module.hir.expressions.get(stmt.initializer);
-    return (
-      initializer?.exprKind === "identifier" && initializer.symbol === symbol
-    );
+    if (initializer?.exprKind === "identifier") {
+      return initializer.symbol === symbol;
+    }
+    return initializer?.exprKind === "field-access"
+      ? fieldAccessRoot({ exprId: initializer.id, ctx }).symbol === symbol
+      : false;
   });
 
 const fieldAccessRoot = ({
@@ -243,7 +265,7 @@ const expressionUsesAlias = ({
   return found;
 };
 
-const mutableAggregateUsesCanPromote = ({
+const mutableAggregatePromotionDecision = ({
   symbol,
   initializer,
   structInfo,
@@ -255,16 +277,19 @@ const mutableAggregateUsesCanPromote = ({
   structInfo: StructuralTypeInfo;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): boolean => {
+}): {
+  canRemainScalar: boolean;
+  crossesMutableCall: boolean;
+} => {
   const origin = ctx.optimization?.escapeAnalysis.origins
     .get(ctx.moduleId)
     ?.get(initializer);
   if (!origin || !origin.directLocalSymbols.includes(symbol)) {
-    return false;
+    return { canRemainScalar: false, crossesMutableCall: false };
   }
   const body = owningFunctionBody({ ctx, fnCtx });
   if (typeof body !== "number") {
-    return false;
+    return { canRemainScalar: false, crossesMutableCall: false };
   }
   const aliases = new Set(origin.directLocalSymbols);
   const allowedIdentifiers = new Set<HirExprId>();
@@ -282,9 +307,20 @@ const mutableAggregateUsesCanPromote = ({
         if (
           stmt.kind !== "let" ||
           stmt.mutable ||
-          stmt.pattern.kind !== "identifier" ||
-          !aliases.has(stmt.pattern.symbol)
+          stmt.pattern.kind !== "identifier"
         ) {
+          return undefined;
+        }
+        const originDeclaration =
+          stmt.pattern.symbol === symbol && stmt.initializer === initializer;
+        if (stmt.pattern.bindingKind === "mutable-ref" && !originDeclaration) {
+          const source = fieldAccessRoot({ exprId: stmt.initializer, ctx });
+          if (typeof source.symbol === "number" && aliases.has(source.symbol)) {
+            safe = false;
+            return "stop";
+          }
+        }
+        if (!aliases.has(stmt.pattern.symbol)) {
           return undefined;
         }
         const value = ctx.module.hir.expressions.get(stmt.initializer);
@@ -419,18 +455,23 @@ const mutableAggregateUsesCanPromote = ({
       },
     },
   });
-  return (
-    safe &&
-    requiredSpecializations.length > 0 &&
-    requiredSpecializations.every(({ meta, paramIndex }) =>
+  if (!safe) {
+    return { canRemainScalar: false, crossesMutableCall: false };
+  }
+  const specializationsAvailable = requiredSpecializations.every(
+    ({ meta, paramIndex }) =>
       tryReserveMutableScalarAggregateSpecialization({
         meta,
         paramIndex,
         existingKindVariants: 0,
         ctx,
       }),
-    )
   );
+  return {
+    canRemainScalar: specializationsAvailable,
+    crossesMutableCall:
+      specializationsAvailable && requiredSpecializations.length > 0,
+  };
 };
 
 const scalarMutableArgumentRoot = ({
@@ -1200,23 +1241,38 @@ export const tryScalarizeAggregateInitializer = ({
     recordScalarAggregateDecision("initializer", "bailout.effectful");
     return undefined;
   }
+  if (
+    isStdIntrinsicNominalType({
+      program: ctx.program,
+      typeId: targetTypeId,
+      intrinsicType: STD_INTRINSIC_TYPE.sharedCell,
+    })
+  ) {
+    recordScalarAggregateDecision("initializer", "bailout.interior_mutability");
+    return undefined;
+  }
   const structInfo = getStructuralTypeInfo(targetTypeId, ctx);
   if (!structInfo) {
     recordScalarAggregateDecision("initializer", "bailout.no_layout");
     return undefined;
   }
   const addressTaken = ctx.module.mutableStorageSymbols.has(symbol);
-  const promoteAcrossMutableCalls =
+  const promotionDecision =
     mutable &&
     addressTaken &&
-    mutableAggregateUsesCanPromote({
+    mutableAggregatePromotionDecision({
       symbol,
       initializer,
       structInfo,
       ctx,
       fnCtx,
     });
-  if (addressTaken && !promoteAcrossMutableCalls) {
+  const canRemainScalar = promotionDecision
+    ? promotionDecision.canRemainScalar
+    : !addressTaken;
+  const promoteAcrossMutableCalls =
+    promotionDecision && promotionDecision.crossesMutableCall;
+  if (!canRemainScalar) {
     recordScalarAggregateDecision("initializer", "bailout.address_taken");
     return undefined;
   }

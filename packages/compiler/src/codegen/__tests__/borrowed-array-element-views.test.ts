@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
@@ -7,6 +7,15 @@ import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import { optimizeProgram } from "../../optimize/pipeline.js";
 import { codegen, codegenProgram } from "../index.js";
 import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
+
+const perf = vi.hoisted(() => ({ increment: vi.fn() }));
+vi.mock("../../perf.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../perf.js")>()),
+  incrementCompilerPerfCounter: perf.increment,
+}));
+
+const recordedCounters = (): string[] =>
+  perf.increment.mock.calls.map(([name]) => String(name));
 
 const compileProgram = (
   source: string,
@@ -66,6 +75,8 @@ const compileMain = (source: string): (() => number) =>
   compileProgram(source).instance.exports.main as () => number;
 
 describe("borrowed array element views", () => {
+  beforeEach(() => perf.increment.mockClear());
+
   it("lowers call-scoped identity guards after single-shot arguments", () => {
     const { instance, module } = compileProgram(`
 obj Box { value: i32 }
@@ -85,6 +96,9 @@ pub fn main() -> i32
 `);
     expect((instance.exports.main as () => number)()).toBe(14);
     expect(module.emitText()).toContain("ref.eq");
+    expect(recordedCounters()).toContain(
+      "borrowing.identity_guard.emitted.immediate",
+    );
   });
 
   it("compares mutable root storage instead of aliased stored objects", () => {
@@ -306,6 +320,15 @@ pub fn distinct() -> i32
 `);
     expect((instance.exports.distinct as () => number)()).toBe(15);
     expect(module.emitText()).toContain("__voyd_panic_ptr");
+    expect(recordedCounters()).toContain(
+      "borrowing.identity_guard.emitted.deferred_default",
+    );
+    expect(recordedCounters()).toContain(
+      "codegen.default_identity_guard_companion.created",
+    );
+    expect(recordedCounters()).toContain(
+      "codegen.default_identity_guard_companion.compiled",
+    );
   });
 
   it("does not emit a guarded companion for a statically safe default", () => {
@@ -318,6 +341,9 @@ pub fn main() -> i32
 `);
     expect((instance.exports.main as () => number)()).toBe(1);
     expect(module.emitText()).not.toContain("__default_identity_guard_v1");
+    expect(recordedCounters()).not.toContain(
+      "codegen.default_identity_guard_companion.requested",
+    );
   });
 
   it("defers complete projected-place conflicts until after defaults", () => {

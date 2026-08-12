@@ -78,6 +78,9 @@ impl CaptureBox
   api fn set(~self, { value: i32 }) -> void
     self.value = value
 
+fn set_capture_box(~value: Borrow<CaptureBox>, replacement: i32) -> void
+  value.value = replacement
+
 fn sum_pair({ left: i32, right: i32 }) -> i32
   left + right
 
@@ -90,7 +93,7 @@ pub fn closure_capture_labeled_calls() -> i32
   let out = SharedCell(CaptureBox { value: 0 })
   each visit(value):
     out.with_mut((~current) =>
-      current.set(value: sum_pair(left: current.value, right: value))
+      set_capture_box(~current, sum_pair(left: current.value, right: value))
     )
   out.with((current) => current.value)
 

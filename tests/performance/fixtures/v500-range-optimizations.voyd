@@ -1,0 +1,28 @@
+use std::array::Array
+
+fn build_values() -> Array<i32>
+  let ~values = Array<i32>::with_capacity(32)
+  var index = 0
+  while index < 32:
+    values.push((index * 3) + 1)
+    index = index + 1
+  values
+
+pub fn direct_range_workload() -> i32
+  var pass = 0
+  var total = 0
+  while pass < 10000:
+    for index in -16..=15:
+      total = total + index + 16
+    pass = pass + 1
+  total
+
+pub fn range_array_checked_access_workload() -> i32
+  let values = build_values()
+  var pass = 0
+  var total = 0
+  while pass < 5000:
+    for index in 0..values.len():
+      total = total + values.at(index)
+    pass = pass + 1
+  total

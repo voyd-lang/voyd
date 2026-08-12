@@ -25,7 +25,6 @@ import {
 import { getModuleSccGroups } from "./scc.js";
 import { collectCyclicModuleExportSurfaces } from "./cyclic-export-surfaces.js";
 import { cloneSemanticsMapForTypingState } from "./semantic-snapshot.js";
-import type { BorrowingResult } from "../semantics/borrowing/index.js";
 import { incrementCompilerPerfCounter } from "../perf.js";
 
 export type SemanticsTypingState = {
@@ -41,8 +40,6 @@ export type AnalyzeModuleSemanticsOptions = {
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
   changedModuleIds?: ReadonlySet<string>;
   typingState?: SemanticsTypingState;
-  reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
-  retainBorrowingIncrementalData?: boolean;
   isCancelled?: () => boolean;
 };
 
@@ -96,8 +93,6 @@ export const analyzeModuleSemantics = ({
   previousSemantics,
   changedModuleIds,
   typingState,
-  reusableBorrowing,
-  retainBorrowingIncrementalData = true,
   isCancelled,
 }: AnalyzeModuleSemanticsOptions): AnalyzeModuleSemanticsResult => {
   if (previousSemantics && !typingState) {
@@ -227,9 +222,6 @@ export const analyzeModuleSemantics = ({
         arena,
         effectInterner,
         isCancelled,
-        reusableBorrowing,
-        previousSemantics,
-        retainBorrowingIncrementalData,
       });
       return;
     }
@@ -246,9 +238,6 @@ export const analyzeModuleSemantics = ({
       effectInterner,
       diagnostics,
       isCancelled,
-      reusableBorrowing,
-      retainBorrowingIncrementalData,
-      previousBorrowing: previousSemantics?.get(moduleId)?.borrowing,
     });
     if (!result) {
       return;
@@ -414,9 +403,6 @@ const analyzeCyclicScc = ({
   arena,
   effectInterner,
   isCancelled,
-  reusableBorrowing,
-  previousSemantics,
-  retainBorrowingIncrementalData,
 }: {
   moduleIds: readonly string[];
   includeTests: boolean | undefined;
@@ -429,9 +415,6 @@ const analyzeCyclicScc = ({
   arena: ReturnType<typeof createTypeArena>;
   effectInterner: ReturnType<typeof createEffectInterner>;
   isCancelled: (() => boolean) | undefined;
-  reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
-  previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
-  retainBorrowingIncrementalData: boolean;
 }) => {
   const seedErrorByModuleId = new Map<string, string>();
   const cyclicExportSurfaces = collectCyclicModuleExportSurfaces({
@@ -480,8 +463,6 @@ const analyzeCyclicScc = ({
       arena,
       effectInterner,
       isCancelled,
-      reusableBorrowing,
-      retainBorrowingIncrementalData: false,
     });
     if (!result) {
       return;
@@ -517,8 +498,6 @@ const analyzeCyclicScc = ({
       arena,
       effectInterner,
       isCancelled,
-      reusableBorrowing,
-      retainBorrowingIncrementalData: false,
     });
     if (!result) {
       return;
@@ -599,9 +578,6 @@ const analyzeCyclicScc = ({
             exports: dependencyExports,
             recoverFromTypingErrors,
             diagnostics,
-            reusableBorrowing,
-            previousBorrowing: previousSemantics?.get(moduleId)?.borrowing,
-            retainBorrowingIncrementalData,
           })
         : analyzeModule({
             moduleId,
@@ -615,9 +591,6 @@ const analyzeCyclicScc = ({
             effectInterner,
             diagnostics,
             isCancelled,
-            reusableBorrowing,
-            previousBorrowing: previousSemantics?.get(moduleId)?.borrowing,
-            retainBorrowingIncrementalData,
           });
     if (!result) {
       return;
@@ -665,21 +638,17 @@ const haveEquivalentPublicTypingSurfaces = (
   }
 
   const publicTypingSurface = (
-    packageInterface: NonNullable<ModuleExportTable["packageSemanticInterface"]>,
+    packageInterface: NonNullable<
+      ModuleExportTable["packageSemanticInterface"]
+    >,
   ) => ({
     moduleId: packageInterface.moduleId,
     exports: packageInterface.exports.map((entry) => ({
       name: entry.name,
       kind: entry.kind,
       visibility: entry.visibility,
-      declarations: entry.declarations.map(
-        ({ summaryId: _summaryId, capability: _capability, ...declaration }) =>
-          declaration,
-      ),
-      members: entry.members.map(
-        ({ summaryId: _summaryId, capability: _capability, ...member }) =>
-          member,
-      ),
+      declarations: entry.declarations,
+      members: entry.members,
     })),
     types: packageInterface.types,
   });
@@ -699,9 +668,6 @@ const reanalyzeBorrowing = ({
   exports,
   recoverFromTypingErrors,
   diagnostics,
-  reusableBorrowing,
-  previousBorrowing,
-  retainBorrowingIncrementalData,
 }: {
   semantics: SemanticsPipelineResult;
   moduleId: string;
@@ -711,9 +677,6 @@ const reanalyzeBorrowing = ({
   exports: Map<string, ModuleExportTable>;
   recoverFromTypingErrors: boolean | undefined;
   diagnostics: Diagnostic[];
-  reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
-  previousBorrowing?: BorrowingResult;
-  retainBorrowingIncrementalData: boolean;
 }): SemanticsPipelineResult | undefined => {
   const module = graph.modules.get(moduleId);
   if (!module) {
@@ -727,9 +690,6 @@ const reanalyzeBorrowing = ({
       dependencies,
       exports,
       recoverFromTypingErrors,
-      borrowingOverride: reusableBorrowing?.get(moduleId),
-      previousBorrowing,
-      retainBorrowingIncrementalData,
     });
     diagnostics.push(
       ...augmentCycleTy0022Diagnostics({
@@ -778,9 +738,6 @@ const analyzeModule = ({
   effectInterner,
   diagnostics,
   isCancelled,
-  reusableBorrowing,
-  previousBorrowing,
-  retainBorrowingIncrementalData,
 }: {
   moduleId: string;
   includeTests: boolean | undefined;
@@ -795,9 +752,6 @@ const analyzeModule = ({
   effectInterner: ReturnType<typeof createEffectInterner>;
   diagnostics?: Diagnostic[];
   isCancelled: (() => boolean) | undefined;
-  reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
-  previousBorrowing?: BorrowingResult;
-  retainBorrowingIncrementalData?: boolean;
 }): SemanticsPipelineResult | undefined => {
   throwIfCancelled(isCancelled);
 
@@ -820,9 +774,6 @@ const analyzeModule = ({
       includeTests,
       recoverFromTypingErrors,
       checkBorrowBodies,
-      borrowingOverride: reusableBorrowing?.get(moduleId),
-      previousBorrowing,
-      retainBorrowingIncrementalData,
     });
     diagnostics?.push(
       ...augmentCycleTy0022Diagnostics({

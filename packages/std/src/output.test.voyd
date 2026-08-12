@@ -1,115 +1,63 @@
-use std::array::Array
-use std::bytes::{ ByteBuffer, Bytes }
+use std::bytes::ByteBuffer
 use std::error::IoError
-use std::optional::types::all
 use std::result::types::all
-use std::string::type::{ String, StringSlice }
+use std::string::type::String
 use std::test::assertions::all
 
-obj StringOutputCapture {
-  values: Array<String>,
-  targets: Array<String>
-}
-
-obj ByteOutputCapture {
-  values: Array<i32>,
-  targets: Array<String>
-}
-
 test "output write defaults to stdout":
-  let ~capture = StringOutputCapture {
-    values: Array<String>::init(),
-    targets: Array<String>::init()
-  }
-  let result = write_with_capture(capture)
+  let result = write_with_assertions()
 
   match(result)
     Ok<Unit>:
-      assert(optional_string_or(capture.values.get(0), "missing".as_slice()).equals("hello"), eq: true)
-      assert(optional_string_or(capture.targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
+      void
     Err<IoError>:
       assert(false, eq: true)
 
 test "output write encodes stderr target":
-  let ~targets = Array<String>::init()
-  let result = write_stderr_with_capture(targets)
+  let result = write_stderr_with_assertions()
 
   match(result)
     Ok<Unit>:
-      assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stderr"), eq: true)
+      void
     Err<IoError>:
       assert(false, eq: true)
 
 test "output write_line appends exactly newline":
-  let ~capture = StringOutputCapture {
-    values: Array<String>::init(),
-    targets: Array<String>::init()
-  }
-  let result = write_line_with_capture(capture)
+  let result = write_line_with_assertions()
 
   match(result)
     Ok<Unit>:
-      assert(optional_string_or(capture.targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
-      assert(capture.targets.len(), eq: 1)
-      assert(capture.values.len(), eq: 1)
-      let line = optional_string_or(capture.values.get(0), "missing".as_slice())
-      let bytes = line.to_utf8()
-      assert(optional_i32_or(bytes.get(0), -1), eq: 104)
-      assert(optional_i32_or(bytes.get(1), -1), eq: 105)
-      assert(optional_i32_or(bytes.get(2), -1), eq: 10)
+      void
     Err<IoError>:
       assert(false, eq: true)
 
 test "output print appends exactly newline and ignores result":
-  let ~capture = StringOutputCapture {
-    values: Array<String>::init(),
-    targets: Array<String>::init()
-  }
-  print_with_capture(capture)
-
-  assert(optional_string_or(capture.targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
-  assert(capture.targets.len(), eq: 1)
-  assert(capture.values.len(), eq: 1)
-  let line = optional_string_or(capture.values.get(0), "missing".as_slice())
-  let bytes = line.to_utf8()
-  assert(optional_i32_or(bytes.get(0), -1), eq: 104)
-  assert(optional_i32_or(bytes.get(1), -1), eq: 105)
-  assert(optional_i32_or(bytes.get(2), -1), eq: 10)
+  print_with_assertions()
 
 test "output write(Bytes) encodes stderr target":
-  let ~capture = ByteOutputCapture {
-    values: Array<i32>::init(),
-    targets: Array<String>::init()
-  }
-  let result = write_byte_payload_with_capture(capture)
+  let result = write_byte_payload_with_assertions()
 
   match(result)
     Ok<Unit>:
-      assert(optional_string_or(capture.targets.get(0), "missing".as_slice()).equals("stderr"), eq: true)
-      assert(optional_i32_or(capture.values.get(0), -1), eq: 7)
-      assert(optional_i32_or(capture.values.get(1), -1), eq: 8)
+      void
     Err<IoError>:
       assert(false, eq: true)
 
 test "output flush defaults to stdout":
-  let ~targets = Array<String>::init()
-  let result = flush_with_capture(targets)
+  let result = flush_with_assertions()
 
   match(result)
     Ok<Unit>:
-      assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
+      void
     Err<IoError>:
       assert(false, eq: true)
 
 test "output is_tty forwards host bool with selected target":
-  let ~targets = Array<String>::init()
-  let stdout_tty = is_tty_with_stdout_payload(value: true, targets: targets)
-  let stderr_tty = is_tty_with_stderr_payload(value: false, targets: targets)
+  let stdout_tty = is_tty_with_stdout_payload(true)
+  let stderr_tty = is_tty_with_stderr_payload(false)
 
   assert(stdout_tty, eq: true)
   assert(stderr_tty, eq: false)
-  assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
-  assert(optional_string_or(targets.get(1), "missing".as_slice()).equals("stderr"), eq: true)
 
 test "output write decodes host errors":
   let result = write_with_payload(output_error(code: 32, message: "broken pipe"))
@@ -121,12 +69,12 @@ test "output write decodes host errors":
     Ok<Unit>:
       assert(false, eq: true)
 
-fn write_with_capture(~capture: StringOutputCapture): () -> Result<Unit, IoError>
+fn write_with_assertions(): Test -> Result<Unit, IoError>
   try
     write("hello".as_slice().to_string())
   Output::write_op(tail, payload):
-    capture.values.push(payload.value)
-    capture.targets.push(payload.target)
+    assert(payload.value.equals("hello"), eq: true)
+    assert(payload.target.equals("stdout"), eq: true)
     tail(output_ok())
   Output::write_bytes_op(tail, _payload):
     tail(output_error(code: 1, message: "unexpected"))
@@ -135,11 +83,11 @@ fn write_with_capture(~capture: StringOutputCapture): () -> Result<Unit, IoError
   Output::is_tty_op(tail, _payload):
     tail(false)
 
-fn write_stderr_with_capture(~targets: Array<String>): () -> Result<Unit, IoError>
+fn write_stderr_with_assertions(): Test -> Result<Unit, IoError>
   try
     write("warn".as_slice().to_string(), StdErr {})
   Output::write_op(tail, payload):
-    targets.push(payload.target)
+    assert(payload.target.equals("stderr"), eq: true)
     tail(output_ok())
   Output::write_bytes_op(tail, _payload):
     tail(output_error(code: 1, message: "unexpected"))
@@ -148,12 +96,16 @@ fn write_stderr_with_capture(~targets: Array<String>): () -> Result<Unit, IoErro
   Output::is_tty_op(tail, _payload):
     tail(false)
 
-fn write_line_with_capture(~capture: StringOutputCapture): () -> Result<Unit, IoError>
+fn write_line_with_assertions(): Test -> Result<Unit, IoError>
   try
     write_line("hi".as_slice().to_string())
   Output::write_op(tail, payload):
-    capture.targets.push(payload.target)
-    capture.values.push(payload.value)
+    assert(payload.target.equals("stdout"), eq: true)
+    let bytes = payload.value.to_utf8()
+    assert(bytes.len(), eq: 3)
+    assert(bytes.at(0), eq: 104)
+    assert(bytes.at(1), eq: 105)
+    assert(bytes.at(2), eq: 10)
     tail(output_ok())
   Output::write_bytes_op(tail, _payload):
     tail(output_error(code: 1, message: "unexpected"))
@@ -162,12 +114,16 @@ fn write_line_with_capture(~capture: StringOutputCapture): () -> Result<Unit, Io
   Output::is_tty_op(tail, _payload):
     tail(false)
 
-fn print_with_capture(~capture: StringOutputCapture): () -> void
+fn print_with_assertions(): Test -> void
   try
     print("hi".as_slice().to_string())
   Output::write_op(tail, payload):
-    capture.targets.push(payload.target)
-    capture.values.push(payload.value)
+    assert(payload.target.equals("stdout"), eq: true)
+    let bytes = payload.value.to_utf8()
+    assert(bytes.len(), eq: 3)
+    assert(bytes.at(0), eq: 104)
+    assert(bytes.at(1), eq: 105)
+    assert(bytes.at(2), eq: 10)
     tail(output_ok())
   Output::write_bytes_op(tail, _payload):
     tail(output_error(code: 1, message: "unexpected"))
@@ -176,7 +132,7 @@ fn print_with_capture(~capture: StringOutputCapture): () -> void
   Output::is_tty_op(tail, _payload):
     tail(false)
 
-fn write_byte_payload_with_capture(~capture: ByteOutputCapture): () -> Result<Unit, IoError>
+fn write_byte_payload_with_assertions(): Test -> Result<Unit, IoError>
   let ~buffer = ByteBuffer::with_capacity(2)
   buffer.push(7)
   buffer.push(8)
@@ -184,8 +140,10 @@ fn write_byte_payload_with_capture(~capture: ByteOutputCapture): () -> Result<Un
   try
     write(buffer.as_bytes(), StdErr {})
   Output::write_bytes_op(tail, payload):
-    capture.targets.push(payload.target)
-    decode_bytes_into(payload.bytes, capture.values)
+    assert(payload.target.equals("stderr"), eq: true)
+    assert(payload.bytes.len(), eq: 2)
+    assert(payload.bytes.at(0), eq: 7)
+    assert(payload.bytes.at(1), eq: 8)
     tail(output_ok())
   Output::write_op(tail, _payload):
     tail(output_error(code: 1, message: "unexpected"))
@@ -194,11 +152,11 @@ fn write_byte_payload_with_capture(~capture: ByteOutputCapture): () -> Result<Un
   Output::is_tty_op(tail, _payload):
     tail(false)
 
-fn flush_with_capture(~targets: Array<String>): () -> Result<Unit, IoError>
+fn flush_with_assertions(): Test -> Result<Unit, IoError>
   try
     flush()
   Output::flush_op(tail, payload):
-    targets.push(payload.target)
+    assert(payload.target.equals("stdout"), eq: true)
     tail(output_ok())
   Output::write_op(tail, _payload):
     tail(output_error(code: 1, message: "unexpected"))
@@ -207,11 +165,11 @@ fn flush_with_capture(~targets: Array<String>): () -> Result<Unit, IoError>
   Output::is_tty_op(tail, _payload):
     tail(false)
 
-fn is_tty_with_stdout_payload({ value: bool, ~targets: Array<String> }): () -> bool
+fn is_tty_with_stdout_payload(value: bool): Test -> bool
   try
     is_tty()
   Output::is_tty_op(tail, payload):
-    targets.push(payload.target)
+    assert(payload.target.equals("stdout"), eq: true)
     tail(value)
   Output::write_op(tail, _payload):
     tail(output_error(code: 1, message: "unexpected"))
@@ -220,11 +178,11 @@ fn is_tty_with_stdout_payload({ value: bool, ~targets: Array<String> }): () -> b
   Output::flush_op(tail, _payload):
     tail(output_error(code: 1, message: "unexpected"))
 
-fn is_tty_with_stderr_payload({ value: bool, ~targets: Array<String> }): () -> bool
+fn is_tty_with_stderr_payload(value: bool): Test -> bool
   try
     is_tty(StdErr {})
   Output::is_tty_op(tail, payload):
-    targets.push(payload.target)
+    assert(payload.target.equals("stderr"), eq: true)
     tail(value)
   Output::write_op(tail, _payload):
     tail(output_error(code: 1, message: "unexpected"))
@@ -244,31 +202,6 @@ fn write_with_payload(payload: OutputResult): () -> Result<Unit, IoError>
     tail(output_error(code: 1, message: "unexpected"))
   Output::is_tty_op(tail, _payload):
     tail(false)
-
-fn decode_bytes_into(payload: Bytes, ~values: Array<i32>) -> void
-  let source = payload.to_array()
-  var index = 0
-  while index < source.len():
-    match(source.get(index))
-      Some<i32> { value }:
-        values.push(value)
-      None:
-        void
-    index = index + 1
-
-fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
-  match(value)
-    Some<String> { value: present }:
-      present
-    None:
-      fallback.to_string()
-
-fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
-  match(value)
-    Some<i32> { value: present }:
-      present
-    None:
-      fallback
 
 fn output_ok() -> OutputResult
   OutputResult { ok: true, code: 0, message: "" }

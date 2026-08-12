@@ -1,5 +1,5 @@
 trait Doubleable<T>
-  fn double(~self) -> T
+  fn double(~self): () -> T
 
 obj Box { value: i32 }
 obj Alt { value: i32 }

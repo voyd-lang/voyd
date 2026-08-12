@@ -1,0 +1,30 @@
+use std::array::Array
+
+obj Box {
+  value: i32
+}
+
+fn mutate_both(
+  ~left: Box,
+  ~right: Box,
+  increment: i32 = 2
+) -> i32
+  left.value = left.value + increment
+  right.value = right.value + increment
+  left.value + right.value
+
+fn guarded(
+  ~values: Array<Box>,
+  left: i32,
+  right: i32
+) -> i32
+  mutate_both(
+    ~values.at(left),
+    ~values.at(right)
+  )
+
+pub fn deferred_guard_dynamic(right: i32) -> i32
+  let ~values = Array<Box>::with_capacity(2)
+  values.push(Box { value: 1 })
+  values.push(Box { value: 10 })
+  guarded(~values, 0, right)

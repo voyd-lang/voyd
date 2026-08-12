@@ -5,4 +5,4 @@
 /// Trait for producing a default instance of a type.
 pub trait Default<T>
   /// Returns the default value for `T`.
-  fn default() -> T
+  fn default(): () -> T

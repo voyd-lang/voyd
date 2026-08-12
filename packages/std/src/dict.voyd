@@ -3,10 +3,9 @@
 //! Provides key/value storage with entry APIs, merge helpers, and iteration utilities.
 //! Keys must implement `DictKey<K>` to supply hash and equality behavior.
 
-use std::array::Array
+use std::array::{ Array, new_array_unchecked }
 use std::fixed_array::fns::{ new_fixed_array }
 use std::math::{ MathError, mod_euclid, next_power_of_two }
-use std::traits::sequence::all
 use std::optional::types::all
 use std::string::type::String
 use std::subscript::{ SubscriptRead, SubscriptWrite }
@@ -16,10 +15,10 @@ use std::subscript::{ SubscriptRead, SubscriptWrite }
 /// Implementors define stable hashing and equality for dictionary lookups.
 pub trait DictKey<K>
   /// Returns a hash used to choose the key bucket.
-  fn dict_hash(self) -> i32
+  fn dict_hash(self): () -> i32
 
   /// Returns true when this key equals `other`.
-  fn dict_eq(self, other: K) -> bool
+  fn dict_eq(self, other: K): () -> bool
 
 /// Entry handle for conditional dictionary updates.
 ///
@@ -52,11 +51,6 @@ obj DictPair<K, V> {
   value: V
 }
 
-obj BucketSetResult<K, V> {
-  bucket: Array<DictPair<K, V>>,
-  inserted: bool
-}
-
 obj BucketDeleteResult<K, V> {
   bucket: Array<DictPair<K, V>>,
   deleted: bool
@@ -74,17 +68,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     /// Estimated number of entries to store.
     capacity: i32
   ) -> Dict<K, V>
-    let target = if capacity > 0 then: capacity else: 0
-    let min_bucket_count = 16
-    let max_initial_bucket_count = 65536
-    let grown_target = if target > 1073741823 then: 2147483647 else: target * 2
-    let desired_bucket_count = next_power_of_two_or_limit(grown_target, max_initial_bucket_count)
-    let bucket_count =
-      if desired_bucket_count > min_bucket_count:
-        desired_bucket_count
-      else:
-        min_bucket_count
-
+    let bucket_count = bucket_count_for_capacity(capacity)
     Dict<K, V> { buckets: new_buckets<K, V>(bucket_count), count: 0 }
 
   /// Returns the number of stored elements.
@@ -145,13 +129,43 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   /// Updates storage owned exclusively by this dictionary.
   fn set_owned(~self, key: K, value: V) -> bool
+    self.set_entry_owned(DictPair<K, V> { key, value })
+
+  fn find_entry_index(self, bucket_index: i32, key: K) -> i32
+    let bucket = __array_get(self.buckets, bucket_index)
+    let storage = bucket.storage
+    var index = 0
+    while index < bucket.count:
+      let entry = __array_get(storage, index)
+      if key_equals(entry.key, key):
+        return index
+      index = index + 1
+    -1
+
+  fn set_entry_owned(~self, entry: DictPair<K, V>) -> bool
     let bucket_count = __array_len(self.buckets)
-    let inserted = set_in_owned_buckets(self.buckets, bucket_count, key, value)
+    let bucket_index = bucket_index_for_key(bucket_count, entry.key)
+    let bucket = __array_get(self.buckets, bucket_index)
+    let bucket_storage = bucket.storage
+    let bucket_len = bucket.count
+    let entry_index = self.find_entry_index(bucket_index, entry.key)
+    let inserted = entry_index < 0
+    let next_count = if inserted then: bucket_len + 1 else: bucket_len
+    let next_storage = new_fixed_array<DictPair<K, V>>(next_count)
+    __array_copy(next_storage, {
+      from: bucket_storage,
+      to_index: 0,
+      from_index: 0,
+      count: bucket_len
+    })
+    let write_index = if inserted then: bucket_len else: entry_index
+    __array_set(next_storage, write_index, entry)
+    let next_bucket = new_array_unchecked<DictPair<K, V>>({ from: next_storage })
+    __array_set(self.buckets, bucket_index, next_bucket)
     if inserted:
       self.count = self.count + 1
       if should_grow(self.count, bucket_count):
-        let grown = rehash_to_bucket_count(self, bucket_count * 2)
-        self.buckets = grown.buckets
+        rehash_owned(~self, bucket_count * 2)
     inserted
 
   /// Returns a dictionary with `key` inserted or updated.
@@ -174,15 +188,34 @@ impl<K: DictKey<K>, V> Dict<K, V>
     if self.count == 0:
       return None {}
 
-    let previous = self.get(key)
     let bucket_count = __array_len(self.buckets)
     let bucket_index = bucket_index_for_key(bucket_count, key)
     let bucket = __array_get(self.buckets, bucket_index)
-    let result = delete_from_bucket(bucket, key)
-    if result.deleted:
-      __array_set(self.buckets, bucket_index, result.bucket)
-      self.count = self.count - 1
-    previous
+    let bucket_storage = bucket.storage
+    let bucket_len = bucket.count
+    let entry_index = self.find_entry_index(bucket_index, key)
+    if entry_index < 0:
+      return None {}
+
+    let entry = __array_get(bucket_storage, entry_index)
+    let next_count = bucket_len - 1
+    let next_storage = new_fixed_array<DictPair<K, V>>(next_count)
+    __array_copy(next_storage, {
+      from: bucket_storage,
+      to_index: 0,
+      from_index: 0,
+      count: entry_index
+    })
+    __array_copy(next_storage, {
+      from: bucket_storage,
+      to_index: entry_index,
+      from_index: entry_index + 1,
+      count: next_count - entry_index
+    })
+    let next_bucket = new_array_unchecked<DictPair<K, V>>({ from: next_storage })
+    __array_set(self.buckets, bucket_index, next_bucket)
+    self.count = self.count - 1
+    Some<V> { value: entry.value }
 
   /// Removes all stored values.
   api fn clear(~self) -> void
@@ -273,17 +306,45 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   /// Appends values from another collection or sequence.
   api fn extend(~self, other: Dict<K, V>) -> void
-    self.extend(entries: other.entries())
-
-  /// Appends values from another collection or sequence.
-  api fn extend(~self, { entries: Sequence<(K, V)> }) -> void
-    let ~iter = entries.iter()
-    while true:
-      match(iter.next())
-        Some<(K, V)> { value }:
-          self.set(value.0, value.1)
-        None:
-          break
+    let bucket_count = __array_len(other.buckets)
+    var bucket_index = 0
+    while bucket_index < bucket_count:
+      let bucket = __array_get(other.buckets, bucket_index)
+      let storage = bucket.storage
+      let len = bucket.count
+      var index = 0
+      while index < len:
+        let entry = __array_get(storage, index)
+        let self_bucket_count = __array_len(self.buckets)
+        let self_bucket_index = bucket_index_for_key(
+          self_bucket_count,
+          entry.key
+        )
+        let self_bucket = __array_get(self.buckets, self_bucket_index)
+        let self_storage = self_bucket.storage
+        let self_len = self_bucket.count
+        let entry_index = self.find_entry_index(self_bucket_index, entry.key)
+        let inserted = entry_index < 0
+        let next_count = if inserted then: self_len + 1 else: self_len
+        let next_storage = new_fixed_array<DictPair<K, V>>(next_count)
+        __array_copy(next_storage, {
+          from: self_storage,
+          to_index: 0,
+          from_index: 0,
+          count: self_len
+        })
+        let write_index = if inserted then: self_len else: entry_index
+        __array_set(next_storage, write_index, entry)
+        let next_bucket = new_array_unchecked<DictPair<K, V>>({
+          from: next_storage
+        })
+        __array_set(self.buckets, self_bucket_index, next_bucket)
+        if inserted:
+          self.count = self.count + 1
+          if should_grow(self.count, self_bucket_count):
+            rehash_owned(~self, self_bucket_count * 2)
+        index = index + 1
+      bucket_index = bucket_index + 1
 
   /// Returns a new dictionary containing entries from both inputs.
   api fn merged(self, other: Dict<K, V>) -> Dict<K, V>
@@ -309,9 +370,10 @@ impl<K: DictKey<K>, V> Dict<K, V>
       if self.count > 2147483647 - other.count
         then: 2147483647
         else: self.count + other.count
-    let empty = Dict<K, V>::with_capacity(max_count)
-    var buckets = empty.buckets
-    var count = 0
+    let output_bucket_count = bucket_count_for_capacity(max_count)
+    let ~output_buckets = new_fixed_array<Array<DictPair<K, V>>>(output_bucket_count)
+    initialize_buckets(~output_buckets)
+    let ~output = Dict<K, V> { buckets: output_buckets, count: 0 }
 
     let self_bucket_count = __array_len(self.buckets)
     var bucket_index = 0
@@ -322,14 +384,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
       var index = 0
       while index < len:
         let entry = __array_get(storage, index)
-        if set_in_owned_buckets(
-          buckets,
-          __array_len(buckets),
-          entry.key,
-          entry.value
-        ):
-          count = count + 1
-          buckets = grow_owned_buckets_if_needed(buckets, count)
+        let _ = output.set_entry_owned(entry)
         index = index + 1
       bucket_index = bucket_index + 1
 
@@ -342,36 +397,26 @@ impl<K: DictKey<K>, V> Dict<K, V>
       var index = 0
       while index < len:
         let entry = __array_get(storage, index)
-        match(value_in_buckets(buckets, count, entry.key))
+        match(output.get(entry.key))
           Some<V> { value: left }:
             let next_value = resolve(entry.key, left, entry.value)
-            let _ = set_in_owned_buckets(
-              buckets,
-              __array_len(buckets),
-              entry.key,
-              next_value
-            )
+            let next_entry = DictPair<K, V> { key: entry.key, value: next_value }
+            let _ = output.set_entry_owned(next_entry)
           None:
-            if set_in_owned_buckets(
-              buckets,
-              __array_len(buckets),
-              entry.key,
-              entry.value
-            ):
-              count = count + 1
-              buckets = grow_owned_buckets_if_needed(buckets, count)
+            let _ = output.set_entry_owned(entry)
         index = index + 1
       bucket_index = bucket_index + 1
-    Dict<K, V> { buckets, count }
+    output
 
   /// Transforms each value and keeps the original keys.
   api fn map<U>(self, f: (key: K, value: V) -> U) -> Dict<K, U>
     if self.count == 0:
       return Dict<K, U>::init()
 
-    let empty = Dict<K, U>::with_capacity(self.count)
-    var buckets = empty.buckets
-    var count = 0
+    let output_bucket_count = bucket_count_for_capacity(self.count)
+    let ~output_buckets = new_fixed_array<Array<DictPair<K, U>>>(output_bucket_count)
+    initialize_buckets(~output_buckets)
+    let ~output = Dict<K, U> { buckets: output_buckets, count: 0 }
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
     while bucket_index < bucket_count:
@@ -381,26 +426,24 @@ impl<K: DictKey<K>, V> Dict<K, V>
       var index = 0
       while index < len:
         let entry = __array_get(storage, index)
-        if set_in_owned_buckets(
-          buckets,
-          __array_len(buckets),
-          entry.key,
-          f(entry.key, entry.value)
-        ):
-          count = count + 1
-          buckets = grow_owned_buckets_if_needed(buckets, count)
+        let next_entry = DictPair<K, U> {
+          key: entry.key,
+          value: f(entry.key, entry.value)
+        }
+        let _ = output.set_entry_owned(next_entry)
         index = index + 1
       bucket_index = bucket_index + 1
-    Dict<K, U> { buckets, count }
+    output
 
   /// Returns a collection containing only values that satisfy the predicate.
   api fn filter(self, pred: (key: K, value: V) -> bool) -> Dict<K, V>
     if self.count == 0:
       return self
 
-    let empty = Dict<K, V>::with_capacity(self.count)
-    var buckets = empty.buckets
-    var count = 0
+    let output_bucket_count = bucket_count_for_capacity(self.count)
+    let ~output_buckets = new_fixed_array<Array<DictPair<K, V>>>(output_bucket_count)
+    initialize_buckets(~output_buckets)
+    let ~output = Dict<K, V> { buckets: output_buckets, count: 0 }
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
     while bucket_index < bucket_count:
@@ -411,17 +454,10 @@ impl<K: DictKey<K>, V> Dict<K, V>
       while index < len:
         let entry = __array_get(storage, index)
         if pred(entry.key, entry.value):
-          if set_in_owned_buckets(
-            buckets,
-            __array_len(buckets),
-            entry.key,
-            entry.value
-          ):
-            count = count + 1
-            buckets = grow_owned_buckets_if_needed(buckets, count)
+          let _ = output.set_entry_owned(entry)
         index = index + 1
       bucket_index = bucket_index + 1
-    Dict<K, V> { buckets, count }
+    output
 
   /// Returns an entry handle for in-place updates on a specific key.
   api fn entry(self, key: K) -> DictEntry<K, V>
@@ -429,18 +465,61 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   fn with_set(self, key: K, value: V) -> Dict<K, V>
     let bucket_count = __array_len(self.buckets)
-    let next_buckets = copy_buckets(self.buckets)
-    let inserted = set_in_owned_buckets(next_buckets, bucket_count, key, value)
-    let count = if inserted then: self.count + 1 else: self.count
-    let next = Dict<K, V> { buckets: next_buckets, count: count }
-    maybe_grow(next)
+    let bucket_index = bucket_index_for_key(bucket_count, key)
+    let bucket = __array_get(self.buckets, bucket_index)
+    let bucket_storage = bucket.storage
+    let bucket_len = bucket.count
+    var entry_index = -1
+    var index = 0
+    while index < bucket_len:
+      let candidate = __array_get(bucket_storage, index)
+      if key_equals(candidate.key, key):
+        entry_index = index
+        break
+      index = index + 1
+    let inserted = entry_index < 0
+    let next_bucket_count = if inserted then: bucket_len + 1 else: bucket_len
+    let next_bucket_storage = new_fixed_array<DictPair<K, V>>(next_bucket_count)
+    __array_copy(next_bucket_storage, {
+      from: bucket_storage,
+      to_index: 0,
+      from_index: 0,
+      count: bucket_len
+    })
+    let write_index = if inserted then: bucket_len else: entry_index
+    __array_set(
+      next_bucket_storage,
+      write_index,
+      DictPair<K, V> { key, value }
+    )
+    let ~next_buckets = new_fixed_array<Array<DictPair<K, V>>>(bucket_count)
+    __array_copy(next_buckets, {
+      from: self.buckets,
+      to_index: 0,
+      from_index: 0,
+      count: bucket_count
+    })
+    let next_bucket = new_array_unchecked<DictPair<K, V>>({
+      from: next_bucket_storage
+    })
+    __array_set(next_buckets, bucket_index, next_bucket)
+    Dict<K, V> {
+      buckets: next_buckets,
+      count: if inserted then: self.count + 1 else: self.count
+    }
 
   fn with_deleted(self, key: K) -> Dict<K, V>
     let bucket_count = __array_len(self.buckets)
     let bucket_index = bucket_index_for_key(bucket_count, key)
     let bucket = __array_get(self.buckets, bucket_index)
     let result = delete_from_bucket(bucket, key)
-    let next_buckets = copy_buckets(self.buckets)
+    let ~next_buckets = new_fixed_array<Array<DictPair<K, V>>>(bucket_count)
+    __array_copy(next_buckets, {
+      from: self.buckets,
+      to_index: 0,
+      from_index: 0,
+      count: bucket_count
+    })
     if result.deleted:
       __array_set(next_buckets, bucket_index, result.bucket)
       return Dict<K, V> { buckets: next_buckets, count: self.count - 1 }
@@ -491,37 +570,28 @@ impl<K: DictKey<K>, V> SubscriptWrite<K, V> for Dict<K, V>
 impl<T> Array<T>
   /// Groups sequence values by key and returns grouped arrays.
   api fn group_by<K: DictKey<K>>(self, f: (value: T) -> K) -> Dict<K, Array<T>>
-    let empty = Dict<K, Array<T>>::with_capacity(self.len())
-    var buckets = empty.buckets
-    var count = 0
+    let output_bucket_count = bucket_count_for_capacity(self.len())
+    let ~output_buckets = new_fixed_array<Array<DictPair<K, Array<T>>>>(output_bucket_count)
+    initialize_buckets(~output_buckets)
+    let ~output = Dict<K, Array<T>> { buckets: output_buckets, count: 0 }
     var index = 0
     while index < self.len():
       match(self.get(index))
         Some<T> { value }:
           let group_key = f(value)
-          match(value_in_buckets(buckets, count, group_key))
+          match(output.get(group_key))
             Some<Array<T>> { value: existing }:
               let next = existing.pushed(value)
-              let _ = set_in_owned_buckets(
-                buckets,
-                __array_len(buckets),
-                group_key,
-                next
-              )
+              let entry = DictPair<K, Array<T>> { key: group_key, value: next }
+              let _ = output.set_entry_owned(entry)
             None:
               let next = Array<T>::with_capacity(1).pushed(value)
-              if set_in_owned_buckets(
-                buckets,
-                __array_len(buckets),
-                group_key,
-                next
-              ):
-                count = count + 1
-                buckets = grow_owned_buckets_if_needed(buckets, count)
+              let entry = DictPair<K, Array<T>> { key: group_key, value: next }
+              let _ = output.set_entry_owned(entry)
         None:
           void
       index = index + 1
-    Dict<K, Array<T>> { buckets, count }
+    output
 
 impl DictKey<String> for String
   /// Returns the hash code used for dictionary key bucketing.
@@ -532,6 +602,16 @@ impl DictKey<String> for String
   api fn dict_eq(self, other: String) -> bool
     self == other
 
+fn bucket_count_for_capacity(capacity: i32) -> i32
+  let target = if capacity > 0 then: capacity else: 0
+  let min_bucket_count = 16
+  let max_initial_bucket_count = 65536
+  let grown_target = if target > 1073741823 then: 2147483647 else: target * 2
+  let desired_bucket_count = next_power_of_two_or_limit(grown_target, max_initial_bucket_count)
+  if desired_bucket_count > min_bucket_count
+    then: desired_bucket_count
+    else: min_bucket_count
+
 fn new_buckets<K, V>(bucket_count: i32) -> FixedArray<Array<DictPair<K, V>>>
   let safe_bucket_count = if bucket_count > 0 then: bucket_count else: 1
   let buckets = new_fixed_array<Array<DictPair<K, V>>>(safe_bucket_count)
@@ -540,6 +620,15 @@ fn new_buckets<K, V>(bucket_count: i32) -> FixedArray<Array<DictPair<K, V>>>
     __array_set(buckets, index, Array<DictPair<K, V>>::init())
     index = index + 1
   buckets
+
+fn initialize_buckets<K, V>(
+  ~buckets: FixedArray<Array<DictPair<K, V>>>
+) -> void
+  let bucket_count = __array_len(buckets)
+  var index = 0
+  while index < bucket_count:
+    __array_set(buckets, index, Array<DictPair<K, V>>::init())
+    index = index + 1
 
 fn copy_buckets<K, V>(
   source: FixedArray<Array<DictPair<K, V>>>
@@ -554,80 +643,62 @@ fn copy_buckets<K, V>(
   })
   copy
 
-/// Updates a bucket table whose physical storage is owned by the caller.
-///
-/// This low-level boundary changes only the table and its selected bucket;
-/// values retained in other buckets are not mutably borrowed.
-fn set_in_owned_buckets<K: DictKey<K>, V>(
-  buckets: FixedArray<Array<DictPair<K, V>>>,
-  bucket_count: i32,
-  key: K,
-  value: V
-) -> bool
-  let bucket_index = bucket_index_for_key(bucket_count, key)
-  let bucket = __array_get(buckets, bucket_index)
-  let result = set_in_bucket(bucket, key, value)
-  __array_set(buckets, bucket_index, result.bucket)
-  result.inserted
-
-fn value_in_buckets<K: DictKey<K>, V>(
-  buckets: FixedArray<Array<DictPair<K, V>>>,
-  count: i32,
-  key: K
-) -> Optional<V>
-  if count == 0:
-    return None {}
-
-  let bucket_count = __array_len(buckets)
-  let bucket_index = bucket_index_for_key(bucket_count, key)
-  let bucket = __array_get(buckets, bucket_index)
-  let entry_index = find_entry_index_in_bucket(bucket, key)
-  if entry_index < 0:
-    return None {}
-
-  let entry = __array_get(bucket.raw_storage(), entry_index)
-  Some<V> { value: entry.value }
-
-fn grow_owned_buckets_if_needed<K: DictKey<K>, V>(
-  buckets: FixedArray<Array<DictPair<K, V>>>,
-  count: i32
-) -> FixedArray<Array<DictPair<K, V>>>
-  let bucket_count = __array_len(buckets)
-  if not should_grow(count, bucket_count):
-    return buckets
-
-  rehash_to_bucket_count(
-    Dict<K, V> { buckets, count },
-    bucket_count * 2
-  ).buckets
-
-fn maybe_grow<K: DictKey<K>, V>(dict: Dict<K, V>) -> Dict<K, V>
-  let bucket_count = __array_len(dict.buckets)
-  if should_grow(dict.count, bucket_count):
-    let next_bucket_count = bucket_count * 2
-    return rehash_to_bucket_count(dict, next_bucket_count)
-  dict
-
 fn should_grow(count: i32, bucket_count: i32) -> bool
   if bucket_count <= 0:
     return true
   (count * 4) > (bucket_count * 3)
 
-fn rehash_to_bucket_count<K: DictKey<K>, V>(dict: Dict<K, V>, bucket_count: i32) -> Dict<K, V>
+fn rehash_owned<K: DictKey<K>, V>(
+  ~dict: Dict<K, V>,
+  bucket_count: i32
+) -> void
   let next_bucket_count = if bucket_count > 0 then: bucket_count else: 1
-  let next_buckets = new_buckets<K, V>(next_bucket_count)
+  let ~next_buckets = new_fixed_array<Array<DictPair<K, V>>>(next_bucket_count)
+  initialize_buckets(~next_buckets)
 
   let previous_bucket_count = __array_len(dict.buckets)
   var bucket_index = 0
   while bucket_index < previous_bucket_count:
     let bucket = __array_get(dict.buckets, bucket_index)
-    insert_bucket_entries(next_buckets, next_bucket_count, bucket)
+    let source_storage = bucket.storage
+    var source_index = 0
+    while source_index < bucket.count:
+      let next_bucket_index = bucket_index_for_stored_entry(
+        dict,
+        next_bucket_count,
+        bucket_index,
+        source_index
+      )
+      let entry = __array_get(source_storage, source_index)
+      let next_bucket = __array_get(next_buckets, next_bucket_index)
+      let next_count = next_bucket.count + 1
+      let next_storage = new_fixed_array<DictPair<K, V>>(next_count)
+      __array_copy(next_storage, {
+        from: next_bucket.storage,
+        to_index: 0,
+        from_index: 0,
+        count: next_bucket.count
+      })
+      __array_set(next_storage, next_bucket.count, entry)
+      let copied_bucket = new_array_unchecked<DictPair<K, V>>({ from: next_storage })
+      __array_set(next_buckets, next_bucket_index, copied_bucket)
+      source_index = source_index + 1
     bucket_index = bucket_index + 1
 
-  Dict<K, V> { buckets: next_buckets, count: dict.count }
+  dict.buckets = next_buckets
+
+fn bucket_index_for_stored_entry<K: DictKey<K>, V>(
+  dict: Dict<K, V>,
+  bucket_count: i32,
+  bucket_index: i32,
+  entry_index: i32
+) -> i32
+  let bucket = __array_get(dict.buckets, bucket_index)
+  let entry = __array_get(bucket.storage, entry_index)
+  bucket_index_for_key(bucket_count, entry.key)
 
 fn insert_bucket_entries<K: DictKey<K>, V>(
-  buckets: FixedArray<Array<DictPair<K, V>>>,
+  ~buckets: FixedArray<Array<DictPair<K, V>>>,
   bucket_count: i32,
   bucket: Array<DictPair<K, V>>
 ) -> void
@@ -636,18 +707,28 @@ fn insert_bucket_entries<K: DictKey<K>, V>(
   var index = 0
   while index < len:
     let entry = __array_get(storage, index)
-    insert_entry(buckets, bucket_count, entry)
+    insert_entry(~buckets, bucket_count, entry)
     index = index + 1
 
 fn insert_entry<K: DictKey<K>, V>(
-  buckets: FixedArray<Array<DictPair<K, V>>>,
+  ~buckets: FixedArray<Array<DictPair<K, V>>>,
   bucket_count: i32,
   entry: DictPair<K, V>
-) -> FixedArray<Array<DictPair<K, V>>>
+) -> void
   let bucket_index = bucket_index_for_key(bucket_count, entry.key)
   let bucket = __array_get(buckets, bucket_index)
-  let next_bucket = bucket.pushed(entry)
+  let next_count = bucket.count + 1
+  let next_storage = new_fixed_array<DictPair<K, V>>(next_count)
+  __array_copy(next_storage, {
+    from: bucket.storage,
+    to_index: 0,
+    from_index: 0,
+    count: bucket.count
+  })
+  __array_set(next_storage, bucket.count, entry)
+  let next_bucket = new_array_unchecked<DictPair<K, V>>({ from: next_storage })
   __array_set(buckets, bucket_index, next_bucket)
+  void
 
 fn find_entry_index_in_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, key: K) -> i32
   let storage = bucket.raw_storage()
@@ -660,28 +741,26 @@ fn find_entry_index_in_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, k
     index = index + 1
   -1
 
-fn set_in_bucket<K: DictKey<K>, V>(
-  bucket: Array<DictPair<K, V>>,
-  key: K,
-  value: V
-) -> BucketSetResult<K, V>
-  let index = find_entry_index_in_bucket(bucket, key)
-  let entry = DictPair<K, V> { key: key, value: value }
-
-  if index < 0:
-    let next_bucket = bucket.pushed(entry)
-    return BucketSetResult<K, V> { bucket: next_bucket, inserted: true }
-
-  let ~next_bucket = bucket.copied()
-  next_bucket.replace(index, with: entry)
-  BucketSetResult<K, V> { bucket: next_bucket, inserted: false }
-
 fn delete_from_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, key: K) -> BucketDeleteResult<K, V>
   let index = find_entry_index_in_bucket(bucket, key)
   if index < 0:
     return BucketDeleteResult<K, V> { bucket: bucket, deleted: false }
 
-  let next_bucket = bucket.removed(index)
+  let next_count = bucket.count - 1
+  let next_storage = new_fixed_array<DictPair<K, V>>(next_count)
+  __array_copy(next_storage, {
+    from: bucket.storage,
+    to_index: 0,
+    from_index: 0,
+    count: index
+  })
+  __array_copy(next_storage, {
+    from: bucket.storage,
+    to_index: index,
+    from_index: index + 1,
+    count: next_count - index
+  })
+  let next_bucket = new_array_unchecked<DictPair<K, V>>({ from: next_storage })
   BucketDeleteResult<K, V> { bucket: next_bucket, deleted: true }
 
 fn bucket_index_for_key<K: DictKey<K>>(bucket_count: i32, key: K) -> i32

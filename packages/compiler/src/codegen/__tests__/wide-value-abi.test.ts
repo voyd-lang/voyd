@@ -38,7 +38,7 @@ obj Present<T> { value: T }
 obj Absent {}
 type Maybe<T> = Present<T> | Absent
 
-fn read(value: borrow Maybe<i32>) -> i32
+fn read(value: Borrow<Maybe<i32>>) -> i32
   match(value)
     Present<i32> { value }:
       value

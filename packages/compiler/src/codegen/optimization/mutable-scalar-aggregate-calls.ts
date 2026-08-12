@@ -1,17 +1,20 @@
-import type {
-  CodegenContext,
-  FunctionMetadata,
-  StructuralTypeInfo,
-} from "../context.js";
+import type { CodegenContext, FunctionMetadata } from "../context.js";
 import type { HirFunction } from "../../semantics/hir/index.js";
-import type { HirExprId, SymbolId } from "../../semantics/ids.js";
+import { incrementCompilerPerfCounter } from "../../perf.js";
+import type { MutableScalarAggregateLaneAbiFallbackReason } from "../../perf-counter-schema.js";
 import { getOptimizedResultAbiKind, getStructuralTypeInfo } from "../types.js";
-import { walkHirExpression } from "../hir-walk.js";
 import {
   composeSpecializationDimensions,
   tryAdmitFunctionSpecialization,
   type FunctionSpecializationDimensions,
 } from "../specialization-policy.js";
+
+type MutableScalarAggregateLaneAbiDecision =
+  | { accepted: true }
+  | {
+      accepted: false;
+      reason: MutableScalarAggregateLaneAbiFallbackReason;
+    };
 
 export const mutableScalarAggregateCalleeCanUseLaneAbi = ({
   meta,
@@ -22,6 +25,31 @@ export const mutableScalarAggregateCalleeCanUseLaneAbi = ({
   paramIndex: number;
   ctx: CodegenContext;
 }): boolean => {
+  incrementCompilerPerfCounter(
+    "codegen.mutable_scalar_aggregate_lane_abi.requested",
+  );
+  const decision = mutableScalarAggregateLaneAbiDecision({
+    meta,
+    paramIndex,
+    ctx,
+  });
+  incrementCompilerPerfCounter(
+    decision.accepted
+      ? "codegen.mutable_scalar_aggregate_lane_abi.accepted"
+      : `codegen.mutable_scalar_aggregate_lane_abi.fallback.${decision.reason}`,
+  );
+  return decision.accepted;
+};
+
+const mutableScalarAggregateLaneAbiDecision = ({
+  meta,
+  paramIndex,
+  ctx,
+}: {
+  meta: FunctionMetadata;
+  paramIndex: number;
+  ctx: CodegenContext;
+}): MutableScalarAggregateLaneAbiDecision => {
   const typeId = meta.paramTypeIds[paramIndex];
   const item = functionItemFor({ ctx, meta });
   const signature = ctx.program.functions.getSignature(
@@ -39,55 +67,92 @@ export const mutableScalarAggregateCalleeCanUseLaneAbi = ({
     moduleId: meta.moduleId,
     symbol: meta.symbol,
   });
-  const footprint =
+  const exactDecision =
     typeof functionId === "number"
-      ? ctx.program.callableAccesses.getFootprint(functionId)
+      ? ctx.program.exactCallOptimizations.getFact(functionId)
       : undefined;
-  const access = footprint?.parameters[paramIndex];
+  const exactFact =
+    exactDecision?.kind === "available" ? exactDecision.fact : undefined;
+  const access = exactFact?.parameters[paramIndex];
 
+  if (!item) return { accepted: false, reason: "missing-body" };
+  if (!targetCtx) {
+    return { accepted: false, reason: "missing-module-context" };
+  }
+  if (!structInfo || structInfo.layoutKind !== "heap-object") {
+    return { accepted: false, reason: "unsupported-layout" };
+  }
+  if (!hirParameter || typeof hirParameter.symbol !== "number") {
+    return { accepted: false, reason: "missing-parameter" };
+  }
+  if (!signature) return { accepted: false, reason: "missing-signature" };
+  if (!ctx.program.effects.isEmpty(signature.effectRow) || meta.effectful) {
+    return { accepted: false, reason: "effectful" };
+  }
   if (
-    !item ||
-    !targetCtx ||
-    !structInfo ||
-    structInfo.layoutKind !== "heap-object" ||
-    !hirParameter ||
-    typeof hirParameter.symbol !== "number" ||
-    !signature ||
-    !ctx.program.effects.isEmpty(signature.effectRow) ||
     meta.resultTypeId !== signature.returnType ||
     meta.resultAbiKind !== "direct" ||
     getOptimizedResultAbiKind({ typeId: meta.resultTypeId, ctx: targetCtx }) !==
-      "direct" ||
-    meta.effectful ||
-    meta.paramAbiKinds[paramIndex] !== "mutable_ref" ||
-    parameter?.bindingKind !== "mutable-ref" ||
-    parameter.optional ||
-    parameter.defaulted ||
-    parameter.typeId !== typeId ||
-    !footprint ||
-    !access ||
-    footprint.maySuspend ||
-    footprint.externalRead ||
-    footprint.externalWrite ||
-    access.runtimeCheckedWrites ||
-    access.retained ||
-    access.returned ||
-    access.returnedProvenance ||
-    access.writePaths.length === 0 ||
-    !parameterUsesOnlyDirectFields({
-      item,
-      symbol: hirParameter.symbol,
-      allowReturns: meta.resultTypeId !== ctx.program.primitives.void,
-      ctx: targetCtx,
-    })
+      "direct"
   ) {
-    return false;
+    return { accepted: false, reason: "result-abi" };
   }
-
-  return (
-    access.readPaths.every((path) => directFieldPath(path, structInfo)) &&
-    access.writePaths.every((path) => directFieldPath(path, structInfo))
-  );
+  if (
+    meta.paramAbiKinds[paramIndex] !== "mutable_ref" ||
+    parameter?.bindingKind !== "mutable-ref"
+  ) {
+    return { accepted: false, reason: "parameter-abi" };
+  }
+  if (parameter.optional) {
+    return { accepted: false, reason: "optional-parameter" };
+  }
+  if (parameter.defaulted) {
+    return { accepted: false, reason: "defaulted-parameter" };
+  }
+  if (parameter.typeId !== typeId) {
+    return { accepted: false, reason: "parameter-type" };
+  }
+  if (!exactFact || !access) {
+    return { accepted: false, reason: "exact-fact-unavailable" };
+  }
+  if (
+    exactFact.maySuspend ||
+    exactFact.externalAccess ||
+    exactFact.nestedCall ||
+    exactFact.recursiveCall ||
+    exactFact.dynamicCall ||
+    exactFact.unresolvedCall ||
+    exactFact.identityGuard
+  ) {
+    return { accepted: false, reason: "unsafe-boundary" };
+  }
+  if (
+    meta.resultTypeId === ctx.program.primitives.void &&
+    exactFact.explicitReturn
+  ) {
+    return { accepted: false, reason: "explicit-void-return" };
+  }
+  if (access.readsWholeValue || access.writesWholeValue) {
+    return { accepted: false, reason: "whole-value-access" };
+  }
+  if (access.indirectAccess) {
+    return { accepted: false, reason: "indirect-access" };
+  }
+  if (access.escapes) return { accepted: false, reason: "escape" };
+  if (access.retained) return { accepted: false, reason: "retention" };
+  if (access.resultAliases) {
+    return { accepted: false, reason: "result-alias" };
+  }
+  if (access.writeFields.length === 0) {
+    return { accepted: false, reason: "no-writes" };
+  }
+  if (
+    !access.readFields.every((field) => structInfo.fieldMap.has(field)) ||
+    !access.writeFields.every((field) => structInfo.fieldMap.has(field))
+  ) {
+    return { accepted: false, reason: "unknown-field" };
+  }
+  return { accepted: true };
 };
 
 export const mutableScalarAggregateSpecializationDimensions = ({
@@ -152,58 +217,3 @@ const functionItemFor = ({
       item.kind === "function" && item.symbol === meta.symbol,
   );
 };
-
-const parameterUsesOnlyDirectFields = ({
-  item,
-  symbol,
-  allowReturns,
-  ctx,
-}: {
-  item: HirFunction;
-  symbol: SymbolId;
-  allowReturns: boolean;
-  ctx: CodegenContext;
-}): boolean => {
-  const allowedIdentifiers = new Set<HirExprId>();
-  let safe = true;
-  walkHirExpression({
-    exprId: item.body,
-    ctx,
-    visitor: {
-      onStmt: (_stmtId, stmt) => {
-        if (stmt.kind === "return" && !allowReturns) {
-          safe = false;
-          return "stop";
-        }
-        return undefined;
-      },
-      onExpr: (exprId, expr) => {
-        if (expr.exprKind === "field-access") {
-          const target = ctx.module.hir.expressions.get(expr.target);
-          if (target?.exprKind === "identifier" && target.symbol === symbol) {
-            allowedIdentifiers.add(target.id);
-          }
-          return undefined;
-        }
-        if (
-          expr.exprKind === "identifier" &&
-          expr.symbol === symbol &&
-          !allowedIdentifiers.has(exprId)
-        ) {
-          safe = false;
-          return "stop";
-        }
-        return undefined;
-      },
-    },
-  });
-  return safe;
-};
-
-const directFieldPath = (
-  path: readonly import("../../semantics/codegen-view/index.js").CodegenPlaceProjection[],
-  structInfo: StructuralTypeInfo,
-): boolean =>
-  path.length === 1 &&
-  path[0]?.kind === "field" &&
-  structInfo.fieldMap.has(path[0].name);

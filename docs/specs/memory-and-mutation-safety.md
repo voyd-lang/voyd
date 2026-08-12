@@ -2,929 +2,441 @@
 
 Status: Implemented
 
-This document defines Voyd's memory-lifetime, aliasing, mutation-safety, and
-borrow-contract model. It is the authoritative description of the implemented
-language and compiler behavior.
+This document defines Voyd's source-level memory lifetime, aliasing, mutation,
+and scoped-borrow rules. A difference in the compiler, standard library, or
+published reference is a bug against this specification.
 
-A difference in the implementation, standard library, or published
-documentation is a bug against this specification.
+The design priorities, in order, are safety, developer experience, and
+performance.
 
-The design priorities, in order, are:
+## 1. Source model
 
-1. safety;
-2. developer experience;
-3. performance.
+Voyd has four memory-safety concepts:
 
-## Part I: Guide
+1. `T` is an ordinary value or a garbage-collected object handle.
+2. `~T` grants exclusive access for a bounded call or local reborrow.
+3. `Borrow<T>` grants shared access for a bounded call or callback.
+4. `SharedCell<T>` provides runtime-checked scoped shared mutation.
 
-### The model in six rules
+Garbage collection determines whether an allocation is alive. Access checking
+determines whether code may read or change a place or allocation at a particular
+time. There is no source-level manual free operation and no persistent runtime
+loan table for ordinary code.
 
-1. Garbage collection keeps reachable allocations alive.
-2. Shared reads may coexist, but an active writer may not overlap another
-   active access to the same storage.
-3. A plain `T` is a semantic value, never a hidden source-level borrow.
-4. Copying an object handle preserves object identity without borrowing the
-   slot from which the handle was read.
-5. A genuine storage view uses `borrow T` and carries provenance.
-6. Advanced public APIs may describe mutation and borrowed-result provenance
-   with checked regions and `@borrow_contract`.
+A plain `T` never hides a source borrow. Scalars and value types are logically
+copied. Copying an object handle preserves object identity without borrowing the
+slot from which it was read. Aggregates are logically copied according to their
+fields; object handles inside a copy remain aliases to their allocations.
 
-### Lifetime and access are separate
+## 2. Mutable access
 
-Garbage collection answers whether an allocation remains alive. Borrow
-checking answers whether code may access that allocation or another storage
-place in a particular way.
-
-```voyd
-obj Account {
-  balance: i32
-}
-
-let ~account = Account { balance: 10 }
-let observer = account
-```
-
-`observer` is another handle to the same `Account`. The allocation remains
-alive while either handle is reachable. Merely possessing either ordinary
-handle does not create a shared loan.
-
-Sequential mutation and observation are valid:
+`~T` is a bounded exclusive capability. While an exclusive access is active,
+the covered place or object allocation MUST NOT be read or written through an
+overlapping alias.
 
 ```voyd
-deposit(~account, 5)
-print(observer.balance) // observes 15
+obj Counter { value: i32 }
+
+fn increment(~counter: Counter) -> void
+  counter.value = counter.value + 1
 ```
 
-A conflict exists only when shared and exclusive accesses are simultaneously
-active, or when an explicit borrowed view remains live:
+For an object, `~obj` covers the handle place and the referenced allocation. For
+a `val`, it is logical copy-in/copy-out access. A compiler that operates through
+a physical reference MUST materialize and write back the logical value whenever
+uncertainty makes that necessary.
+
+Mutable access does not move or free the value. A callable MAY return an ordinary
+object handle derived from an argument because the callee's exclusive access has
+ended on return. The caller MUST conservatively treat a reference-bearing result
+as a possible alias of every reference-bearing argument while an overlapping
+parent capability remains active.
+
+### 2.1 Local duration
+
+Ordinary mutable reborrows have local non-lexical duration. A reborrow begins
+when exclusive access is activated and may end after its final local use. An
+exclusive reborrow suspends its parent capability until the nested access ends.
+
+An active exclusive capability MUST NOT be:
+
+- stored in another value;
+- captured by a closure;
+- returned as a capability;
+- kept across suspension or an effect boundary;
+- passed to an unknown callable as plain `T`; or
+- otherwise hidden from mutation analysis.
+
+### 2.2 Overlap and runtime guards
+
+Overlapping shared access is allowed. Any overlap involving a write requires
+exclusivity. When two projected arguments may overlap, the compiler MUST do one
+of the following:
+
+1. prove the places disjoint;
+2. insert a bounded runtime identity guard; or
+3. reject the program.
+
+Known unequal fields and stable constant indices may be proven disjoint locally.
+A dynamic guard runs after argument and default evaluation and before parameter
+access is activated. Equal identities cause a deterministic exclusivity-conflict
+panic. The guard ends with the call and does not install persistent loan state.
+
+## 3. Ordinary mutation summaries
+
+A callable whose normalized signature does not contain `Borrow<T>` uses an
+ordinary mutation summary. The summary contains exactly:
+
+- one access mode per parameter: `unused`, `read`, or `write`;
+- an ambient-object-access bit;
+- an unknown-callback bit; and
+- a suspension bit.
+
+The summary MUST NOT contain field, tuple, index, dereference, region, result, or
+generic projection paths. Its state count MUST NOT depend on object field count,
+projection depth, generic nesting, aggregate result shape, call-path count, or
+trait implementation count.
+
+Local analysis MAY distinguish fields and stable indices within one callable.
+At a call or package boundary, that detail collapses to the whole parameter or
+referenced allocation.
 
 ```voyd
-inspect(account, while: () =>
-  deposit(~account, 5) // error if `inspect` keeps shared access active
-)
+fn update(~state: State) -> void
+  state.profile.count = state.profile.count + 1
 ```
 
-This is a single-threaded access rule. A future concurrency model must add
-transfer and synchronization rules before ordinary handles can cross threads.
+`update` publishes only that it writes parameter zero.
 
-### Shared and exclusive access
+An ordinary signature is an upper bound. Plain `T` permits at most `read`; `~T`
+permits at most `write`. A trait declaration provides the bound for dynamic
+dispatch, and every implementation MUST fit it. Dynamic dispatch MUST NOT join
+implementation-specific field footprints.
 
-Ordinary access is shared and read-only:
+Every callable with a `~T` parameter MUST prove that it does not:
+
+- perform potentially overlapping ambient object access;
+- invoke an unknown callback; or
+- suspend.
+
+While an exclusive capability is active, a known call is allowed only when its
+summary is compatible. An unknown callback, suspension, or effect operation is
+rejected. Ambient access is allowed only when local analysis proves it disjoint
+from every active exclusive capability.
+
+The summary solver MUST use a finite lattice and a dependency worklist. It MUST
+revisit callers only when a dependency summary changes and converge per strongly
+connected component. Programs without `Borrow<T>` MUST create zero explicit
+borrow-provenance facts.
+
+## 4. The `Borrow<T>` type
+
+`Borrow` is an unshadowable compiler-known type constructor with exactly one
+type argument. It uses ordinary generic type syntax:
 
 ```voyd
-let account = Account { balance: 10 }
-let balance = account.balance
+fn inspect<T>(value: Borrow<T>) -> i32
 ```
 
-Use `~` when code needs exclusive mutable access:
+The removed `borrow T` prefix is invalid syntax. `Borrow<Borrow<T>>` is always
+invalid. `Borrow` is invariant: its inner type must match exactly after alias
+expansion and inference. Formation does not perform subtype, trait-object, or
+other representation-changing widening.
+
+### 4.1 Legal positions
+
+After type aliases are expanded, `Borrow<T>` is legal only as the complete type
+of a callable input. This includes an input of a nested function type:
 
 ```voyd
-let ~account = Account { balance: 10 }
-
-fn deposit(~account: Account, amount: i32) -> void
-  account.balance = account.balance + amount
-
-deposit(~account, 5)
+fn run<T, R>(value: T, body: fn(value: Borrow<T>) : () -> R) -> R
 ```
 
-`~account` does not move, free, or transfer the GC allocation. It activates an
-exclusive access capability for the places used by the operation.
+The function value is ordinary and MAY be stored, passed, returned, or named by
+a type alias. Its borrow becomes active only when that callable is invoked.
 
-### Borrows end after their final use
+A local binding MAY have type `Borrow<T>` only when initialized from an active
+borrowed parameter or one of its source-derived projections. The local alias
+does not extend the invocation scope.
 
-Voyd infers the duration of explicit and mutable borrows:
+Every other normalized occurrence is invalid, including:
+
+- callable results;
+- object, structural-value, or aggregate fields;
+- tuple or union members;
+- module values;
+- ordinary generic arguments;
+- host, Wasm, or FFI signatures; and
+- nested `Borrow` types.
+
+### 4.2 Formation and activation
+
+A plain `T` argument implicitly forms shared access when the selected input is
+exactly `Borrow<T>`. The argument may be an addressable place or a temporary. A
+temporary remains alive until the call returns.
+
+The loan covers the argument place and every source-derived alias reached from
+it. For an object handle, this includes the referenced allocation. A projection
+may narrow the covered place but does not erase its origin.
+
+Calls use this order:
+
+1. evaluate the receiver and explicit arguments in source order;
+2. evaluate omitted defaults in parameter order;
+3. perform static checks and required identity guards;
+4. activate parameter access;
+5. run the callable; and
+6. end parameter access when it returns.
+
+A `Borrow<T>` parameter remains active for the complete invocation. Passing it
+to another `Borrow<T>` input creates a nested shared reborrow. Passing it to a
+plain `T` input is invalid, including through overload resolution, defaults,
+imports, ordinary generics, and callable adaptation. A callable with a plain
+input cannot satisfy a callable type with a borrowed input, and the reverse
+adaptation is also invalid.
+
+### 4.3 Exclusive scoped access
+
+`~value: Borrow<T>` grants exclusive scoped access. It may be formed only from:
+
+- an existing exclusive `~T` place;
+- an existing `~Borrow<T>` through exclusive reborrow; or
+- a successful compiler-known `SharedCell<T>` exclusive guard.
+
+A shared `Borrow<T>` MUST NOT be upgraded to `~Borrow<T>`. An exclusive
+capability may form a shared reborrow. Either kind of reborrow suspends the
+parent exclusive capability until the nested call returns.
+
+An exclusive scoped input may mutate or rebind according to the usual `~T`
+rules. A `val` is written back logically. Object mutation affects the borrowed
+allocation, and rebinding updates the borrowed handle slot.
+
+## 5. Scoped origin and escape rules
+
+Explicit borrow analysis tracks one origin per borrowed input across a call
+boundary. Field and index projections are local facts and MUST NOT become public
+projection families.
+
+Every source-derived projection preserves its origin, including:
+
+- object and nested fields;
+- array and container elements;
+- tuples, structural values, destructuring, and pattern bindings;
+- callable fields and closures stored inside borrowed data;
+- compiler-known operations; and
+- object handles inside copied value types or aggregates.
+
+Wrapping, copying, destructuring, generic substitution, overload resolution,
+and callable adaptation MUST NOT erase an origin.
+
+An active borrow MUST NOT be returned, stored, captured, suspended, passed
+through a plain parameter, used as an ordinary generic argument, sent to an
+effect operation, or exposed to a host/Wasm/FFI boundary.
+
+Borrowed code may use direct projections, compiler-known operations, and direct
+helpers whose input explicitly normalizes to `Borrow<T>` or `~Borrow<T>`.
+Ordinary method dispatch, callable adaptation, and dynamic or open-trait
+dispatch on a borrowed receiver are invalid. A shared borrow cannot invoke an
+exclusive helper.
+
+No closure may capture an active borrow, even if it appears to run immediately.
+Nested code receives it through an explicit borrowed input. A callable with a
+borrowed input cannot perform an effect operation or suspend before returning.
+
+### 5.1 Independent results
+
+A value derived while reading a borrow may leave the scope only when it belongs
+to this closed classification:
+
+- primitives and scalars copied by value;
+- a reference-free value type, tuple, or structural value after logical copy;
+- a fresh allocation whose type structure contains no derived mutable handle;
+  or
+- a compiler-known stable immutable retained handle.
+
+`StringSlice` is the initial stable immutable retained type. It directly retains
+immutable backing, and later mutation or rebinding of the source cannot change
+that backing. Adding another type to this category requires a separate language
+or standard-library decision; it MUST NOT be inferred from arbitrary bodies.
+
+A copied object handle, closure, or aggregate containing an alias-observing
+handle remains derived. A whole value type that contains an object handle is not
+automatically independent, although its scalar fields may be copied out.
+
+## 6. Borrowed results and containers
+
+No callable may return a borrow, directly or inside another type:
 
 ```voyd
-let ~account = Account { balance: 10 }
-let ~current = account
-
-deposit(~current, 5)
-// `current` is not used again, so the reborrow has ended.
-
-deposit(~account, 2)
+fn item_at<T>(items: Array<T>, index: i32) -> Borrow<T> // invalid
+fn find<T>(items: Array<T>) -> Option<Borrow<T>>        // invalid
 ```
 
-A borrow remains active when a later use requires it:
+A borrowed value may not be stored in an object, structural value, tuple,
+union, module binding, `SharedCell`, or ordinary generic container. APIs needing
+zero-copy access use bounded callbacks:
 
 ```voyd
-let ~current = account
-let before = account.balance // error: `current` remains live
-deposit(~current, 5)
+trait CollectionAccess<T>
+  fn with_item<R>(
+    self,
+    index: i32,
+    { body: fn(item: Borrow<T>) : () -> R }
+  ): () -> Option<R>
 ```
 
-An ordinary object alias is not an implicit borrow. A future use of an ordinary
-handle does not retroactively create a loan across unrelated intervening
-operations.
+Ordinary `Iterator<T>` remains the iteration protocol and returns `Option<T>`.
+The removed `ViewIterator` protocol and `Array.view_iter()` API do not exist.
 
-### Places, slots, and referenced allocations
+## 7. `SharedCell<T>`
 
-A **place** is addressable storage. Bindings, fields, tuple positions, and
-stable container elements can be places:
-
-```voyd
-account
-account.balance
-pair.0
-values.at(3)
-```
-
-The slot holding an object handle and the referenced allocation are distinct:
-
-```voyd
-self.source = replacement // writes the `source` field slot
-self.source.lower()        // writes the referenced String allocation
-```
-
-The compiler must preserve that distinction in inference, contracts,
-diagnostics, optimization facts, and separate-compilation summaries.
-
-Different fixed fields may be proven disjoint:
-
-```voyd
-obj State {
-  left: Counter,
-  right: Counter
-}
-```
-
-Accessing `state.left` need not block independent access to `state.right`.
-Unknown indexed overlap remains conservative unless it qualifies for the
-bounded runtime identity guard defined below.
-
-### Plain values are independent of source storage
-
-Plain assignment, argument passing, aggregate construction, capture, and
-return produce semantic values:
-
-```voyd
-fn at(self, index: i32) -> T
-```
-
-The result does not borrow the field or element slot from which it was read.
-
-- Scalars are copied.
-- `val` values are logically copied.
-- Object handles are copied cheaply and preserve object identity.
-- Aggregates are logically copied according to their fields.
-- Object handles inside copied values remain aliases to their referenced
-  allocations.
-
-This rule concerns expression and API semantics. It does not redefine the
-language's `val` and `obj` categories.
-
-### Physical borrowing is an optimization
-
-The compiler may temporarily represent a plain value with a physical readonly
-borrow when that representation is unobservable. It must materialize the value
-before:
-
-- an ownership-demanding use;
-- escape or storage;
-- an opaque boundary;
-- conflicting mutation;
-- or any point at which the representation would change accepted source
-  behavior.
-
-An internal physical borrow is not part of the value's type or public callable
-contract.
-
-### Explicit borrowed values
-
-`borrow T` is a prefix type modifier for a value that refers to storage owned
-elsewhere:
-
-```voyd
-fn borrow_at(self, index: i32) -> borrow T
-```
-
-`borrow` binds to the following type:
-
-```voyd
-borrow T
-Option<borrow T>
-Result<borrow T, LookupError>
-(borrow Key, borrow Value)
-borrow Option<T>
-```
-
-These two types are intentionally different:
-
-```voyd
-Option<borrow T> // an ordinary Option with a borrowed Some payload
-borrow Option<T> // borrowed access to an Option stored elsewhere
-```
-
-Borrowed results are shared views. Exclusive borrowed results are not defined
-by this specification. Scoped APIs such as `SharedCell.with_mut` may grant
-exclusive access to borrowed storage through the existing `~` parameter
-marker.
-
-Borrow provenance follows borrowed values through optionals, results, tuples,
-structural values, nominal values, generic wrappers, pattern matching, and
-closures wherever such containment is legal.
-
-### Ordinary and view iterators
-
-The ordinary iterator contract returns values:
-
-```voyd
-trait Iterator<T>
-  fn next(~self) -> Option<T>
-```
-
-This code is valid:
-
-```voyd
-let first = iterator.next()
-let second = iterator.next()
-use(first)
-```
-
-Advancing the cursor does not borrow or invalidate a prior value. A returned
-object handle may still alias the same object allocation as another handle.
-
-A zero-copy view iterator is a separate API:
-
-```voyd
-trait ViewIterator<T>
-  region cursor
-  region source
-  disjoint cursor, source
-
-  @borrow_contract(
-    mutates: cursor,
-    returns_from: source
-  )
-  fn next(~self) -> Option<borrow T>
-```
-
-The `Option` is an ordinary value. Only its `Some` payload borrows source
-storage.
-
-### Borrow contracts
-
-Regions are symbolic sets of places used at representation-hiding boundaries:
-
-```voyd
-trait CacheView<K, V>
-  region entries
-  region statistics
-  disjoint entries, statistics
-
-  @borrow_contract(
-    mutates: statistics,
-    returns_from: entries
-  )
-  fn get(~self, key: K) -> Option<borrow V>
-```
-
-The attribute uses Voyd's existing labeled-argument syntax. Multiple regions
-use arrays:
-
-```voyd
-@borrow_contract(
-  reads: metadata,
-  mutates: [cursor, statistics],
-  returns_from: [primary_source, fallback_source]
-)
-```
-
-`reads` bounds caller-observable shared reads that are not already implied by a
-write or returned borrow. Reading a `mutates` region while updating it and
-reading a `returns_from` region to produce the borrowed result need not be
-listed again.
-
-An implementation maps abstract regions to private representation places:
-
-```voyd
-impl ViewIterator<T> for ArrayViewIterator<T>
-  region cursor = self.cursor
-  region source = deref(self.items)
-
-  api fn next(~self) -> Option<borrow T>
-    // ...
-```
-
-`deref(place)` is a contract-place expression, not a runtime function. It maps
-the region to the allocation referenced by a handle slot rather than to the
-slot itself.
-
-Implementations inherit the trait contract. They do not repeat the annotation.
-The compiler checks default implementations and every override.
-
-At a trait-dispatch boundary, the trait declaration's contract is the
-authoritative caller-visible behavior. A known implementation's more precise
-inferred behavior may validate or optimize a concrete call, but it must not
-narrow the contract used to check a call through the trait.
-
-### Receiver access uses callable footprints
-
-`~self` requests exclusive mutation capability, but it does not activate a
-loan over the entire transitive object graph.
-
-For concrete code, the compiler infers the exact caller-observable read and
-write footprint. Public semantic interfaces publish that footprint. A declared
-`@borrow_contract` bounds it across traits and other abstraction boundaries.
-
-When no precise summary or contract is available, the conservative fallback is
-the receiver's direct and inline storage. Transitively referenced allocations
-are not included merely because they are reachable through `self`; accesses to
-them require their own inferred or declared provenance.
-
-### Stable StringSlice
-
-An ordinary `StringSlice` is a stable semantic value. It retains immutable
-backing storage directly rather than retaining a view of a mutable `String`
-shell:
-
-```voyd
-obj String {
-  backing: StringStorage
-}
-
-obj StringSlice {
-  backing: StringStorage,
-  start: i32,
-  byte_count: i32
-}
-```
-
-Mutating a `String` replaces its backing handle:
-
-```voyd
-let slice = text.slice(bytes: 0, len: 3)
-text.lower()
-use(slice) // observes the original bytes
-```
-
-Other handles to the same `String` object observe its new contents. Existing
-slices continue to observe their retained backing.
-
-String mutation may copy. Reference-counted copy-on-write or compiler-proven
-unique in-place mutation may be used when unobservable. Safety and accepted
-source behavior must not depend on those optimizations.
-
-An API that intentionally exposes mutable or reusable source storage must use
-an explicit borrowed type rather than ordinary `StringSlice`.
-
-### SharedCell
-
-`SharedCell<T>` is the explicit single-threaded abstraction for intentional
-shared or reentrant mutation.
-
-Its callback parameters are explicit scoped borrows:
+`SharedCell<T>` provides deterministic runtime-checked access for state with
+several long-lived owners. Its public callback signatures are:
 
 ```voyd
 impl<T> SharedCell<T>
-  fn with<R>(
+  api fn with<R>(
     self,
-    body: fn(value: borrow T) : () -> R
+    body: fn(value: Borrow<T>) : () -> R
   ): () -> R
 
-  fn with_mut<R>(
+  api fn with_mut<R>(
     self,
-    body: fn(~value: borrow T) : () -> R
+    body: fn(~value: Borrow<T>) : () -> R
   ): () -> R
+
+  api fn try_with<R>(
+    self,
+    body: fn(value: Borrow<T>) : () -> R
+  ): () -> Result<R, SharedCellBorrowError>
+
+  api fn try_with_mut<R>(
+    self,
+    body: fn(~value: Borrow<T>) : () -> R
+  ): () -> Result<R, SharedCellBorrowError>
 ```
 
-The callback may return ordinary values:
+The guard begins before the callback and ends after it returns. Shared callbacks
+may nest. Any overlap involving an exclusive callback fails through the existing
+panic or typed `Result` behavior. An exclusive callback writes a rebound value
+back to the cell before ending the guard.
 
-```voyd
-let balance = cell.with((value) => value.balance)
-```
-
-It may not return, store, capture, suspend with, or otherwise escape its
-borrowed parameter or a borrowed projection:
-
-```voyd
-let escaped = cell.with((value) => value) // error
-```
-
-`SharedCell` checks runtime state:
-
-- multiple shared callbacks may coexist;
-- one exclusive callback may run;
-- a conflict deterministically panics;
-- `try_with` and `try_with_mut` return a typed conflict error;
-- state is restored on every normal or handled exceptional exit;
-- callbacks have a closed non-suspending effect row.
-
-`SharedCell` is not thread-safe.
-
-### Bounded runtime exclusivity
-
-The initial automatic runtime fallback is deliberately narrow. It handles
-unknown overlap between stable, call-scoped projected places using identity
-guards:
-
-```voyd
-transfer(~accounts.at(left), ~accounts.at(right))
-```
-
-The compiler evaluates the receiver, explicit arguments, and defaults in
-source order, then compares the relevant place identities. Conceptually:
-
-```text
-(accounts backing identity, left)
-(accounts backing identity, right)
-```
-
-- Statically equal places are compile errors.
-- Statically disjoint places need no guard.
-- Dynamically uncertain but comparable places receive a deterministic guard.
-- Equal runtime identities produce an exclusivity-conflict panic.
-- Unstable, escaping, suspending, or otherwise unbounded accesses are rejected
-  unless an explicit safe dynamic abstraction governs them.
-
-This guard proves call-scoped disjointness. It does not install a runtime loan,
-reader count, side-table entry, or GC-finalized token, so there is no dynamic
-release operation.
-
-The optimizer may eliminate or hoist a guard only when it proves that place
-identity, source evaluation order, access duration, and conflict behavior are
-unchanged. Required guards remain enabled in every build mode.
-
-General escaped runtime loans are not defined by this specification. Use
-explicit borrow contracts for static views and `SharedCell` for longer-lived
-dynamic shared mutation.
-
-### Closures, callbacks, effects, and continuations
-
-An ordinary object handle captured by a closure remains an ordinary alias, not
-a hidden borrow. Accesses made when the closure is invoked participate in the
-normal call access rules.
-
-An explicit borrow or mutable capability:
-
-- may be captured only by a proven non-escaping closure;
-- may be returned only when its origin is inferred or declared by
-  `returns_from`;
-- may be wrapped in a provenance-tracked, scope-bounded aggregate;
-- must not be stored somewhere that can outlive its origin or erase its
-  provenance;
-- must not cross a suspension or continuation boundary that may resume later;
-- must not be passed to an opaque host boundary without a safe contract.
-
-Returning an explicit borrow activates a shared loan over its mapped source
-places. The loan remains active until the returned borrowed value or containing
-aggregate's final possible use.
-
-Unknown callbacks and calls remain conservative for the duration in which they
-may access or retain borrowed values. Possessing an ordinary handle before or
-after such a call does not create a permanent shared loan.
-
-### Performance
-
-The safety model permits:
-
-- deferred or eliminated value materialization;
-- scalar replacement;
-- copy-on-write;
-- stable load and store forwarding;
-- no-alias call lowering;
-- loop-invariant load preservation;
-- vectorization using proven-disjoint places;
-- removal of redundant identity guards;
-- localized `SharedCell` barriers.
-
-No optimization is required for correctness. Optimized and unoptimized
-execution must preserve value independence, object identity, evaluation and
-effect order, mutation visibility, and required conflict behavior.
-
-## Part II: Normative Specification
-
-The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**,
-and **MAY** are normative.
-
-### 1. Scope
-
-This specification defines:
-
-- GC-observed allocation lifetime;
-- shared and exclusive access;
-- mutable reborrows and non-lexical duration;
-- places, projections, dereferenced allocations, and provenance;
-- semantic values and object aliases;
-- explicit borrowed types;
-- callable access summaries;
-- abstract regions and borrow contracts;
-- bounded call-scoped runtime identity guards;
-- closure, callback, effect, and continuation restrictions;
-- `SharedCell`;
-- stable ordinary `StringSlice`;
-- optimization equivalence.
-
-It does not define raw linear-memory safety, FFI safety, unsafe facilities, or
-multithreaded synchronization.
-
-### 2. Semantic values and object aliases
-
-A plain `T` MUST be a semantic value independent of the source slot from which
-it was read.
-
-This rule applies to:
-
-- assignment;
-- argument passing;
-- return;
-- aggregate construction and storage;
-- closure capture.
-
-Copying a `val` MUST preserve logical value independence.
-
-Copying an object handle MUST:
-
-- preserve the referenced allocation's identity;
-- keep that allocation reachable as required by GC;
-- preserve alias provenance to the allocation;
-- not create a borrow of the binding, field, element, or aggregate slot from
-  which the handle was copied.
-
-Merely possessing or retaining an ordinary object handle MUST NOT create a
-shared loan. Reads performed through a handle are shared accesses for their
-actual access duration.
-
-### 3. Borrowed types
-
-The type grammar is extended with:
-
-```ebnf
-BorrowedType = "borrow", Type;
-```
-
-`borrow` binds to the immediately following type. Consequently,
-`Option<borrow T>` and `borrow Option<T>` are distinct.
-
-A value of type `borrow T`:
-
-- refers to storage owned elsewhere;
-- carries its origin provenance;
-- keeps any required allocation reachable;
-- prevents overlapping mutation for its live duration;
-- MUST NOT outlive the origin's valid access scope.
-
-Borrowed provenance MUST compose through supported aggregates and generic
-wrappers. Pattern matching MUST transfer the provenance to the extracted
-payload.
-
-A provenance-tracked aggregate MAY contain borrowed values, including when its
-runtime representation uses a fresh heap allocation such as
-`Some<borrow T>`. The aggregate and every copy or projection carrying the
-borrow MUST remain bounded by the origin's access scope. A borrowed value MUST
-NOT be inserted into pre-existing, global, opaque, or otherwise longer-lived
-storage unless the compiler proves that storage is bounded by the same origin.
-
-An explicitly borrowed result MAY cross a return boundary when its origin is
-inferred for a concrete callable or covered by `returns_from` in the public
-contract. Returning it activates a retained shared loan over the mapped source
-places. The result's liveness determines the loan duration, and the result
-keeps required origin allocations reachable. Returning borrowed provenance
-through a plain `T`, from an undeclared origin, or beyond a scoped callback
-boundary is forbidden.
-
-Borrowed results are shared borrowed values. This specification does not
-define an exclusive borrowed-result type.
-
-### 4. Places and provenance
-
-A place consists of a root followed by zero or more projections:
-
-```text
-Place = Root Projection*
-Projection =
-  Field(name)
-  | Tuple(index)
-  | Element(index)
-  | Discriminant
-  | Dereference
-```
-
-`Dereference` identifies the allocation referenced by a handle slot. It MUST
-remain distinct from that slot.
-
-Provenance MUST survive any operation that preserves a storage view or object
-alias, including assignment, projection, wrapping, destructuring, capture,
-return, generic substitution, and callable composition.
-
-The implementation MUST keep separate provenance categories for:
-
-1. semantic values;
-2. returned or retained object-allocation aliases;
-3. explicit borrowed storage;
-4. compiler-only physical borrows.
-
-### 5. Overlap and compatibility
-
-A place overlaps itself and its inline containing storage. Known distinct
-fixed fields and tuple positions MAY be proven disjoint.
-
-Indexed projections overlap unless stable storage and distinct indices are
-proven or a bounded runtime identity guard establishes disjointness.
-
-A handle slot and its dereferenced allocation do not overlap merely because
-the slot contains the handle. Two dereferenced handles overlap when they refer
-to the same allocation and overlapping subplaces.
-
-Simultaneously active accesses to overlapping places are compatible only as
-follows:
-
-| First | Second | Allowed |
-| --- | --- | --- |
-| shared | shared | yes |
-| shared | exclusive/write | no |
-| exclusive/write | shared | no |
-| exclusive/write | exclusive/write | no |
-
-Statically known conflicts MUST be rejected.
-
-### 6. Loan activation and duration
-
-A non-escaping loan begins when its access is activated and ends after its
-final possible use.
-
-The compiler MUST account for control-flow paths, loops, early exits, closure
-uses, retention, effects, and continuation capture.
-
-Calls are evaluated in this order:
-
-1. receiver;
-2. explicit arguments in source order;
-3. omitted defaults in parameter order;
-4. required static checks and runtime identity guards;
-5. activation of call accesses;
-6. callable execution;
-7. end of non-retained call accesses.
-
-Optimized execution MUST preserve the same observable order.
-
-### 7. Reborrowing
-
-An exclusive capability may be reborrowed. While the reborrow is live, the
-source capability MUST NOT be used in a conflicting way. Ending the reborrow
-restores source use when no other escape or active access prevents it.
-
-### 8. Physical borrow optimization
-
-The implementation MAY use a physical readonly borrow to represent a plain
-semantic value only while the representation is unobservable.
-
-It MUST materialize before escape, ownership demand, opaque access,
-conflicting mutation, or any point at which retaining the physical borrow
-would reject a program accepted by value semantics.
-
-Physical borrows MUST NOT appear in source types or public callable contracts.
-
-### 9. Callable contracts and receiver footprints
-
-For concrete callables, the compiler SHOULD infer:
-
-- shared and exclusive parameter accesses;
-- direct and dereferenced read/write footprints;
-- retained borrowed provenance;
-- returned object aliases;
-- returned borrowed provenance;
-- callback escape behavior;
-- suspension behavior.
-
-Public semantic interfaces MUST preserve the caller-visible subset required
-across module, package, cache, and separate-compilation boundaries.
-
-`~self` requests exclusive capability. Activated access MUST be limited to the
-checked inferred or declared footprint. It MUST NOT automatically include the
-transitive object graph.
-
-When no precise summary is available, the conservative receiver footprint is
-its direct and inline storage. Dereferenced allocations require independent
-provenance.
-
-### 10. Region and contract syntax
-
-A trait may declare abstract regions and disjointness:
-
-```ebnf
-RegionDeclaration = "region", Identifier;
-DisjointDeclaration = "disjoint", Identifier, (",", Identifier)+;
-```
-
-A method contract uses:
-
-```voyd
-@borrow_contract(
-  reads: region_or_array,
-  mutates: region_or_array,
-  returns_from: region_or_array
-)
-```
-
-All labels are optional. `reads` is an upper bound on caller-observable shared
-reads not already implied by a write or returned borrow. `mutates` is an upper
-bound on caller-observable writes. `returns_from` applies only to explicit
-borrowed portions of the result and declares a retained shared access to their
-origins.
-
-Region identifiers in the attribute are symbolic compile-time names, not
-runtime values or strings.
-
-For every implementation:
-
-- inferred caller-observable reads MUST be a subset of the union of `reads`,
-  `mutates`, and `returns_from`;
-- inferred writes MUST be a subset of `mutates`;
-- explicit borrowed-result origins MUST be a subset of `returns_from`;
-- every declared disjoint pair MUST map to non-overlapping places;
-- plain result portions MUST NOT acquire borrowed provenance.
-
-A default trait body and every overriding implementation MUST be checked.
-
-At a trait-dispatch boundary, the declaration contract MUST be authoritative.
-Implementation-specific inference MUST NOT narrow the caller-visible reads,
-writes, returned provenance, retention, suspension, or runtime-guard
-requirements used to check a call through the trait.
-
-### 11. Region mappings
-
-An implementation maps regions inside its `impl` body:
-
-```voyd
-impl Trait<T> for Concrete<T>
-  region cursor = self.cursor
-  region source = deref(self.source)
-```
-
-Mapping expressions are compile-time contract-place expressions.
-`deref(place)` maps to the allocation referenced by the place. It is not a
-runtime callable.
-
-Mappings MUST preserve representation privacy while satisfying the public
-contract. They MUST compose through generics, wrappers, dynamic dispatch,
-modules, packages, and separate compilation.
-
-### 12. Trait defaults
-
-An ordinary trait method returning plain `T` promises value semantics:
-
-```voyd
-trait Iterator<T>
-  fn next(~self) -> Option<T>
-```
-
-Implementations MUST NOT expose a source borrow through any plain portion of
-the result.
-
-Advanced traits returning borrowed values MUST declare enough provenance for
-safe open-world calls. Missing explicit-borrow provenance is a compile error;
-it MUST NOT be inferred as an undocumented public contract.
-
-### 13. Bounded runtime identity guards
-
-The compiler MUST support a bounded runtime fallback when all of these hold:
-
-- uncertainty is limited to overlap among identified projected places;
-- every place has stable, comparable identity;
-- accesses are confined to one non-suspending call;
-- no checked access escapes or is retained;
-- all other alias relationships are statically safe.
-
-The guard compares complete place identities before activating call accesses.
-It installs no persistent runtime loan state.
-
-The compiler MUST:
-
-- reject statically equal conflicting places;
-- omit guards for statically disjoint places;
-- deterministically panic for equal runtime identities;
-- retain required guards in all build modes;
-- report both conflicting places when debug metadata is available.
-
-Unbounded or unstable cases MUST be rejected unless an explicit safe dynamic
-abstraction applies.
-
-### 14. SharedCell
-
-`SharedCell<T>` MUST expose scoped borrowed callback parameters:
-
-```voyd
-fn with<R>(self, body: fn(value: borrow T) : () -> R): () -> R
-fn with_mut<R>(self, body: fn(~value: borrow T) : () -> R): () -> R
-```
-
-Its runtime state is:
-
-```text
-Unborrowed
-Shared(reader_count > 0)
-Exclusive
-```
-
-Conflicting `with` and `with_mut` operations MUST panic deterministically.
-`try_with` and `try_with_mut` MUST return typed conflicts.
-
-The callback MUST NOT escape a borrowed value or projection and MUST NOT
-suspend. Runtime state MUST be restored on every normal or handled exceptional
-exit. Release MUST NOT depend on GC finalization.
-
-### 15. String and StringSlice
-
-An ordinary `StringSlice` MUST retain stable immutable backing storage rather
-than a mutable `String` shell.
-
-Mutating a `String` MUST preserve all existing ordinary slices. It may replace
-the String's backing, copy, use copy-on-write, or mutate uniquely proven
-unobservable backing.
-
-An ordinary slice MUST NOT block source `String` mutation. A source-tied view
-over mutable or reusable storage MUST use an explicit borrowed type.
-
-### 16. Closures, effects, and opaque boundaries
-
-Capturing an ordinary object handle preserves an ordinary alias and MUST NOT
-silently create a borrow.
-
-An explicit borrow or mutable reborrow MUST NOT escape through:
-
-- a plain return or a return outside inferred or declared `returns_from`
-  provenance;
-- pre-existing, global, opaque, or otherwise longer-lived storage;
-- escaping closure capture;
-- retained callback;
-- suspended continuation;
-- opaque host storage.
-
-A fresh provenance-tracked aggregate, including a heap-backed aggregate, MAY
-contain a borrowed value when the aggregate cannot outlive the origin and does
-not erase provenance.
-
-A mutable or explicit borrow MUST NOT cross an operation that may suspend and
-resume later.
-
-Unknown calls are conservative for borrowed and active-access behavior during
-the call. They MUST NOT permanently downgrade ordinary handles merely because
-those handles remain reachable.
-
-### 17. Diagnostics
-
-A borrow diagnostic SHOULD identify:
-
-- the active access or borrowed value;
-- the conflicting attempted access;
-- both relevant places or regions;
-- the final use retaining an earlier borrow;
-- the callable contract or unknown boundary involved.
-
-A runtime identity conflict SHOULD identify both projected places when debug
-metadata is available.
-
-Suggested remedies SHOULD distinguish consuming a value sooner, requesting an
-owned value, shortening an explicit borrow, splitting storage, correcting a
-contract, and deliberately using `SharedCell`.
-
-### 18. Optimization equivalence
-
-Optimized execution MUST preserve:
-
-- source acceptance;
-- plain-value independence;
-- object identity and aliasing;
-- evaluation and effect order;
-- mutation visibility;
-- static errors;
-- required runtime conflict panic and typed-error behavior.
-
-Region contracts have no runtime representation. Runtime identity guards and
-`SharedCell` state are observable only through their required conflict
-behavior.
-
-### 19. Conformance requirements
-
-A conforming implementation MUST test:
-
-- plain assignment, arguments, returns, aggregate storage, and capture;
-- scalar and wide-`val` independence;
-- object-handle identity without source-slot borrowing;
-- sequential mutation followed by observation through another ordinary handle;
-- active shared/exclusive conflicts;
-- NLL and reborrowing;
-- field, tuple, slot, dereference, and constant-index disjointness;
-- dynamic-index static rejection, guard success, and guard conflict;
-- call and default evaluation order;
-- internal physical borrow materialization;
-- `Option<borrow T>` and `borrow Option<T>` distinction;
-- construction, return, and pattern extraction of `Option<borrow T>`;
-- borrowed payload propagation through aggregates and patterns;
-- rejection when a borrowed aggregate is inserted into longer-lived storage;
-- retained borrowed-result loans ending after final use;
-- cursor-only ViewIterator calls while an earlier source borrow remains live;
-- source mutation rejected until a returned source borrow's final use;
-- invalid borrow escape;
-- region parsing, mapping, validation, and disjointness;
-- contract checking across traits, generics, wrappers, modules, and dynamic
-  dispatch;
-- ordinary Iterator retained-result behavior;
-- ViewIterator cursor/source disjointness;
-- reusable-buffer conflicts;
-- stable StringSlice across String mutation;
-- explicit source-tied string-view conflicts if such an API exists;
-- closure, callback, effect, continuation, and opaque-call restrictions;
-- all `SharedCell` state transitions and callback restrictions;
-- optimized/unoptimized equivalence;
-- actionable diagnostics.
+The generic result `R` MUST NOT hide an active borrow. Callback effect rows are
+closed. `SharedCell` is single-threaded and does not block or synchronize
+threads.
+
+## 8. Effects, suspension, and host boundaries
+
+An active mutable or scoped-borrow capability MUST NOT cross:
+
+- an effect operation or handler continuation;
+- a suspension point;
+- a task boundary;
+- closure capture;
+- a host call;
+- a host or Wasm import/export; or
+- an FFI signature.
+
+Ordinary owned values may cross these boundaries according to their normal type
+and effect rules. Code MUST finish the scoped access and copy or construct an
+independent result before invoking a continuation or starting later work.
+
+Compiler-known intrinsics may implement `SharedCell` and internal physical
+borrowing. They MUST NOT expose a source borrow to the host.
+
+## 9. Internal physical borrowing
+
+The compiler MAY represent an ordinary wide value with an internal readonly
+borrow when this is unobservable. This is an optimization, not a source type or
+public callable contract.
+
+The compiler MUST materialize an ordinary value before storage, escape,
+suspension, an opaque call, conflicting mutation, or any point where the
+physical representation would change accepted source behavior.
+
+## 10. Optimization facts
+
+Finite safety summaries are separate from optimizer facts. A release
+optimization MAY request a precise fact for one exact callable body. Such a fact
+may include direct fields read or written, escape and retention, result aliasing,
+external access, suspension, nested or unresolved calls, and identity guards.
+
+An exact-call optimization fact MUST be:
+
+- requested only for an actual candidate;
+- limited to one exact body;
+- work- and memory-budgeted;
+- cached;
+- conservative at recursive, nested, dynamic, or unresolved calls;
+- excluded from safety summaries and safety fixed points; and
+- irrelevant to whether source code is accepted.
+
+When proof is unavailable, the optimizer uses the ordinary ABI or materialized
+representation. It MUST NOT interpret a coarse whole-parameter summary as a
+precise field contract.
+
+In particular, no optimization may:
+
+- depend on removed borrowed results or named-region metadata;
+- assume a whole-parameter write is disjoint from a field or index;
+- treat `~T` as unique beyond its active scope;
+- retain a physical borrow across storage, suspension, escape, an opaque call,
+  or conflicting mutation;
+- join concrete dynamic implementations into a precise field footprint; or
+- elide an identity guard without an independent local proof.
+
+## 11. Removed language forms
+
+The following forms are not part of Voyd:
+
+- the `borrow T` prefix;
+- borrowed results and borrow-carrying aggregates or generic containers;
+- trait `region` declarations;
+- implementation region mappings;
+- `deref(...)` contract-place expressions;
+- `disjoint` declarations;
+- `@borrow_contract`;
+- `ViewIterator`; and
+- `Array.view_iter()`.
+
+The words `region`, `disjoint`, and `deref` retain any ordinary identifier use
+allowed by the general grammar. They have no borrow-contract declaration
+meaning.
+
+## 12. Diagnostics
+
+A rejected access SHOULD identify the primary conflicting use and the origin or
+active capability that makes it unsafe. When useful, diagnostics SHOULD identify
+the call, capture, suspension, storage, or type position through which an access
+would escape.
+
+A diagnostic MAY suggest the smallest safe remedy: finish an access earlier,
+copy an independent value, use an explicit Borrow-aware helper, split disjoint
+storage, or use `SharedCell<T>` for intentionally shared mutable state.
+
+## 13. Conformance requirements
+
+A conforming implementation MUST test at least:
+
+- ordinary alias overlap for `~T`, including callbacks, ambient state, dynamic
+  calls, effects, and suspension;
+- compatible known helpers and bounded runtime identity guards;
+- whole-parameter summaries for functions, generics, traits, and SCCs;
+- prevention of exclusive-capability storage, capture, return, and laundering;
+- `Borrow<T>` parsing, reservation, arity, invariance, and legal positions after
+  alias expansion;
+- shared and exclusive formation, full-invocation duration, reborrow, and parent
+  restoration;
+- rejection of borrowed results, containers, fields, ordinary generics,
+  callable adaptation, method receivers, captures, effects, and host boundaries;
+- origin preservation through projections and aggregates;
+- independent scalar, reference-free value, and `StringSlice` results;
+- all four `SharedCell<T>` callbacks, writeback, nesting, and runtime conflict
+  behavior;
+- ordinary iterator behavior and internal wide-value physical borrowing;
+- zero explicit-borrow facts for programs without `Borrow<T>`; and
+- demand, budget, cache, fallback, and emitted behavior for every optimization
+  that consumes exact-call facts.
+
+Raw linear memory, unsafe facilities, host-language FFI implementation safety,
+and multithreaded transfer or synchronization remain outside this specification.

@@ -6,7 +6,6 @@ import { compilerImplementationAttributeMacro } from "./compiler-impl-attribute.
 import { intrinsicTypeAttributeMacro } from "./intrinsic-type-attribute.js";
 import { effectAttributeMacro } from "./effect-attribute.js";
 import { externalAttributeMacro } from "./external-attribute.js";
-import { borrowContractAttributeMacro } from "./borrow-contract-attribute.js";
 import { primary } from "./primary.js";
 import { attachColonClauses } from "./colon-clauses.js";
 import { constructorObjectLiteral } from "./constructor-object-literal.js";
@@ -26,7 +25,6 @@ export const BASE_SYNTAX_MACROS: SyntaxMacro[] = [
 
 export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
   intrinsicAttributeMacro,
-  borrowContractAttributeMacro,
   compilerContractAttributeMacro,
   compilerImplementationAttributeMacro,
   intrinsicTypeAttributeMacro,

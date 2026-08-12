@@ -14,10 +14,7 @@ import type {
   EffectDeclId,
 } from "./ids.js";
 import type { IdentifierAtom } from "../parser/ast/atom.js";
-import type {
-  BorrowContractAttribute,
-  IntrinsicAttribute,
-} from "../parser/attributes.js";
+import type { IntrinsicAttribute } from "../parser/attributes.js";
 
 export interface ParameterDecl {
   id: ParameterDeclId;
@@ -63,7 +60,6 @@ export interface FunctionDecl {
   moduleIndex: number;
   implId?: ImplDeclId;
   intrinsic?: IntrinsicAttribute;
-  borrowContract?: BorrowContractAttribute;
   documentation?: string;
 }
 
@@ -142,23 +138,12 @@ export interface TraitMethodDecl {
   effectTypeExpr?: Expr;
   defaultBody?: Expr;
   intrinsic?: IntrinsicAttribute;
-  borrowContract?: BorrowContractAttribute;
   documentation?: string;
 }
 
 export type TraitMethodDeclInput = Omit<TraitMethodDecl, "params"> & {
   params: ParameterDeclInput[];
 };
-
-export interface RegionDecl {
-  name: string;
-  ast: Syntax;
-}
-
-export interface DisjointRegionDecl {
-  regions: readonly string[];
-  ast: Syntax;
-}
 
 export interface TraitDecl {
   id: TraitDeclId;
@@ -168,8 +153,6 @@ export interface TraitDecl {
   symbol: SymbolId;
   typeParameters?: TypeParameterDecl[];
   methods: TraitMethodDecl[];
-  regions?: readonly RegionDecl[];
-  disjoint?: readonly DisjointRegionDecl[];
   scope: ScopeId;
   moduleIndex: number;
   documentation?: string;
@@ -180,12 +163,6 @@ export type TraitDeclInput = Omit<TraitDecl, "id" | "methods"> & {
   methods?: TraitMethodDeclInput[];
 };
 
-export interface RegionMappingDecl {
-  name: string;
-  ast: Syntax;
-  place: Expr;
-}
-
 export interface ImplDecl {
   id: ImplDeclId;
   form?: Form;
@@ -195,7 +172,6 @@ export interface ImplDecl {
   trait?: Expr;
   typeParameters?: TypeParameterDecl[];
   methods: FunctionDecl[];
-  regionMappings?: readonly RegionMappingDecl[];
   scope: ScopeId;
   moduleIndex: number;
   documentation?: string;

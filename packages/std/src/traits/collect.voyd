@@ -2,9 +2,9 @@
 //!
 //! Provides conversions from sequences into concrete collection types.
 
-use std::traits::sequence::Sequence
+use std::traits::sequence::Iterator
 
 /// Trait for creating a value from a sequence of items.
 pub trait Collect<T>
-  /// Builds `Self` from all items in `items`.
-  fn from_sequence({ items: Sequence<T> }) -> Self
+  /// Builds `Self` by consuming all items from `items`.
+  fn from_iterator({ ~items: Iterator<T> }): () -> Self

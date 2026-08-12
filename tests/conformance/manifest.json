@@ -135,28 +135,48 @@
     },
     {
       "id": "typing.borrow-conflicts",
-      "title": "Mutable and explicit borrow diagnostics",
+      "title": "Mutable access overlap diagnostics",
       "entry": "cases/typing/borrow-conflicts.voyd",
       "tags": ["typing", "borrowing", "diagnostics"],
       "cases": [
         {
           "id": "typing.borrowing.conflicting-active-accesses",
-          "title": "rejects overlapping mutable access and explicit borrow escapes without rejecting ordinary aliases",
+          "title": "rejects overlapping mutable call arguments",
           "expect": {
             "kind": "diagnostics",
-            "codes": ["TY0048", "TY0051", "TY0054"],
-            "messageIncludes": [
-              "active shared borrow",
-              "cannot escape through a return",
-              "has no 'returns_from' clause"
-            ],
-            "spans": [
-              { "code": "TY0051", "text": "local" },
-              {
-                "code": "TY0054",
-                "text": "fn view(self) -> borrow Box"
-              }
-            ]
+            "codes": ["TY0048"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "typing.scoped-borrow-boundary",
+      "title": "Scoped Borrow boundary diagnostics",
+      "entry": "cases/typing/scoped-borrow-boundary.voyd",
+      "tags": ["typing", "borrowing", "diagnostics"],
+      "cases": [
+        {
+          "id": "typing.borrowing.plain-parameter-laundering",
+          "title": "rejects passing Borrow<T> through a plain parameter",
+          "expect": {
+            "kind": "diagnostics",
+            "codes": ["TY0051"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "typing.ordinary-mutation-callback",
+      "title": "Ordinary mutation callback diagnostics",
+      "entry": "cases/typing/ordinary-mutation-callback.voyd",
+      "tags": ["typing", "borrowing", "callbacks", "diagnostics"],
+      "cases": [
+        {
+          "id": "typing.borrowing.unknown-callback",
+          "title": "rejects an unknown callback during exclusive access",
+          "expect": {
+            "kind": "diagnostics",
+            "codes": ["TY0055"]
           }
         }
       ]
@@ -186,22 +206,16 @@
           "expect": { "kind": "equals", "value": 8 }
         },
         {
-          "id": "runtime.borrowing.explicit-borrowed-result",
-          "title": "reads through an explicit borrowed result",
-          "entryName": "explicit_borrowed_result_reads_source",
-          "expect": { "kind": "equals", "value": 21 }
+          "id": "runtime.borrowing.scoped-borrow-inputs",
+          "title": "forms scoped borrows from places and supports nested reborrows",
+          "entryName": "scoped_borrow_inputs",
+          "expect": { "kind": "equals", "value": 32 }
         },
         {
-          "id": "runtime.borrowing.checked-region-contract",
-          "title": "uses a checked view contract with Option<borrow T>",
-          "entryName": "checked_borrow_contract_view",
-          "expect": { "kind": "equals", "value": 42 }
-        },
-        {
-          "id": "runtime.borrowing.nested-explicit-borrow",
-          "title": "preserves explicit borrows nested in optional payloads",
-          "entryName": "nested_explicit_borrow_preserves_payload",
-          "expect": { "kind": "equals", "value": 34 }
+          "id": "runtime.borrowing.scoped-borrow-temporary",
+          "title": "keeps a temporary alive for a scoped borrow invocation",
+          "entryName": "scoped_borrow_temporary",
+          "expect": { "kind": "equals", "value": 17 }
         },
         {
           "id": "runtime.borrowing.slot-allocation-distinction",
@@ -267,7 +281,7 @@
         },
         {
           "id": "runtime.borrowing.mutable-capture-replacement",
-          "title": "replaces mutable captured references",
+          "title": "replaces state captured through SharedCell",
           "entryName": "mutable_capture_replacement",
           "expect": { "kind": "equals", "value": 7 }
         },
@@ -443,6 +457,18 @@
           "expect": { "kind": "equals", "value": 8 }
         },
         {
+          "id": "runtime.borrowing.optimized-scoped-borrow-inputs",
+          "title": "preserves scoped borrow formation and nested reborrows",
+          "entryName": "scoped_borrow_inputs",
+          "expect": { "kind": "equals", "value": 32 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-scoped-borrow-temporary",
+          "title": "preserves temporary lifetime for a scoped borrow invocation",
+          "entryName": "scoped_borrow_temporary",
+          "expect": { "kind": "equals", "value": 17 }
+        },
+        {
           "id": "runtime.borrowing.optimized-slot-allocation-distinction",
           "title": "preserves the distinction between handle slots and allocations",
           "entryName": "handle_slots_are_distinct_from_allocations",
@@ -506,7 +532,7 @@
         },
         {
           "id": "runtime.borrowing.optimized-mutable-capture-replacement",
-          "title": "preserves mutable capture replacement",
+          "title": "preserves captured SharedCell replacement",
           "entryName": "mutable_capture_replacement",
           "expect": { "kind": "equals", "value": 7 }
         },

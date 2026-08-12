@@ -49,6 +49,8 @@ import {
   isStdIntrinsicNominalTypeInstantiation,
   STD_INTRINSIC_TYPE,
 } from "../../compiler-contracts/types.js";
+import { incrementCompilerPerfCounter } from "../../perf.js";
+import type { ArrayLoopProofFallbackReason } from "../../perf-counter-schema.js";
 
 type ArrayMethodInfo = {
   targetTypeId: TypeId;
@@ -85,6 +87,41 @@ type ArrayForLoopAnalysis = {
 };
 
 type StatementCompiler = (stmtId: number) => binaryen.ExpressionRef;
+
+type ArrayLoopProofDecision =
+  | { accepted: true }
+  | { accepted: false; reason: ArrayLoopProofFallbackReason };
+
+type SafeArrayWhileLoopDecision =
+  | { kind: "not-candidate" }
+  | { kind: "fallback"; reason: "shape" | ArrayLoopProofFallbackReason }
+  | { kind: "accepted"; analysis: SafeArrayWhileLoopAnalysis };
+
+type FastPathMetricPrefix =
+  | "codegen.safe_array_while"
+  | "codegen.range_array_safe_scope"
+  | "codegen.intrinsic_array_for"
+  | "codegen.intrinsic_range_for";
+
+type FastPathFallbackReason =
+  | ArrayLoopProofFallbackReason
+  | "effectful"
+  | "shape";
+
+const recordFastPathDecision = ({
+  prefix,
+  accepted,
+  reason,
+}: {
+  prefix: FastPathMetricPrefix;
+  accepted: boolean;
+  reason?: FastPathFallbackReason;
+}): void => {
+  incrementCompilerPerfCounter(`${prefix}.requested`);
+  incrementCompilerPerfCounter(
+    accepted ? `${prefix}.accepted` : `${prefix}.fallback.${reason ?? "shape"}`,
+  );
+};
 
 const isStdArrayType = ({
   typeId,
@@ -437,16 +474,19 @@ const isSafeLoopIntrinsicCall = ({
   );
 };
 
-const isSafeLoopResolvedCall = ({
+const safeLoopResolvedCallDecision = ({
   expr,
   ctx,
 }: {
   expr: HirCallExpr;
   ctx: CodegenContext;
-}): boolean => {
+}): ArrayLoopProofDecision => {
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
-  if (callInfo.traitDispatch || callInfo.identityGuards.length > 0) {
-    return false;
+  if (callInfo.traitDispatch) {
+    return { accepted: false, reason: "dynamic-call" };
+  }
+  if (callInfo.identityGuards.length > 0) {
+    return { accepted: false, reason: "identity-guard" };
   }
   const targets = [...(callInfo.targets?.values() ?? [])];
   if (targets.length === 0) {
@@ -459,27 +499,27 @@ const isSafeLoopResolvedCall = ({
           })
         : undefined;
     if (typeof target !== "number") {
-      return false;
+      return { accepted: false, reason: "unresolved-call" };
     }
     targets.push(target);
   }
-  return targets.every((target) => {
-    const footprint = ctx.program.callableAccesses.getFootprint(target);
-    return (
-      footprint !== undefined &&
-      !footprint.maySuspend &&
-      !footprint.externalRead &&
-      !footprint.externalWrite &&
-      footprint.parameters.every(
-        (parameter) =>
-          parameter.writePaths.length === 0 &&
-          !parameter.runtimeCheckedWrites &&
-          !parameter.retained &&
-          !parameter.returned &&
-          !parameter.returnedProvenance,
-      )
-    );
-  });
+  for (const target of targets) {
+    const summary = ctx.program.ordinaryMutations.getSummary(target);
+    if (!summary) return { accepted: false, reason: "missing-summary" };
+    if (summary.maySuspend) {
+      return { accepted: false, reason: "suspending-call" };
+    }
+    if (summary.ambientObjectAccess) {
+      return { accepted: false, reason: "ambient-access" };
+    }
+    if (summary.invokesUnknownCallback) {
+      return { accepted: false, reason: "unknown-callback" };
+    }
+    if (summary.parameterAccesses.some((access) => access === "write")) {
+      return { accepted: false, reason: "parameter-write" };
+    }
+  }
+  return { accepted: true };
 };
 
 const isSafeLoopPrimitiveType = ({
@@ -567,28 +607,31 @@ const bodyPreservesArrayLoopProof = ({
   indexUpdate: "increment" | "none";
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): boolean => {
+}): ArrayLoopProofDecision => {
   const arrayAliases = aliasesFor({ symbol: arraySymbol, fnCtx });
   let indexIncrements = 0;
-  let valid = true;
+  let fallback: ArrayLoopProofFallbackReason | undefined;
+  const reject = (reason: ArrayLoopProofFallbackReason): void => {
+    fallback ??= reason;
+  };
 
   walkHirExpression({
     exprId: bodyExprId,
     ctx,
     visitor: {
       onExpr: (exprId, expr) => {
-        if (!valid) {
+        if (fallback) {
           return "stop";
         }
         if (
           exprId !== bodyExprId &&
           (expr.exprKind === "while" || expr.exprKind === "loop")
         ) {
-          valid = false;
+          reject("nested-control");
           return "stop";
         }
         if (expr.exprKind === "break" || expr.exprKind === "continue") {
-          valid = false;
+          reject("control-transfer");
           return "stop";
         }
         if (expr.exprKind === "assign") {
@@ -600,14 +643,14 @@ const bodyPreservesArrayLoopProof = ({
             typeof targetSymbol === "number" &&
             arrayAliases.has(targetSymbol)
           ) {
-            valid = false;
+            reject("array-reassigned");
             return "stop";
           }
           if (targetSymbol === indexSymbol) {
             if (
               !exprIsIndexIncrement({ exprId: expr.value, indexSymbol, ctx })
             ) {
-              valid = false;
+              reject("index-update");
               return "stop";
             }
             indexIncrements += 1;
@@ -623,16 +666,16 @@ const bodyPreservesArrayLoopProof = ({
           ) {
             return undefined;
           }
-          valid = false;
+          reject("array-method");
           return "stop";
         }
         if (expr.exprKind === "call") {
-          if (
-            !isSafeLoopIntrinsicCall({ expr, ctx, fnCtx }) &&
-            !isSafeLoopResolvedCall({ expr, ctx })
-          ) {
-            valid = false;
-            return "stop";
+          if (!isSafeLoopIntrinsicCall({ expr, ctx, fnCtx })) {
+            const decision = safeLoopResolvedCallDecision({ expr, ctx });
+            if (!decision.accepted) {
+              reject(decision.reason);
+              return "stop";
+            }
           }
           if (
             expr.args.some((arg) => {
@@ -642,7 +685,7 @@ const bodyPreservesArrayLoopProof = ({
               );
             })
           ) {
-            valid = false;
+            reject("array-alias-argument");
             return "stop";
           }
         }
@@ -650,8 +693,10 @@ const bodyPreservesArrayLoopProof = ({
       },
     },
   });
-
-  return valid && indexIncrements === (indexUpdate === "increment" ? 1 : 0);
+  if (fallback) return { accepted: false, reason: fallback };
+  return indexIncrements === (indexUpdate === "increment" ? 1 : 0)
+    ? { accepted: true }
+    : { accepted: false, reason: "index-count" };
 };
 
 const indexInitStatement = ({
@@ -830,18 +875,18 @@ const tryAnalyzeSafeArrayWhileLoop = ({
   statementIndex: number;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): SafeArrayWhileLoopAnalysis | undefined => {
+}): SafeArrayWhileLoopDecision => {
   const currentStmtId = block.statements[statementIndex];
   const currentStmt =
     typeof currentStmtId === "number"
       ? ctx.module.hir.statements.get(currentStmtId)
       : undefined;
   if (currentStmt?.kind !== "expr-stmt") {
-    return undefined;
+    return { kind: "not-candidate" };
   }
   const whileExpr = ctx.module.hir.expressions.get(currentStmt.expr);
   if (whileExpr?.exprKind !== "while") {
-    return undefined;
+    return { kind: "not-candidate" };
   }
 
   const condition = analyzeWhileCondition({
@@ -852,7 +897,7 @@ const tryAnalyzeSafeArrayWhileLoop = ({
     fnCtx,
   });
   if (!condition) {
-    return undefined;
+    return { kind: "fallback", reason: "shape" };
   }
 
   const indexInit = indexInitStatement({
@@ -862,7 +907,7 @@ const tryAnalyzeSafeArrayWhileLoop = ({
     ctx,
   });
   if (!indexInit) {
-    return undefined;
+    return { kind: "fallback", reason: "shape" };
   }
   if (
     !bodyHasFinalIndexIncrement({
@@ -871,29 +916,31 @@ const tryAnalyzeSafeArrayWhileLoop = ({
       ctx,
     })
   ) {
-    return undefined;
+    return { kind: "fallback", reason: "shape" };
   }
 
-  if (
-    !bodyPreservesArrayLoopProof({
-      bodyExprId: whileExpr.body,
-      indexSymbol: indexInit.indexSymbol,
-      arraySymbol: condition.arraySymbol,
-      indexUpdate: "increment",
-      ctx,
-      fnCtx,
-    })
-  ) {
-    return undefined;
+  const proof = bodyPreservesArrayLoopProof({
+    bodyExprId: whileExpr.body,
+    indexSymbol: indexInit.indexSymbol,
+    arraySymbol: condition.arraySymbol,
+    indexUpdate: "increment",
+    ctx,
+    fnCtx,
+  });
+  if (!proof.accepted) {
+    return { kind: "fallback", reason: proof.reason };
   }
 
   return {
-    whileExpr,
-    scope: {
-      arraySymbol: condition.arraySymbol,
-      indexSymbol: indexInit.indexSymbol,
+    kind: "accepted",
+    analysis: {
+      whileExpr,
+      scope: {
+        arraySymbol: condition.arraySymbol,
+        indexSymbol: indexInit.indexSymbol,
+      },
+      cachedLengthExpr: condition.cachedLengthExpr,
     },
-    cachedLengthExpr: condition.cachedLengthExpr,
   };
 };
 
@@ -1027,17 +1074,23 @@ export const tryCompileArraySafeWhileStatement = ({
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): binaryen.ExpressionRef | undefined => {
-  const analysis = tryAnalyzeSafeArrayWhileLoop({
+  const decision = tryAnalyzeSafeArrayWhileLoop({
     block,
     statementIndex,
     ctx,
     fnCtx,
   });
-  if (!analysis) {
+  if (decision.kind === "not-candidate") {
     return undefined;
   }
+  recordFastPathDecision({
+    prefix: "codegen.safe_array_while",
+    accepted: decision.kind === "accepted",
+    ...(decision.kind === "fallback" ? { reason: decision.reason } : {}),
+  });
+  if (decision.kind === "fallback") return undefined;
   return compileSafeArrayWhileLoop({
-    analysis,
+    analysis: decision.analysis,
     ctx,
     fnCtx,
     compileExpr,
@@ -1366,6 +1419,88 @@ const tryAnalyzeArrayForLoop = ({
     : undefined;
 };
 
+const forLoopIteratorCall = ({
+  block,
+  statementIndex,
+  ctx,
+}: {
+  block: HirBlockExpr;
+  statementIndex: number;
+  ctx: CodegenContext;
+}): HirMethodCallExpr | undefined => {
+  const statement = ctx.module.hir.statements.get(
+    block.statements[statementIndex]!,
+  );
+  const wrapper =
+    statement?.kind === "expr-stmt"
+      ? ctx.module.hir.expressions.get(statement.expr)
+      : undefined;
+  const iteratorStatement =
+    wrapper?.exprKind === "block" && wrapper.statements.length === 1
+      ? ctx.module.hir.statements.get(wrapper.statements[0]!)
+      : undefined;
+  const iterCall =
+    iteratorStatement?.kind === "let"
+      ? ctx.module.hir.expressions.get(iteratorStatement.initializer)
+      : undefined;
+  const whileExpr =
+    wrapper?.exprKind === "block" && typeof wrapper.value === "number"
+      ? ctx.module.hir.expressions.get(wrapper.value)
+      : undefined;
+  return iteratorStatement?.kind === "let" &&
+    iterCall?.exprKind === "method-call" &&
+    whileExpr?.exprKind === "while"
+    ? iterCall
+    : undefined;
+};
+
+const intrinsicArrayForLoopCandidate = ({
+  block,
+  statementIndex,
+  ctx,
+  fnCtx,
+}: {
+  block: HirBlockExpr;
+  statementIndex: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): boolean => {
+  const iterCall = forLoopIteratorCall({ block, statementIndex, ctx });
+  if (!iterCall) return false;
+  const typeId = getRequiredExprType(
+    iterCall.target,
+    ctx,
+    fnCtx.typeInstanceId ?? fnCtx.instanceId,
+  );
+  return isStdArrayType({ typeId, ctx });
+};
+
+const intrinsicRangeForLoopCandidate = ({
+  block,
+  statementIndex,
+  ctx,
+  fnCtx,
+}: {
+  block: HirBlockExpr;
+  statementIndex: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): boolean => {
+  const iterCall = forLoopIteratorCall({ block, statementIndex, ctx });
+  if (!iterCall) return false;
+  const typeId = getRequiredExprType(
+    iterCall.target,
+    ctx,
+    fnCtx.typeInstanceId ?? fnCtx.instanceId,
+  );
+  return isStdIntrinsicNominalTypeInstantiation({
+    program: ctx.program,
+    typeId,
+    intrinsicType: STD_INTRINSIC_TYPE.range,
+    typeArgs: [ctx.program.primitives.i32],
+  });
+};
+
 const compileArrayForLoop = ({
   analysis,
   ctx,
@@ -1533,7 +1668,22 @@ export const tryCompileArrayForStatement = ({
   compileExpr: ExpressionCompiler;
   compileStatement: StatementCompiler;
 }): binaryen.ExpressionRef | undefined => {
+  if (
+    !intrinsicArrayForLoopCandidate({
+      block,
+      statementIndex,
+      ctx,
+      fnCtx,
+    })
+  ) {
+    return undefined;
+  }
   if (fnCtx.effectful) {
+    recordFastPathDecision({
+      prefix: "codegen.intrinsic_array_for",
+      accepted: false,
+      reason: "effectful",
+    });
     return undefined;
   }
   const analysis = tryAnalyzeArrayForLoop({
@@ -1541,6 +1691,11 @@ export const tryCompileArrayForStatement = ({
     statementIndex,
     ctx,
     fnCtx,
+  });
+  recordFastPathDecision({
+    prefix: "codegen.intrinsic_array_for",
+    accepted: Boolean(analysis),
+    ...(!analysis ? { reason: "shape" } : {}),
   });
   return analysis
     ? compileArrayForLoop({
@@ -1838,6 +1993,28 @@ const tryAnalyzeRangeForLoop = ({
   if (!body) {
     return undefined;
   }
+  let safeArrayScope: SafeArrayLoopScope | undefined;
+  if (iterator.safeArray) {
+    const proof = bodyPreservesArrayLoopProof({
+      bodyExprId: body.userBodyExpr,
+      indexSymbol: body.indexSymbol,
+      arraySymbol: iterator.safeArray.arraySymbol,
+      indexUpdate: "none",
+      ctx,
+      fnCtx,
+    });
+    recordFastPathDecision({
+      prefix: "codegen.range_array_safe_scope",
+      accepted: proof.accepted,
+      ...(!proof.accepted ? { reason: proof.reason } : {}),
+    });
+    if (proof.accepted) {
+      safeArrayScope = {
+        arraySymbol: iterator.safeArray.arraySymbol,
+        indexSymbol: body.indexSymbol,
+      };
+    }
+  }
   return {
     whileExpr,
     startExpr: iterator.startExpr,
@@ -1846,21 +2023,7 @@ const tryAnalyzeRangeForLoop = ({
     indexSymbol: body.indexSymbol,
     userBodyExpr: body.userBodyExpr,
     userStatements: body.userStatements,
-    safeArrayScope:
-      iterator.safeArray &&
-      bodyPreservesArrayLoopProof({
-        bodyExprId: body.userBodyExpr,
-        indexSymbol: body.indexSymbol,
-        arraySymbol: iterator.safeArray.arraySymbol,
-        indexUpdate: "none",
-        ctx,
-        fnCtx,
-      })
-        ? {
-            arraySymbol: iterator.safeArray.arraySymbol,
-            indexSymbol: body.indexSymbol,
-          }
-        : undefined,
+    safeArrayScope,
   };
 };
 
@@ -2020,7 +2183,22 @@ export const tryCompileRangeForStatement = ({
   compileExpr: ExpressionCompiler;
   compileStatement: StatementCompiler;
 }): binaryen.ExpressionRef | undefined => {
+  if (
+    !intrinsicRangeForLoopCandidate({
+      block,
+      statementIndex,
+      ctx,
+      fnCtx,
+    })
+  ) {
+    return undefined;
+  }
   if (fnCtx.effectful) {
+    recordFastPathDecision({
+      prefix: "codegen.intrinsic_range_for",
+      accepted: false,
+      reason: "effectful",
+    });
     return undefined;
   }
   const analysis = tryAnalyzeRangeForLoop({
@@ -2028,6 +2206,11 @@ export const tryCompileRangeForStatement = ({
     statementIndex,
     ctx,
     fnCtx,
+  });
+  recordFastPathDecision({
+    prefix: "codegen.intrinsic_range_for",
+    accepted: Boolean(analysis),
+    ...(!analysis ? { reason: "shape" } : {}),
   });
   return analysis
     ? compileRangeForLoop({

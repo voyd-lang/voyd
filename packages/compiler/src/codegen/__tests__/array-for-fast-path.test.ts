@@ -1,11 +1,20 @@
 import { resolve } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createVoydHost } from "@voyd-lang/js-host";
 import { monomorphizeProgram } from "../../semantics/linking.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import { optimizeProgram } from "../../optimize/pipeline.js";
 import { codegenProgram } from "../index.js";
 import { compileEffectFixture } from "./support/effects-harness.js";
+
+const perf = vi.hoisted(() => ({ increment: vi.fn() }));
+vi.mock("../../perf.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../perf.js")>()),
+  incrementCompilerPerfCounter: perf.increment,
+}));
+
+const recordedCounters = (): string[] =>
+  perf.increment.mock.calls.map(([name]) => String(name));
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -98,6 +107,12 @@ describe("intrinsic Array<T> for-loop fast path", () => {
     const custom = watForExport(wat, "custom_sequence_fallback");
     expect(custom).not.toContain("array_for_loop");
     expect(custom).toContain("call_ref");
+    expect(recordedCounters()).toContain(
+      "codegen.intrinsic_array_for.accepted",
+    );
+    expect(recordedCounters()).toContain(
+      "codegen.intrinsic_array_for.fallback.shape",
+    );
   });
 
   it("leaves non-intrinsic Sequence implementations on the general path", async () => {

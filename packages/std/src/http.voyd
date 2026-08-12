@@ -188,9 +188,7 @@ impl Headers
 
   /// Returns a copy with one header appended.
   api fn append(self, { header: Header }) -> Headers
-    let ~next = self.entries_value.copied(1)
-    next.push(header)
-    Headers::unchecked(next)
+    Headers::unchecked(self.entries_value.pushed(header))
 
   /// Returns a copy with one header appended.
   api fn append(self, { header name: StringSlice, value: StringSlice }) -> Headers

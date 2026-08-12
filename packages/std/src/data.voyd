@@ -4,10 +4,11 @@
 //! compiler-generated boundary codec performs the final typed conversion only
 //! after this module validates the matching provider-neutral `Shape`.
 
-use std::array::Array
+use std::array::{ Array, new_array_unchecked }
 use std::bytes::Bytes
 use std::dict::{ Dict, DictKey }
 use std::error::panic
+use std::fixed_array::fns::new_fixed_array
 use std::meta::{
   ArrayShape,
   BoolShape,
@@ -101,6 +102,7 @@ pub obj CustomDtoError {
 ///
 /// `Representation` must itself be eligible for automatic DTO derivation.
 /// Implementations are format-independent and singular for `T`.
+@compiler_contract(id: "voyd.std.custom-dto")
 pub trait CustomDto<T, Representation>
   fn write(value: T) -> Representation
   fn read(value: Representation) -> Result<T, CustomDtoError>
@@ -187,60 +189,60 @@ pub type DataKind = NullKind
 /// Calls must form one balanced root value. A writer becomes unusable after
 /// the first sink failure.
 pub trait DataWriter<SinkError>
-  fn reject(~self, message: String) -> Result<Unit, SinkError>
-  fn write_null(~self) -> Result<Unit, SinkError>
-  fn write_bool(~self, value: bool) -> Result<Unit, SinkError>
-  fn write_i32(~self, value: i32) -> Result<Unit, SinkError>
-  fn write_i64(~self, value: i64) -> Result<Unit, SinkError>
-  fn write_f32(~self, value: f32) -> Result<Unit, SinkError>
-  fn write_f64(~self, value: f64) -> Result<Unit, SinkError>
-  fn write_string(~self, value: String) -> Result<Unit, SinkError>
-  fn write_bytes(~self, value: Bytes) -> Result<Unit, SinkError>
-  fn begin_array(~self, { length: i32 }) -> Result<Unit, SinkError>
-  fn end_array(~self) -> Result<Unit, SinkError>
+  fn reject(~self, message: String): () -> Result<Unit, SinkError>
+  fn write_null(~self): () -> Result<Unit, SinkError>
+  fn write_bool(~self, value: bool): () -> Result<Unit, SinkError>
+  fn write_i32(~self, value: i32): () -> Result<Unit, SinkError>
+  fn write_i64(~self, value: i64): () -> Result<Unit, SinkError>
+  fn write_f32(~self, value: f32): () -> Result<Unit, SinkError>
+  fn write_f64(~self, value: f64): () -> Result<Unit, SinkError>
+  fn write_string(~self, value: String): () -> Result<Unit, SinkError>
+  fn write_bytes(~self, value: Bytes): () -> Result<Unit, SinkError>
+  fn begin_array(~self, { length: i32 }): () -> Result<Unit, SinkError>
+  fn end_array(~self): () -> Result<Unit, SinkError>
   fn begin_record(
     ~self,
     { name: String, field_count: i32 }
-  ) -> Result<Unit, SinkError>
-  fn write_field(~self, name: String) -> Result<Unit, SinkError>
-  fn end_record(~self) -> Result<Unit, SinkError>
+  ): () -> Result<Unit, SinkError>
+  fn write_field(~self, name: String): () -> Result<Unit, SinkError>
+  fn end_record(~self): () -> Result<Unit, SinkError>
   fn begin_variant(
     ~self,
     { union: String, variant: String, field_count: i32 }
-  ) -> Result<Unit, SinkError>
-  fn end_variant(~self) -> Result<Unit, SinkError>
+  ): () -> Result<Unit, SinkError>
+  fn end_variant(~self): () -> Result<Unit, SinkError>
 
 /// Stateful pull source used by generated DTO traversal.
 pub trait DataReader<SourceError>
-  fn reject(~self, message: String) -> Result<Unit, SourceError>
+  fn reject(~self, message: String): () -> Result<Unit, SourceError>
   fn reject_custom(
     ~self,
     code: String,
     message: String
-  ) -> Result<Unit, SourceError>
+  ): () -> Result<Unit, SourceError>
   fn current_path(self) -> String
   fn matches_name(self, actual: String, expected: String) -> bool
-  fn enter_field(~self, name: String) -> void
-  fn enter_index(~self, index: i32) -> void
-  fn leave(~self) -> void
+  fn enter_field(~self, name: String): () -> void
+  fn enter_index(~self, index: i32): () -> void
+  fn leave(~self): () -> void
   fn kind(self) -> Result<DataKind, SourceError>
-  fn read_null(~self) -> Result<Unit, SourceError>
-  fn read_bool(~self) -> Result<bool, SourceError>
-  fn read_i32(~self) -> Result<i32, SourceError>
-  fn read_i64(~self) -> Result<i64, SourceError>
-  fn read_f32(~self) -> Result<f32, SourceError>
-  fn read_f64(~self) -> Result<f64, SourceError>
-  fn read_string(~self) -> Result<String, SourceError>
-  fn read_bytes(~self) -> Result<Bytes, SourceError>
-  fn begin_array(~self) -> Result<i32, SourceError>
+  fn read_null(~self): () -> Result<Unit, SourceError>
+  fn read_bool(~self): () -> Result<bool, SourceError>
+  fn read_i32(~self): () -> Result<i32, SourceError>
+  fn read_i64(~self): () -> Result<i64, SourceError>
+  fn read_f32(~self): () -> Result<f32, SourceError>
+  fn read_f64(~self): () -> Result<f64, SourceError>
+  fn read_string(~self): () -> Result<String, SourceError>
+  fn read_bytes(~self): () -> Result<Bytes, SourceError>
+  fn begin_array(~self): () -> Result<i32, SourceError>
   fn has_next_element(self) -> Result<bool, SourceError>
-  fn end_array(~self) -> Result<Unit, SourceError>
-  fn begin_record(~self) -> Result<Unit, SourceError>
-  fn next_field(~self) -> Result<Option<String>, SourceError>
-  fn skip_value(~self) -> Result<Unit, SourceError>
-  fn end_record(~self) -> Result<Unit, SourceError>
-  fn begin_variant(~self) -> Result<String, SourceError>
-  fn end_variant(~self) -> Result<Unit, SourceError>
+  fn end_array(~self): () -> Result<Unit, SourceError>
+  fn begin_record(~self): () -> Result<Unit, SourceError>
+  fn next_field(~self): () -> Result<Option<String>, SourceError>
+  fn skip_value(~self): () -> Result<Unit, SourceError>
+  fn end_record(~self): () -> Result<Unit, SourceError>
+  fn begin_variant(~self): () -> Result<String, SourceError>
+  fn end_variant(~self): () -> Result<Unit, SourceError>
 
 /// Balanced-stream error reported by `DataValueWriter`.
 pub obj DataValueWriteError {
@@ -312,25 +314,25 @@ impl DataValueWriter
           return data_writer_failure<DataValue>("data writer has trailing events")
         Ok<DataValue> { value: parsed.value }
 
-  fn start_value(~self) -> Result<Unit, DataValueWriteError>
+  fn start_value(~self) -> i32
     if self.failed:
-      return data_writer_failure<Unit>("data writer session has failed")
+      return 1
     if self.depth == 0:
       if self.root_count != 0:
-        return self.fail("data writer received more than one root value")
+        self.failed = true
+        return 2
       self.root_count = 1
-    data_writer_success()
+    0
 
   fn write_literal(
     ~self,
     value: DataValue
   ) -> Result<Unit, DataValueWriteError>
-    match(self.start_value())
-      Err<DataValueWriteError> { error }:
-        Err<DataValueWriteError> { error }
-      Ok<Unit>:
-        self.events.push(DataValueLiteralEvent { value })
-        data_writer_success()
+    let start_status = self.start_value()
+    if start_status != 0:
+      return data_writer_start_value_failure(start_status)
+    self.events.push(DataValueLiteralEvent { value })
+    data_writer_success()
 
   fn fail(~self, message: String) -> Result<Unit, DataValueWriteError>
     self.failed = true
@@ -370,13 +372,12 @@ impl DataWriter<DataValueWriteError> for DataValueWriter
   ) -> Result<Unit, DataValueWriteError>
     if length < 0:
       return self.fail("data writer array length cannot be negative")
-    match(self.start_value())
-      Err<DataValueWriteError> { error }:
-        Err<DataValueWriteError> { error }
-      Ok<Unit>:
-        self.events.push(DataValueBeginArrayEvent { length })
-        self.depth = self.depth + 1
-        data_writer_success()
+    let start_status = self.start_value()
+    if start_status != 0:
+      return data_writer_start_value_failure(start_status)
+    self.events.push(DataValueBeginArrayEvent { length })
+    self.depth = self.depth + 1
+    data_writer_success()
 
   fn end_array(~self) -> Result<Unit, DataValueWriteError>
     if self.depth <= 0:
@@ -391,13 +392,12 @@ impl DataWriter<DataValueWriteError> for DataValueWriter
   ) -> Result<Unit, DataValueWriteError>
     if field_count < 0:
       return self.fail("data writer record field count cannot be negative")
-    match(self.start_value())
-      Err<DataValueWriteError> { error }:
-        Err<DataValueWriteError> { error }
-      Ok<Unit>:
-        self.events.push(DataValueBeginRecordEvent { field_count })
-        self.depth = self.depth + 1
-        data_writer_success()
+    let start_status = self.start_value()
+    if start_status != 0:
+      return data_writer_start_value_failure(start_status)
+    self.events.push(DataValueBeginRecordEvent { field_count })
+    self.depth = self.depth + 1
+    data_writer_success()
 
   fn write_field(~self, name: String) -> Result<Unit, DataValueWriteError>
     if self.depth <= 0:
@@ -416,16 +416,15 @@ impl DataWriter<DataValueWriteError> for DataValueWriter
     ~self,
     { union: String, variant: String, field_count: i32 }
   ) -> Result<Unit, DataValueWriteError>
-    match(self.start_value())
-      Err<DataValueWriteError> { error }:
-        Err<DataValueWriteError> { error }
-      Ok<Unit>:
-        self.events.push(DataValueBeginVariantEvent {
-          name: variant,
-          field_count
-        })
-        self.depth = self.depth + 1
-        data_writer_success()
+    let start_status = self.start_value()
+    if start_status != 0:
+      return data_writer_start_value_failure(start_status)
+    self.events.push(DataValueBeginVariantEvent {
+      name: variant,
+      field_count
+    })
+    self.depth = self.depth + 1
+    data_writer_success()
 
   fn end_variant(~self) -> Result<Unit, DataValueWriteError>
     if self.depth <= 0:
@@ -525,6 +524,11 @@ fn data_writer_parsed(
 fn data_writer_success() -> Result<Unit, DataValueWriteError>
   Ok<Unit> { value: Unit {} }
 
+fn data_writer_start_value_failure(status: i32) -> Result<Unit, DataValueWriteError>
+  if status == 1:
+    return data_writer_failure<Unit>("data writer session has failed")
+  data_writer_failure<Unit>("data writer received more than one root value")
+
 fn data_writer_failure<T>(message: String) -> Result<T, DataValueWriteError>
   Err<DataValueWriteError> { error: DataValueWriteError { message } }
 
@@ -603,11 +607,70 @@ impl DataReader<DataValueReadError> for DataValueReader
 
   fn enter_field(~self, name: String) -> void
     self.parents.push(self.path)
-    self.path = self.path.concat(".").concat(name)
+    let separator = "."
+    let path_count = self.path.byte_count
+    let separator_count = separator.byte_count
+    let name_count = name.byte_count
+    let next_bytes = new_fixed_array<i32>(
+      path_count + separator_count + name_count
+    )
+    __array_copy(next_bytes, {
+      from: self.path.bytes.bytes,
+      to_index: 0,
+      from_index: 0,
+      count: path_count
+    })
+    __array_copy(next_bytes, {
+      from: separator.bytes.bytes,
+      to_index: path_count,
+      from_index: 0,
+      count: separator_count
+    })
+    __array_copy(next_bytes, {
+      from: name.bytes.bytes,
+      to_index: path_count + separator_count,
+      from_index: 0,
+      count: name_count
+    })
+    self.path = new_string(next_bytes)
 
   fn enter_index(~self, index: i32) -> void
     self.parents.push(self.path)
-    self.path = self.path.concat("[").concat(cast::to_string(index)).concat("]")
+    let open = "["
+    let value = cast::to_string(index)
+    let close = "]"
+    let path_count = self.path.byte_count
+    let open_count = open.byte_count
+    let value_count = value.byte_count
+    let close_count = close.byte_count
+    let next_bytes = new_fixed_array<i32>(
+      path_count + open_count + value_count + close_count
+    )
+    __array_copy(next_bytes, {
+      from: self.path.bytes.bytes,
+      to_index: 0,
+      from_index: 0,
+      count: path_count
+    })
+    __array_copy(next_bytes, {
+      from: open.bytes.bytes,
+      to_index: path_count,
+      from_index: 0,
+      count: open_count
+    })
+    __array_copy(next_bytes, {
+      from: value.bytes.bytes,
+      to_index: path_count + open_count,
+      from_index: 0,
+      count: value_count
+    })
+    __array_copy(next_bytes, {
+      from: close.bytes.bytes,
+      to_index: path_count + open_count + value_count,
+      from_index: 0,
+      count: close_count
+    })
+    self.path = new_string(next_bytes)
 
   fn leave(~self) -> void
     if self.parents.is_empty() == false:
@@ -709,7 +772,15 @@ impl DataReader<DataValueReadError> for DataValueReader
       DataValueLiteralEvent:
         event.value.match(value)
           DataString:
-            let result = value.value.as_slice().to_string()
+            let byte_count = value.value.byte_count
+            let bytes = new_fixed_array<i32>(byte_count)
+            __array_copy(bytes, {
+              from: value.value.bytes.bytes,
+              to_index: 0,
+              from_index: 0,
+              count: byte_count
+            })
+            let result = new_string(bytes)
             self.index = self.index + 1
             Ok<String> { value: result }
           else:
@@ -724,7 +795,17 @@ impl DataReader<DataValueReadError> for DataValueReader
       DataValueLiteralEvent:
         event.value.match(value)
           DataBytes:
-            let result = value.value.copied()
+            let byte_count = value.value.storage.count
+            let bytes = new_fixed_array<i32>(byte_count)
+            __array_copy(bytes, {
+              from: value.value.storage.storage,
+              to_index: 0,
+              from_index: 0,
+              count: byte_count
+            })
+            let result = Bytes {
+              storage: new_array_unchecked<i32>({ from: bytes })
+            }
             self.index = self.index + 1
             Ok<Bytes> { value: result }
           else:
@@ -788,7 +869,15 @@ impl DataReader<DataValueReadError> for DataValueReader
       DataValueEndVariantEvent:
         Ok<Option<String>> { value: None {} }
       DataValueFieldEvent:
-        let name = event.name.as_slice().to_string()
+        let byte_count = event.name.byte_count
+        let bytes = new_fixed_array<i32>(byte_count)
+        __array_copy(bytes, {
+          from: event.name.bytes.bytes,
+          to_index: 0,
+          from_index: 0,
+          count: byte_count
+        })
+        let name = new_string(bytes)
         self.index = self.index + 1
         Ok<Option<String>> { value: Some<String> { value: name } }
       else:
@@ -818,7 +907,15 @@ impl DataReader<DataValueReadError> for DataValueReader
       return self.fail<String>("data reader expected variant")
     self.events.at(self.index).match(event)
       DataValueBeginVariantEvent:
-        let name = event.name.as_slice().to_string()
+        let byte_count = event.name.byte_count
+        let bytes = new_fixed_array<i32>(byte_count)
+        __array_copy(bytes, {
+          from: event.name.bytes.bytes,
+          to_index: 0,
+          from_index: 0,
+          count: byte_count
+        })
+        let name = new_string(bytes)
         self.index = self.index + 1
         Ok<String> { value: name }
       else:

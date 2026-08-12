@@ -1,8 +1,13 @@
 use std::result::types::{ Ok, Err }
+use std::string::type::{ String, StringSlice, new_string }
 use std::test::assertions::assert
 
 obj SharedCellCounter {
   value: i32
+}
+
+obj SharedCellSliceHolder {
+  slice: StringSlice
 }
 
 test "SharedCell reads and mutates values":
@@ -25,11 +30,23 @@ test "SharedCell replaces reference payloads in place":
   )
   assert(cell.with((value) => value.value), eq: 8)
 
+test "SharedCell returns stable string slices across source replacement":
+  let cell = SharedCell(SharedCellSliceHolder {
+    slice: "before".as_slice()
+  })
+  let retained = cell.with((value) => value.slice)
+  cell.with_mut((~value) =>
+    value = SharedCellSliceHolder { slice: "after".as_slice() }
+    void
+  )
+  assert(retained.to_string().equals("before"), eq: true)
+
 test "SharedCell allows nested shared access":
   let cell = SharedCell(SharedCellCounter { value: 3 })
   let total = cell.with((outer) =>
+    let outer_value = outer.value
     cell.with((inner) =>
-      outer.value + inner.value
+      outer_value + inner.value
     )
   )
   assert(total, eq: 6)
@@ -51,8 +68,9 @@ test "SharedCell try methods report overlapping access":
       assert(false, eq: true)
 
   let write_during_read = cell.with((value) =>
+    let next_value = value.value + 1
     cell.try_with_mut((~current) =>
-      current.value = value.value + 1
+      current.value = next_value
     )
   )
   match(write_during_read)

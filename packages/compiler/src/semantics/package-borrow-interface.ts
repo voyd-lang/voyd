@@ -1,16 +1,10 @@
-import {
-  CALLABLE_BORROW_SUMMARY_SCHEMA,
-  CALLABLE_BORROW_SUMMARY_VERSION,
-  type CallableBorrowContract,
-  type CallableBorrowSummary,
-  type LoanAnalysisMode,
-} from "./borrowing/index.js";
+import type { OrdinaryMutationSummary } from "./borrowing/index.js";
 import {
   PACKAGE_SEMANTIC_INTERFACE_SCHEMA,
   PACKAGE_SEMANTIC_INTERFACE_VERSION,
-  type ModuleExportEntry,
   type ModuleExportTable,
   type PackageCallableSignature,
+  type PackageOrdinaryMutationSummary,
   type PackageSemanticInterface,
 } from "./modules.js";
 import {
@@ -72,35 +66,33 @@ export const buildPackageSemanticInterface = ({
     }
     return dependencyKeys.get(`${owner}:${symbol}`) ?? `${owner}::unresolved`;
   };
-  const summaries = new Map<string, CallableBorrowSummary>();
-  const summaryIdForSymbol = new Map<SymbolId, string>();
-  const capabilityForSymbol = new Map<SymbolId, LoanAnalysisMode>();
+  const ordinaryMutationSummaries = new Map<string, OrdinaryMutationSummary>();
+  const ordinaryMutationSummaryIdForSymbol = new Map<SymbolId, string>();
+  const defaultIdentityGuardProtocols = new Set<SymbolId>();
 
   exports.forEach((entry) => {
-    entry.borrowing?.forEach((borrow) => {
-      const localKey = keys.get(borrow.symbol);
-      const locallyOwned = borrow.summaryId === `${moduleId}:${borrow.symbol}`;
-      const id =
-        localKey && locallyOwned ? `${localKey}::borrow` : borrow.summaryId;
-      borrow.summaryId = id;
-      summaryIdForSymbol.set(borrow.symbol, id);
-      if (borrow.capability) {
-        capabilityForSymbol.set(borrow.symbol, borrow.capability);
+    entry.defaultIdentityGuardProtocols?.forEach(({ symbol, protocol }) => {
+      if (protocol === "presence-conflict-bit-v1") {
+        defaultIdentityGuardProtocols.add(symbol);
       }
-      const existing = summaries.get(id);
-      if (existing) {
-        borrow.contract = existing.contract;
-        return;
+    });
+    entry.ordinaryMutation?.forEach((ordinary) => {
+      const { symbol, summary } = ordinary;
+      const localKey =
+        keys.get(symbol) ??
+        fallbackDeclarationKey(symbolTable, moduleId, symbol);
+      const locallyOwned = ordinary.summaryId === `${moduleId}:${symbol}`;
+      const id = locallyOwned
+        ? `${localKey}::ordinary-mutation`
+        : ordinary.summaryId;
+      ordinary.summaryId = id;
+      ordinaryMutationSummaryIdForSymbol.set(symbol, id);
+      if (!ordinaryMutationSummaries.has(id)) {
+        ordinaryMutationSummaries.set(
+          id,
+          publicOrdinaryMutationSummary(summary),
+        );
       }
-      summaries.set(id, {
-        schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
-        version: CALLABLE_BORROW_SUMMARY_VERSION,
-        dispatch: borrow.dispatch ?? "ordinary",
-        contract: borrow.contract,
-        ...(borrow.namedContract
-          ? { namedContract: borrow.namedContract }
-          : {}),
-      });
     });
   });
 
@@ -187,94 +179,31 @@ export const buildPackageSemanticInterface = ({
         ...(item.kind === "effect"
           ? { resumable: item.operations[index]!.resumable }
           : {}),
-        ...(summaryIdForSymbol.get(member.symbol)
-          ? { summaryId: summaryIdForSymbol.get(member.symbol) }
+        ...(ordinaryMutationSummaryIdForSymbol.get(member.symbol)
+          ? {
+              ordinaryMutationSummaryId: ordinaryMutationSummaryIdForSymbol.get(
+                member.symbol,
+              ),
+            }
           : {}),
-        ...(capabilityForSymbol.get(member.symbol)
-          ? { capability: capabilityForSymbol.get(member.symbol) }
+        ...(defaultIdentityGuardProtocols.has(member.symbol)
+          ? {
+              defaultIdentityGuardProtocol: "presence-conflict-bit-v1" as const,
+            }
           : {}),
         ...(signature ? { signature } : {}),
       };
     });
     membersByOwner.set(item.symbol, members);
   });
-  const summaryIdForContract = (
-    contract: CallableBorrowContract,
-    hint: string,
-  ) => {
-    const existing = Array.from(summaries).find(
-      ([, summary]) => summary.contract === contract,
-    )?.[0];
-    if (existing) return existing;
-    const id = `${hint}::borrow`;
-    summaries.set(id, {
-      schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
-      version: CALLABLE_BORROW_SUMMARY_VERSION,
-      dispatch: "ordinary",
-      contract,
-    });
-    return id;
-  };
-  const encodeCoercion = (
-    coercion: NonNullable<ModuleExportEntry["borrowingCoercions"]>[number],
-    index: number,
-    family: string,
-  ) => ({
-    concrete: durableRef(coercion.concrete),
-    trait: durableRef(coercion.trait),
-    implementation: `${moduleId}::${family}:${index}:implementation`,
-    ...(coercion.resultPaths ? { resultPaths: coercion.resultPaths } : {}),
-    ...(coercion.resultType
-      ? { resultType: durableRef(coercion.resultType) }
-      : {}),
-    ...(coercion.applicability
-      ? {
-          applicability: coercion.applicability.map((entry) => ({
-            callable: durableRef(entry.callable),
-            ...(entry.omissionRequirements
-              ? { omissionRequirements: entry.omissionRequirements }
-              : {}),
-          })),
-        }
-      : {}),
-    summaryId: summaryIdForContract(
-      coercion.contract,
-      `${moduleId}::${family}:${index}`,
-    ),
-  });
-  const rawCoercions = Array.from(exports.values()).flatMap(
-    (entry) => entry.borrowingCoercions ?? [],
-  );
-  const rawCallableCoercions = Array.from(exports.values()).flatMap(
-    (entry) => entry.borrowingCallableResultCoercions ?? [],
-  );
-  const traitImplementations = (
-    exports.borrowingTraitImplementations ?? []
-  ).map((implementation, implementationIndex) => ({
-    concrete: durableRef(implementation.concrete),
-    trait: durableRef(implementation.trait),
-    implementation: `${moduleId}::trait-implementation:${implementationIndex}`,
-    methods: implementation.methods.map((method, methodIndex) => ({
-      implementation: `${moduleId}::trait-implementation:${implementationIndex}:method:${methodIndex}:implementation`,
-      declaration: durableRef(method.declaration),
-      summaryId: summaryIdForContract(
-        method.contract,
-        `${moduleId}::trait-implementation:${implementationIndex}:${methodIndex}`,
-      ),
-    })),
-  }));
-  const coercions = rawCoercions.map((entry, index) =>
-    encodeCoercion(entry, index, "coercion"),
-  );
-  const callableResultCoercions = rawCallableCoercions.map((entry, index) =>
-    encodeCoercion(entry, index, "callable-result-coercion"),
-  );
-
   exports.packageSemanticInterface = {
     schema: PACKAGE_SEMANTIC_INTERFACE_SCHEMA,
     version: PACKAGE_SEMANTIC_INTERFACE_VERSION,
     moduleId,
-    summaries: Array.from(summaries, ([id, summary]) => ({ id, summary })),
+    ordinaryMutationSummaries: Array.from(
+      ordinaryMutationSummaries,
+      ([id, summary]) => ({ id, summary }),
+    ),
     exports: Array.from(exports.values(), (entry) => ({
       name: entry.name,
       kind: entry.kind,
@@ -313,11 +242,17 @@ export const buildPackageSemanticInterface = ({
           });
         return {
           key: keys.get(symbol)!,
-          ...(summaryIdForSymbol.get(symbol)
-            ? { summaryId: summaryIdForSymbol.get(symbol) }
+          ...(ordinaryMutationSummaryIdForSymbol.get(symbol)
+            ? {
+                ordinaryMutationSummaryId:
+                  ordinaryMutationSummaryIdForSymbol.get(symbol),
+              }
             : {}),
-          ...(capabilityForSymbol.get(symbol)
-            ? { capability: capabilityForSymbol.get(symbol) }
+          ...(defaultIdentityGuardProtocols.has(symbol)
+            ? {
+                defaultIdentityGuardProtocol:
+                  "presence-conflict-bit-v1" as const,
+              }
             : {}),
           ...(signature ? { signature } : {}),
           ...(typeof value === "number"
@@ -328,31 +263,32 @@ export const buildPackageSemanticInterface = ({
       }),
       members: membersByOwner.get(entry.symbol) ?? [],
     })),
-    coercions,
-    callableResultCoercions,
-    traitImplementations,
     types: typeEncoder.types,
   };
   if (isCompilerPerfEnabled()) {
-    const retained = [
-      ...summaries.values(),
-      ...exports.packageSemanticInterface.coercions,
-      ...exports.packageSemanticInterface.callableResultCoercions,
-      ...exports.packageSemanticInterface.traitImplementations.flatMap(
-        (implementation) => implementation.methods,
-      ),
-    ];
+    const retained = Array.from(ordinaryMutationSummaries.values());
+    incrementCompilerPerfCounter("borrowing.contract.retainedCount", 0);
+    incrementCompilerPerfCounter("borrowing.contract.retainedBytes", 0);
     incrementCompilerPerfCounter(
-      "borrowing.contract.retainedCount",
+      "borrowing.ordinary.interfaceCount",
       retained.length,
     );
     incrementCompilerPerfCounter(
-      "borrowing.contract.retainedBytes",
+      "borrowing.ordinary.interfaceBytes",
       new TextEncoder().encode(JSON.stringify(retained)).byteLength,
     );
   }
   return exports;
 };
+
+const publicOrdinaryMutationSummary = (
+  summary: OrdinaryMutationSummary,
+): PackageOrdinaryMutationSummary => ({
+  parameterAccesses: [...summary.parameterAccesses],
+  ambientObjectAccess: summary.ambientObjectAccess,
+  invokesUnknownCallback: summary.invokesUnknownCallback,
+  maySuspend: summary.maySuspend,
+});
 
 const durableDeclarationKeys = ({
   moduleId,
@@ -581,28 +517,4 @@ const createPublicTypeEncoder = ({
     encodeEffects,
     types,
   };
-};
-
-const summaryIndexes = new WeakMap<
-  ModuleExportTable,
-  ReadonlyMap<string, CallableBorrowSummary>
->();
-
-export const resolveExportBorrowSummary = ({
-  exports,
-  summaryId,
-}: {
-  exports: ModuleExportTable;
-  summaryId: string;
-}): CallableBorrowSummary | undefined => {
-  const existing = summaryIndexes.get(exports);
-  if (existing) return existing.get(summaryId);
-  const index = new Map(
-    exports.packageSemanticInterface?.summaries.map(({ id, summary }) => [
-      id,
-      summary,
-    ]) ?? [],
-  );
-  summaryIndexes.set(exports, index);
-  return index.get(summaryId);
 };

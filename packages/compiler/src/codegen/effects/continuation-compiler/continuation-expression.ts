@@ -67,6 +67,10 @@ const coerceDirectContinuationResult = ({
     expectedResultTypeId ?? getRequiredExprType(targetExprId, ctx, typeInstanceId);
   const targetType = wasmTypeFor(targetTypeId, ctx);
   const actualTypeId = getRequiredExprType(valueExprId, ctx, typeInstanceId);
+  const valueType = binaryen.getExpressionType(value);
+  if (valueType === binaryen.unreachable) {
+    return value;
+  }
   const coerced = coerceValueToType({
     value,
     actualType: actualTypeId,

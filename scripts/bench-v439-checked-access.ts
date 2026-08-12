@@ -6,16 +6,28 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
 import type { CompileResult } from "@voyd-lang/sdk";
+import {
+  captureCompilerPerf,
+  createProcessMemoryTracker,
+  emitBenchmarkReport,
+} from "./benchmark-report.js";
 
 type Entrypoint = {
   name: string;
   expected: unknown;
+  args?: readonly unknown[];
 };
 
 type Scenario = {
   name: string;
   entryPath: string;
   entrypoints: readonly Entrypoint[];
+  requiredPositiveCounters?: readonly string[];
+  wasmSignals?: readonly {
+    name: string;
+    pattern: RegExp;
+    expected: "present" | "absent";
+  }[];
 };
 
 type CompileSuccess = Extract<CompileResult, { success: true }>;
@@ -33,6 +45,7 @@ const runtimeSampleCount = Number.parseInt(
 const label = valueAfter("--label") ?? "worktree";
 const scenarioFilter = valueAfter("--scenario");
 const sdkRoot = valueAfter("--sdk-root");
+const outputPath = valueAfter("--output");
 if (sampleCount < 3 || runtimeSampleCount < 3) {
   throw new Error(
     "benchmark requires at least three compile and runtime samples",
@@ -40,6 +53,7 @@ if (sampleCount < 3 || runtimeSampleCount < 3) {
 }
 
 const repository = path.resolve(import.meta.dirname, "..");
+process.env.VOYD_COMPILER_PERF = "1";
 const sdkModule = sdkRoot
   ? pathToFileURL(path.join(sdkRoot, "packages", "sdk", "src", "index.ts")).href
   : "@voyd-lang/sdk";
@@ -95,6 +109,64 @@ const scenarios: readonly Scenario[] = [
       { name: "response_serialization_stage", expected: 600_952_779 },
     ],
   },
+  {
+    name: "isolated-range-optimizations",
+    entryPath: path.join(
+      performanceFixtures,
+      "v500-range-optimizations.voyd",
+    ),
+    entrypoints: [
+      { name: "direct_range_workload", expected: 4_960_000 },
+      {
+        name: "range_array_checked_access_workload",
+        expected: 7_600_000,
+      },
+    ],
+    requiredPositiveCounters: [
+      "codegen.intrinsic_range_for.accepted",
+      "codegen.range_array_safe_scope.accepted",
+    ],
+    wasmSignals: [
+      {
+        name: "direct-array-access",
+        pattern: /\(array\.get(?:_[su])?\b/,
+        expected: "present",
+      },
+      {
+        name: "general-range-iterator",
+        pattern: /\$std__range__RangeIterator/,
+        expected: "absent",
+      },
+    ],
+  },
+  {
+    name: "deferred-default-identity-guard",
+    entryPath: path.join(
+      performanceFixtures,
+      "v500-deferred-default-guard.voyd",
+    ),
+    entrypoints: [
+      { name: "deferred_guard_dynamic", args: [1], expected: 15 },
+    ],
+    requiredPositiveCounters: [
+      "borrowing.identity_guard.emitted.deferred_default",
+      "codegen.default_identity_guard_companion.requested",
+      "codegen.default_identity_guard_companion.created",
+      "codegen.default_identity_guard_companion.compiled",
+    ],
+    wasmSignals: [
+      {
+        name: "deferred-identity-comparison",
+        pattern: /\(ref\.eq\b/,
+        expected: "present",
+      },
+      {
+        name: "deferred-panic-path",
+        pattern: /__voyd_panic_ptr/,
+        expected: "present",
+      },
+    ],
+  },
 ];
 
 if (!scenarioFilter) {
@@ -138,19 +210,16 @@ if (!scenarioFilter) {
   if (!first) {
     throw new Error("benchmark has no scenarios");
   }
-  console.log(
-    JSON.stringify(
-      {
-        schemaVersion: first.schemaVersion,
-        label: first.label,
-        methodology: first.methodology,
-        environment: first.environment,
-        results: documents.flatMap((document) => document.results),
-      },
-      null,
-      2,
-    ),
-  );
+  emitBenchmarkReport({
+    report: {
+      schemaVersion: first.schemaVersion,
+      label: first.label,
+      methodology: first.methodology,
+      environment: first.environment,
+      results: documents.flatMap((document) => document.results),
+    },
+    outputPath,
+  });
   process.exit(0);
 }
 
@@ -177,7 +246,7 @@ const expectCompileSuccess = (
     return result;
   }
   throw new Error(
-    `${scenario} failed to compile:\n${result.diagnostics
+    `${scenario} failed to compile:\n${("diagnostics" in result ? result.diagnostics : [])
       .map((diagnostic) => diagnostic.message)
       .join("\n")}`,
   );
@@ -205,6 +274,17 @@ const assertResult = ({
 const count = (source: string, pattern: RegExp): number =>
   Array.from(source.matchAll(pattern)).length;
 
+const medianRecord = (
+  records: readonly Readonly<Record<string, number>>[],
+): Record<string, number> => {
+  const keys = new Set(records.flatMap((record) => Object.keys(record)));
+  return Object.fromEntries(
+    Array.from(keys)
+      .sort()
+      .map((key) => [key, median(records.map((record) => record[key] ?? 0))]),
+  );
+};
+
 const codeShape = (wasmText: string) => ({
   allocationSites: count(
     wasmText,
@@ -218,7 +298,34 @@ const codeShape = (wasmText: string) => ({
   identityComparisons: count(wasmText, /\(ref\.eq\b/g),
   directCalls: count(wasmText, /\(call\s+\$/g),
   indirectCalls: count(wasmText, /\(call_ref\b/g),
+  unreachableSites: count(wasmText, /\(unreachable\b/g),
+  rangeIteratorReferences: count(wasmText, /\$std__range__RangeIterator/g),
+  defaultIdentityGuardCompanionReferences: count(
+    wasmText,
+    /__default_identity_guard_v1/g,
+  ),
 });
+
+const escapeRegex = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const watForExport = (wasmText: string, exportName: string): string => {
+  const exportedFunction = wasmText.match(
+    new RegExp(
+      `\\(export "${escapeRegex(exportName)}" \\(func \\$([^\\s\\)]+)\\)\\)`,
+    ),
+  )?.[1];
+  if (!exportedFunction) return "";
+  const start = wasmText.indexOf(`(func $${exportedFunction} `);
+  if (start < 0) return "";
+  let depth = 0;
+  for (let index = start; index < wasmText.length; index += 1) {
+    if (wasmText[index] === "(") depth += 1;
+    if (wasmText[index] === ")") depth -= 1;
+    if (depth === 0) return wasmText.slice(start, index + 1);
+  }
+  return "";
+};
 
 const measureScenario = async ({
   scenario,
@@ -227,19 +334,32 @@ const measureScenario = async ({
   scenario: Scenario;
   optimize: boolean;
 }) => {
+  const memoryTracker = createProcessMemoryTracker();
   const compileMs: number[] = [];
+  const compileRssBytes: number[] = [];
+  const compilerPerfSamples: Array<{
+    phasesMs: Record<string, number>;
+    counters: Record<string, number>;
+  }> = [];
   let compiled: CompileSuccess | undefined;
   for (let sample = 0; sample < sampleCount; sample += 1) {
     const startedAt = performance.now();
-    compiled = expectCompileSuccess(
-      await createSdk().compile({
+    const captured = await captureCompilerPerf(() =>
+      createSdk().compile({
         entryPath: scenario.entryPath,
         optimize,
         emitWasmText: true,
       }),
-      scenario.name,
     );
+    compiled = expectCompileSuccess(captured.value, scenario.name);
     compileMs.push(performance.now() - startedAt);
+    memoryTracker.sample();
+    compileRssBytes.push(process.memoryUsage().rss);
+    const summary = captured.summaries.at(-1);
+    compilerPerfSamples.push({
+      phasesMs: summary?.phasesMs ?? {},
+      counters: summary?.counters ?? {},
+    });
   }
   if (!compiled) {
     throw new Error(`${scenario.name} did not produce a compiled module`);
@@ -255,7 +375,9 @@ const measureScenario = async ({
       assertResult({
         scenario: scenario.name,
         entrypoint,
-        actual: await host.run<unknown>(entrypoint.name),
+        actual: await host.run<unknown>(entrypoint.name, [
+          ...(entrypoint.args ?? []),
+        ]),
       });
     }
     const memory = host.instance.exports.memory;
@@ -264,7 +386,9 @@ const measureScenario = async ({
     const samplesMs: number[] = [];
     for (let sample = 0; sample < runtimeSampleCount; sample += 1) {
       const startedAt = performance.now();
-      const actual = await host.run<unknown>(entrypoint.name);
+      const actual = await host.run<unknown>(entrypoint.name, [
+        ...(entrypoint.args ?? []),
+      ]);
       samplesMs.push(performance.now() - startedAt);
       assertResult({ scenario: scenario.name, entrypoint, actual });
     }
@@ -281,17 +405,62 @@ const measureScenario = async ({
   }
   const runtime = Object.fromEntries(runtimeEntries);
   const wasmText = compiled.wasmText ?? "";
+  const phaseMediansMs = medianRecord(
+    compilerPerfSamples.map((sample) => sample.phasesMs),
+  );
+  const counterMedians = medianRecord(
+    compilerPerfSamples.map((sample) => sample.counters),
+  );
+  const processMemory = memoryTracker.finish();
 
   return {
     optimize,
-    compile: { samplesMs: compileMs, medianMs: median(compileMs) },
+    compile: {
+      samplesMs: compileMs,
+      medianMs: median(compileMs),
+      rssSamplesBytes: compileRssBytes,
+      rssMedianBytes: median(compileRssBytes),
+      perfSamples: compilerPerfSamples,
+      phaseMediansMs,
+      counterMedians,
+    },
     runtime,
+    processMemory,
     linearMemoryGrowthBytes: maxLinearMemoryGrowthBytes,
     wasmBytes: compiled.wasm.byteLength,
     gzipBytes: gzipSync(compiled.wasm).byteLength,
     wasmTextBytes: new TextEncoder().encode(wasmText).byteLength,
     wasmSha256: createHash("sha256").update(compiled.wasm).digest("hex"),
     codeShape: codeShape(wasmText),
+    entrypointCodeShape: Object.fromEntries(
+      scenario.entrypoints.map((entrypoint) => [
+        entrypoint.name,
+        codeShape(watForExport(wasmText, entrypoint.name)),
+      ]),
+    ),
+    expectedSignals: {
+      positiveCounters: Object.fromEntries(
+        (scenario.requiredPositiveCounters ?? []).map((counter) => [
+          counter,
+          {
+            value: counterMedians[counter] ?? 0,
+            observed: (counterMedians[counter] ?? 0) > 0,
+          },
+        ]),
+      ),
+      wasm: Object.fromEntries(
+        (scenario.wasmSignals ?? []).map((signal) => {
+          const matched = signal.pattern.test(wasmText);
+          return [
+            signal.name,
+            {
+              expected: signal.expected,
+              observed: signal.expected === "present" ? matched : !matched,
+            },
+          ];
+        }),
+      ),
+    },
   };
 };
 
@@ -303,33 +472,33 @@ for (const scenario of selectedScenarios) {
 }
 
 const cpu = cpus();
-console.log(
-  JSON.stringify(
-    {
-      schemaVersion: 1,
-      label,
-      methodology: {
-        compileSamples: sampleCount,
-        freshSdkPerCompile: true,
-        runtimeWarmups: 3,
-        runtimeSamples: runtimeSampleCount,
-        freshHostPerEntrypoint: true,
-        modes: ["none", "release"],
-        sdkRoot: sdkRoot ? path.resolve(sdkRoot) : repository,
-        codeShape:
-          "Static instruction-site counts from the emitted WAT for each complete module",
-      },
-      environment: {
-        platform: process.platform,
-        arch: process.arch,
-        node: process.version,
-        cpu: cpu[0]?.model ?? "unknown",
-        logicalCpus: cpu.length,
-        totalMemoryBytes: totalmem(),
-      },
-      results,
+emitBenchmarkReport({
+  report: {
+    schemaVersion: 2,
+    label,
+    methodology: {
+      compileSamples: sampleCount,
+      freshSdkPerCompile: true,
+      runtimeWarmups: 3,
+      runtimeSamples: runtimeSampleCount,
+      freshHostPerEntrypoint: true,
+      modes: ["none", "release"],
+      sdkRoot: sdkRoot ? path.resolve(sdkRoot) : repository,
+      compilerPerf: "VOYD_COMPILER_PERF=1; raw summary retained per compile",
+      processMemory:
+        "post-compile RSS samples plus sampled and operating-system peak RSS",
+      codeShape:
+        "Static instruction-site counts from emitted WAT for complete modules and each benchmark export",
     },
-    null,
-    2,
-  ),
-);
+    environment: {
+      platform: process.platform,
+      arch: process.arch,
+      node: process.version,
+      cpu: cpu[0]?.model ?? "unknown",
+      logicalCpus: cpu.length,
+      totalMemoryBytes: totalmem(),
+    },
+    results,
+  },
+  outputPath,
+});

@@ -633,9 +633,20 @@ impl DataReader<MsgPackError> for MsgPackReader
               None:
                 self.fail<String>("msgpack reader expected a variant name")
               Some<String> { value: name }:
+                let name_slice = name.as_slice()
+                let ~name_bytes = Array<i32>::with_capacity(name_slice.byte_len())
+                var name_index = 0
+                while name_index < name_slice.byte_len():
+                  match(name_slice.get_byte(name_index))
+                    Some<i32> { value: byte }:
+                      name_bytes.push(byte)
+                    None:
+                      void
+                  name_index = name_index + 1
+                let stable_name = new_string(name_bytes.to_fixed_array())
                 let index = self.remaining_values.len() - 1
                 self.remaining_values.replace(index, with: length - 1)
-                Ok<String> { value: name }
+                Ok<String> { value: stable_name }
 
   fn end_variant(~self) -> Result<Unit, MsgPackError>
     self.end_container(kind: 2)
@@ -667,7 +678,9 @@ pub fn encode_data_value_bytes(value: DataValue) -> Result<Bytes, MsgPackError>
 
 /// Decodes MessagePack bytes directly into one neutral data value.
 pub fn decode_data_value_bytes(bytes: Bytes) -> Result<DataValue, MsgPackError>
-  let ~reader = MsgPackReader::init(bytes)
+  let ~buffer = ByteBuffer::with_capacity(bytes.len())
+  buffer.extend(bytes)
+  let ~reader = MsgPackReader::init(buffer.as_bytes())
   match(read_data_value(reader))
     Err<MsgPackError> { error }:
       Err<MsgPackError> { error }
@@ -858,6 +871,17 @@ fn read_data_fields(~reader: MsgPackReader) -> Result<DataValue, MsgPackError>
               None:
                 reading = false
               Some<String> { value: name }:
+                let name_slice = name.as_slice()
+                let ~name_bytes = Array<i32>::with_capacity(name_slice.byte_len())
+                var name_index = 0
+                while name_index < name_slice.byte_len():
+                  match(name_slice.get_byte(name_index))
+                    Some<i32> { value: byte }:
+                      name_bytes.push(byte)
+                    None:
+                      void
+                  name_index = name_index + 1
+                let stable_name = new_string(name_bytes.to_fixed_array())
                 if name == "$variant":
                   match(reader.read_string())
                     Err<MsgPackError> { error }:
@@ -870,7 +894,7 @@ fn read_data_fields(~reader: MsgPackReader) -> Result<DataValue, MsgPackError>
                     Err<MsgPackError> { error }:
                       return Err<MsgPackError> { error }
                     Ok<DataValue> { value }:
-                      fields.push(DataField { name, value })
+                      fields.push(DataField { name: stable_name, value })
       match(reader.end_record())
         Err<MsgPackError> { error }:
           Err<MsgPackError> { error }
@@ -989,7 +1013,9 @@ pub fn decode_value_result(ptr: i32, len: i32): () -> Result<MsgPack, MsgPackErr
 
 /// Decodes exactly one parsed MessagePack value from immutable bytes.
 pub fn decode_value_bytes(bytes: Bytes): () -> Result<MsgPack, MsgPackError>
-  let ~decoder = bytes_decoder(bytes)
+  let ~buffer = ByteBuffer::with_capacity(bytes.len())
+  buffer.extend(bytes)
+  let ~decoder = bytes_decoder(buffer.as_bytes())
   let value = decoder.decode_any()
   if decoder.ok == false:
     return Err<MsgPackError> {
@@ -1811,12 +1837,23 @@ impl Decoder
     var index = 0
     while index < length:
       let key = self.decode_any()
-      let value = self.decode_any()
       key.match(decoded_key)
         String:
-          out.set(decoded_key, value)
+          let key_slice = decoded_key.as_slice()
+          let ~key_bytes = Array<i32>::with_capacity(key_slice.byte_len())
+          var key_index = 0
+          while key_index < key_slice.byte_len():
+            match(key_slice.get_byte(key_index))
+              Some<i32> { value: byte }:
+                key_bytes.push(byte)
+              None:
+                void
+            key_index = key_index + 1
+          let stable_key = new_string(key_bytes.to_fixed_array())
+          let value = self.decode_any()
+          out.set(stable_key, value)
         else:
-          void
+          self.decode_any()
       index = index + 1
     out
 

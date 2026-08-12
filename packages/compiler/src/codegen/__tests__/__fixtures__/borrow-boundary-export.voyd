@@ -1,0 +1,11 @@
+#!no_prelude
+
+obj Box {
+  value: i32
+}
+
+pub fn read(value: Borrow<Box>) -> i32
+  value.value
+
+pub fn main() -> i32
+  1

@@ -43,7 +43,6 @@ const suites = {
       "src/optimize/__tests__/pipeline-receiver-trait.test.ts": 834,
       "src/semantics/__tests__/pipeline.test.ts": 1210,
       "src/semantics/borrowing/__tests__/borrowing.test.ts": 6953,
-      "src/semantics/borrowing/__tests__/callable-result-provenance.test.ts": 1270,
     },
   },
   codegen: {

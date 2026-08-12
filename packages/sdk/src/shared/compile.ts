@@ -4,9 +4,7 @@ import { DiagnosticError } from "@voyd-lang/compiler/diagnostics/index.js";
 import {
   commitDependencySnapshot,
   createCompilerDependencySnapshotCache,
-  exportCompilerDependencyBorrowArtifact,
   prepareDependencySnapshotReuse,
-  type CompilerDependencyBorrowArtifact,
   type CompilerDependencySnapshotCache,
 } from "@voyd-lang/compiler/modules/dependency-snapshot-cache.js";
 import type {
@@ -58,30 +56,15 @@ const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
 export const createCompilerReuseCache = (
   options: CreateSdkOptions,
 ): CompilerReuseCache | undefined => {
-  const cacheOptions = options as {
-    compilerCache?: unknown;
-    compilerArtifact?: CompilerDependencyBorrowArtifact;
-  };
+  const cacheOptions = options as { compilerCache?: unknown };
   const policy = cacheOptions.compilerCache;
-  if (
-    policy !== undefined &&
-    policy !== "memory" &&
-    policy !== "artifact" &&
-    policy !== "none"
-  ) {
+  if (policy !== undefined && policy !== "memory" && policy !== "none") {
     throw new Error(`unknown compiler cache policy ${JSON.stringify(policy)}`);
-  }
-  if (policy === "none" && cacheOptions.compilerArtifact !== undefined) {
-    throw new Error('compilerArtifact requires compilerCache: "artifact"');
   }
   return policy === "none"
     ? undefined
-    : createCompilerDependencySnapshotCache(cacheOptions.compilerArtifact, {
-        artifactEnabled: policy === "artifact",
-      });
+    : createCompilerDependencySnapshotCache();
 };
-export const exportCompilerReuseArtifact =
-  exportCompilerDependencyBorrowArtifact;
 
 export const compileWithLoader = async ({
   entryPath,
@@ -208,8 +191,6 @@ export const compileWithLoader = async ({
       captureDependencySnapshot: Boolean(dependencySnapshotReuse.key),
       previousSemantics: dependencySnapshotReuse.previousSemantics,
       typingState: dependencySnapshotReuse.typingState,
-      reusableBorrowing: dependencySnapshotReuse.reusableBorrowing,
-      retainBorrowingIncrementalData: cache?.artifactEnabled === true,
     });
     perf.mark("analyzeModules", analyzeStartedAt);
     const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];

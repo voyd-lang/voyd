@@ -191,13 +191,18 @@ export const emitResolvedCall = ({
   const deferredIdentityGuards = identityGuards.filter(
     (guard) => guard.afterDefaults,
   );
-  deferredIdentityGuards.forEach((guard) => {
-    if (guard.defaultIdentityGuardProtocol !== "presence-conflict-bit-v1") {
-      throw new Error(
-        `call ${callId} is missing the deferred identity-guard protocol`,
-      );
-    }
-  });
+  const targetSupportsDeferredIdentityGuards =
+    ctx.program.modules
+      .get(meta.moduleId)
+      ?.defaultIdentityGuardTargets.has(meta.symbol) === true;
+  if (
+    deferredIdentityGuards.length > 0 &&
+    !targetSupportsDeferredIdentityGuards
+  ) {
+    throw new Error(
+      `call ${callId} targets a callable without the deferred identity-guard protocol`,
+    );
+  }
   const staticSpecializedMeta = fnCtx.staticEffectContext
     ? getOrCreateStaticEffectSpecialization({
         ctx,

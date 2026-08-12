@@ -1,69 +1,53 @@
-import type { SymbolTable } from "../binder/index.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
 import {
+  addCompilerPerfPhaseDuration,
   incrementCompilerPerfCounter,
   markCompilerPerfPhaseDuration,
   startCompilerPerfPhase,
 } from "../../perf.js";
-import {
-  type HirFunction,
-  type HirGraph,
-  type HirLambdaExpr,
-  type HirModuleLet,
+import type { SymbolTable } from "../binder/index.js";
+import type { DeclTable } from "../decls.js";
+import type {
+  HirFunction,
+  HirGraph,
+  HirLambdaExpr,
+  HirVisibility,
 } from "../hir/index.js";
-import type { HirExprId, HirItemId, SymbolId } from "../ids.js";
+import type { HirItemId, SymbolId } from "../ids.js";
 import type { TypingResult } from "../typing/index.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
-import type { DeclTable } from "../decls.js";
-import {
-  createLocalBorrowingEnvironment,
-  prepareFunctionBorrowing,
-  prepareLambdaBorrowing,
-  type PreparedBorrowingAnalysis,
-} from "./body-analysis.js";
-import type {
-  BorrowingResult,
-  CallableBorrowContract,
-  PlaceProjection,
-} from "./model.js";
-import { translateProjectionPath } from "./model.js";
-import type { BorrowingDependency } from "./dependency.js";
-import {
-  abstractTraitContractFromImplementation,
-  projectedTypes,
-  resolveBorrowCall,
-  resolveBorrowCallTargets,
-  type ResolveContext,
-} from "./call-resolution.js";
-import {
-  referenceOriginsInType,
-  typeCanCarryReference,
-} from "./reference-bearing.js";
-import { borrowedPathsInType, typeContainsBorrowed } from "./borrowed-types.js";
-import { objectLiteralFieldProvider } from "./object-literal-providers.js";
-import {
-  lowerNamedBorrowContracts,
-  validateNamedBorrowContracts,
-} from "./named-contracts.js";
-import type { CallableBorrowFacts } from "./callable-facts.js";
-import { type ImportedCallableCapability } from "./capability-classifier.js";
+import { canonicalSymbolRef } from "../typing/symbol-ref-utils.js";
 import {
   extractCallableBorrowIndex,
   type CallableBorrowIndex,
 } from "./callable-borrow-index.js";
 import {
-  checkTransientSameCallOverlaps,
-  contractFromBorrowIndex,
-} from "./transient-contract.js";
-import { inferBorrowingContracts } from "./contract-routing.js";
-import { planRuntimeBorrowing } from "./transient-guards.js";
+  resolveBorrowCallTargets,
+  type ResolveContext,
+} from "./call-resolution.js";
+import type { BorrowingDependency } from "./dependency.js";
+import type { BorrowingResult } from "./model.js";
+import { checkOrdinaryLocalMutationSafety } from "./ordinary-mutation-local.js";
+import { planOrdinaryMutationSafety } from "./ordinary-mutation-safety.js";
 import {
-  contractWithResultProvenance,
-  inferCallableResultProvenance,
-  resultCallableFromLambda,
-} from "./callable-result-flow.js";
-import { persistedBorrowQueryInput } from "./query-digest.js";
+  OrdinaryParameterAccess,
+  extractOrdinaryMutationInput,
+  ordinaryMutationSignatureUpperBound,
+  solveOrdinaryMutationSummaries,
+  validateOrdinaryMutationSummaryBound,
+  type OrdinaryMutationBoundViolation,
+  type OrdinaryMutationSummary,
+} from "./ordinary-mutation-summary.js";
+import { checkScopedBorrowLocal } from "./scoped-borrow-local.js";
 
+/**
+ * Analyze source-level mutation and scoped borrows with bounded state.
+ *
+ * Interprocedural safety retains only a whole-parameter finite summary. An
+ * explicit `Borrow<T>` origin is a callable-local parameter bit and is
+ * discarded when this function returns; no result provenance, projection
+ * family, region, or legacy callable contract crosses the module boundary.
+ */
 export const analyzeBorrowing = ({
   hir,
   typing,
@@ -73,710 +57,650 @@ export const analyzeBorrowing = ({
   dependencies,
   decls,
   checkBodies = true,
-  previousQueries,
-  retainIncrementalData = true,
 }: {
   hir: HirGraph;
   typing: TypingResult;
   symbolTable: SymbolTable;
   moduleId: string;
-  imports: readonly {
-    local: SymbolId;
-    target?: SymbolRef;
-  }[];
+  imports: readonly { local: SymbolId; target?: SymbolRef }[];
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
   checkBodies?: boolean;
-  previousQueries?: BorrowingResult["queries"];
-  /** Keep incremental reuse payloads only when the caller can retain them. */
-  retainIncrementalData?: boolean;
 }): BorrowingResult => {
-  const summariesStartedAt = startCompilerPerfPhase();
+  const analysisStartedAt = startCompilerPerfPhase();
   const summaryHir = hirWithTraitDefaultFunctions(hir);
-  const effectOperationContracts = effectOperationCallableContracts({
-    hir,
-    typing,
-    decls,
-  });
-  // Lower declared trait/region contracts before body inference. Declaration
-  // validation does not need inferred body facts; seeding the single contract
-  // solve here avoids analyzing every callable once to discover declarations
-  // and then again with those declarations installed.
-  const preliminaryNamedContracts = lowerNamedBorrowContracts({
-    hir,
-    typing,
-    symbolTable,
-    moduleId,
-    imports,
-  });
+  const functions = Array.from(summaryHir.items.values()).filter(
+    (item): item is HirFunction => item.kind === "function",
+  );
+  const lambdas = Array.from(summaryHir.expressions.values()).filter(
+    (expression): expression is HirLambdaExpr =>
+      expression.exprKind === "lambda",
+  );
   const importMap = new Map(
     imports.flatMap((entry) =>
       entry.target ? ([[entry.local, entry.target]] as const) : [],
     ),
   );
-  const declaredContracts = new Map([
-    ...effectOperationContracts,
-    ...preliminaryNamedContracts.declarationCallables,
-  ]);
-  const functions = Array.from(summaryHir.items.values()).filter(
-    (item): item is HirFunction => item.kind === "function",
-  );
-  const lambdas = Array.from(hir.expressions.values()).filter(
-    (expr): expr is HirLambdaExpr => expr.exprKind === "lambda",
-  );
-  const importedCallables = new Map<string, ImportedCallableCapability>();
-  dependencies.forEach((dependency, dependencyModuleId) => {
-    dependency.callables.forEach((callable, symbol) => {
-      importedCallables.set(`${dependencyModuleId}:${symbol}`, {
-        ...(callable.capability !== undefined
-          ? { capability: callable.capability }
-          : {}),
-        ...(callable.contract ? { contract: callable.contract } : {}),
-      });
-    });
-    dependency.effectOperations.forEach((_operation, symbol) => {
-      const key = `${dependencyModuleId}:${symbol}`;
-      if (importedCallables.has(key)) return;
-      importedCallables.set(key, {
-        // An effect operation without an exported capability is an ambiguous
-        // boundary. Its compact contract is not available here, so keep the
-        // unknown case on the conservative flow-sensitive path.
-        capability: "flow-sensitive",
-      });
-    });
-  });
-  const localCallables = new Map<SymbolId, ImportedCallableCapability>();
-  declaredContracts.forEach((contract, symbol) => {
-    localCallables.set(symbol, { contract });
-  });
-  const indexResolveContext: ResolveContext = {
+  const resolveContext: ResolveContext = {
     hir: summaryHir,
     typing,
     symbolTable,
     moduleId,
     imports: importMap,
     dependencies,
-    contracts: declaredContracts,
     bindingInitializers: new Map(),
-    callResolutionCache: new Map(),
     borrowIndexMode: "symbolic",
     decls,
   };
-  const moduleStorageSymbols = new Set(
-    Array.from(summaryHir.items.values())
-      .filter((item) => item.kind === "module-let")
-      .map((item) => item.symbol),
-  );
   const resolvedCallTargets = new Map(
-    Array.from(summaryHir.expressions).flatMap(([exprId, expression]) =>
+    Array.from(summaryHir.expressions).flatMap(([expressionId, expression]) =>
       expression.exprKind === "call" || expression.exprKind === "method-call"
         ? [
             [
-              exprId,
-              resolveBorrowCallTargets(expression, indexResolveContext),
+              expressionId,
+              resolveBorrowCallTargets(expression, resolveContext),
             ] as const,
           ]
         : [],
     ),
   );
-  const resultProvenanceStartedAt = startCompilerPerfPhase();
-  const publishedResults = inferCallableResultProvenance({
-    callables: [
-      ...functions,
-      ...lambdas.map((lambda) => resultCallableFromLambda(lambda, typing)),
-    ],
-    hir: summaryHir,
-    typing,
-    resolveContext: indexResolveContext,
-    baseContracts: declaredContracts,
-    moduleStorage: moduleStorageSymbols,
-    imports: new Set(imports.map((entry) => entry.local)),
-    resolvedCallTargets,
-  });
-  publishedResults.provenance.forEach((provenance) =>
-    incrementCompilerPerfCounter(
-      `borrowing.resultProvenance.${provenance.kind}`,
-    ),
-  );
-  markCompilerPerfPhaseDuration(
-    "analyzeBorrowing.resultProvenance",
-    resultProvenanceStartedAt,
-  );
-  const indexedResolveContext: ResolveContext = {
-    ...indexResolveContext,
-    contracts: publishedResults.contracts,
-    callResolutionCache: new Map(),
-  };
-  const functionIndexes = extractCallableBorrowIndex({
-    callables: functions,
-    hir: summaryHir,
-    typing,
-    symbolTable,
-    decls,
-    resolveContext: indexedResolveContext,
-    resolvedCallTargets,
-  });
-  const lambdaIndexes = extractCallableBorrowIndex({
-    callables: lambdas.map((lambda) => ({
-      symbol: (-1 - lambda.id) as SymbolId,
-      parameters: lambda.parameters,
-      body: lambda.body,
-      type: typing.resolvedExprTypes.get(lambda.id),
-      captures: lambda.captures,
-    })),
-    hir: summaryHir,
-    typing,
-    symbolTable,
-    decls,
-    resolveContext: indexedResolveContext,
-    resolvedCallTargets,
-  });
   const indexes = new Map<SymbolId, CallableBorrowIndex>([
-    ...functionIndexes,
-    ...lambdaIndexes,
+    ...extractCallableBorrowIndex({
+      callables: functions,
+      hir: summaryHir,
+      typing,
+      symbolTable,
+      decls,
+      resolveContext,
+      resolvedCallTargets,
+    }),
+    ...extractCallableBorrowIndex({
+      callables: lambdas.map((lambda) => ({
+        symbol: (-1 - lambda.id) as SymbolId,
+        parameters: lambda.parameters,
+        body: lambda.body,
+        type: typing.resolvedExprTypes.get(lambda.id),
+        captures: lambda.captures,
+      })),
+      hir: summaryHir,
+      typing,
+      symbolTable,
+      decls,
+      resolveContext,
+      resolvedCallTargets,
+    }),
   ]);
-  const fullInitialContracts = new Map<SymbolId, CallableBorrowContract>(
+
+  const ordinaryStartedAt = startCompilerPerfPhase();
+  const ordinaryInputs = new Map(
     Array.from(indexes, ([symbol, index]) => [
       symbol,
-      contractFromBorrowIndex(index),
+      extractOrdinaryMutationInput(index),
     ]),
   );
-  effectOperationContracts.forEach((contract, symbol) =>
-    fullInitialContracts.set(symbol, contract),
+  const importedSummaries = new Map<string, OrdinaryMutationSummary>();
+  dependencies.forEach((dependency, dependencyModuleId) =>
+    dependency.ordinaryMutationSummaries.forEach((summary, symbol) =>
+      importedSummaries.set(`${dependencyModuleId}::${symbol}`, summary),
+    ),
   );
-  declaredContracts.forEach((contract, symbol) =>
-    fullInitialContracts.set(symbol, contract),
-  );
-  const initialContracts = new Map(fullInitialContracts);
-  publishedResults.provenance.forEach((provenance, symbol) => {
-    const contract = initialContracts.get(symbol);
-    if (!contract) return;
-    initialContracts.set(
-      symbol,
-      contractWithResultProvenance({ contract, provenance }),
-    );
-  });
-  // Flow-sensitive callables do not publish these seed contracts as their
-  // final ABI. They provide only the cheap access/effect footprint needed to
-  // classify an immediate caller use without treating the callee's maximum
-  // mode as contagious.
-  const initialCompactContracts = new Map(initialContracts);
-  initialCompactContracts.forEach((contract, symbol) => {
-    const prior = localCallables.get(symbol);
-    localCallables.set(symbol, { ...prior, contract });
-  });
-  const compactStartedAt = startCompilerPerfPhase();
-  const routing = inferBorrowingContracts({
-    hir: summaryHir,
+  const declarationBounds = buildOrdinaryDeclarationBounds({
+    hir,
     typing,
     symbolTable,
     moduleId,
-    imports,
+    importMap,
     dependencies,
-    decls,
-    resolveContext: indexedResolveContext,
-    functions,
-    lambdas,
-    indexes,
-    declaredContracts,
-    importedCallables,
-    localCallables,
-    initialContracts,
-    initialCompactContracts,
-    fullInitialContracts,
-    resultProvenance: publishedResults.provenance,
-    previousQueries,
-    retainIncrementalData,
+    inputs: ordinaryInputs,
   });
-  const capabilities = routing.capabilities;
-  const compactFallbacks = routing.compactFallbacks;
-  const flowFunctions = routing.flowFunctions;
-  const flowLambdas = routing.flowLambdas;
-  const callableFacts = routing.functionFacts;
-  const lambdaFacts = routing.lambdaFacts;
-  const inferred = routing.inferred;
-  capabilities.forEach((mode) =>
-    incrementCompilerPerfCounter(`borrowing.capability.${mode}`),
-  );
-  routing.decisions.forEach((decision) =>
-    decision.reasons.forEach((reason) =>
-      incrementCompilerPerfCounter(`borrowing.capability.reason.${reason}`),
-    ),
-  );
-  incrementCompilerPerfCounter(
-    "borrowing.capability.compactFallbacks",
-    compactFallbacks,
-  );
-  incrementCompilerPerfCounter(
-    "borrowing.fullFacts.materialized",
-    routing.materializedFacts,
-  );
+  const solved = solveOrdinaryMutationSummaries({
+    inputs: ordinaryInputs,
+    moduleId,
+    importedSummaries,
+    declarationBounds,
+  });
+  const ordinaryMutationSummaries = new Map(solved.summaries);
+  addDeclarationOrdinaryMutationSummaries({
+    hir,
+    typing,
+    decls,
+    symbolTable,
+    summaries: ordinaryMutationSummaries,
+  });
+  const violations = collectOrdinaryMutationViolations({
+    indexes,
+    summaries: ordinaryMutationSummaries,
+    declarationViolations: solved.declarationBoundViolations,
+    exclusiveDeclarationSymbols: exclusiveDeclarationSymbolsIn(hir),
+  });
   markCompilerPerfPhaseDuration(
-    "analyzeBorrowing.composeCompactContracts",
-    compactStartedAt,
+    "analyzeBorrowing.ordinaryMutation",
+    ordinaryStartedAt,
   );
-  const allCallableFacts = new Map<SymbolId, CallableBorrowFacts>([
-    ...Array.from(callableFacts.entries()),
-    ...Array.from(
-      lambdaFacts.values(),
-      (facts) => [facts.symbol, facts] as const,
-    ),
-  ]);
-  incrementCompilerPerfCounter(
-    "borrowing.facts.blocks",
-    Array.from(allCallableFacts.values()).reduce(
-      (total, facts) => total + facts.blocks.length,
-      0,
+
+  const defaultIdentityGuardTargets = new Set(
+    Array.from(indexes).flatMap(([symbol, index]) =>
+      index.flags.hasDefaultArgument && !index.flags.hasDefaultBorrowFlow
+        ? [symbol]
+        : [],
     ),
   );
-  incrementCompilerPerfCounter(
-    "borrowing.facts.operations",
-    Array.from(allCallableFacts.values()).reduce(
-      (total, facts) => total + facts.operations.length,
-      0,
+  const qualifiedDefaultIdentityGuardTargets = new Set(
+    Array.from(
+      defaultIdentityGuardTargets,
+      (symbol) => `${moduleId}::${symbol}`,
     ),
   );
-  incrementCompilerPerfCounter(
-    "borrowing.facts.suspensions",
-    Array.from(allCallableFacts.values()).reduce(
-      (total, facts) => total + facts.suspensionPoints.length,
-      0,
+  dependencies.forEach((dependency, dependencyModuleId) =>
+    dependency.defaultIdentityGuardTargets.forEach((symbol) =>
+      qualifiedDefaultIdentityGuardTargets.add(
+        `${dependencyModuleId}::${symbol}`,
+      ),
     ),
   );
-  const publicDynamicContract = ({
-    contract,
-    named,
-    declarations,
-  }: {
-    contract: CallableBorrowContract;
-    named: import("./model.js").CheckedNamedBorrowContract;
-    declarations: ReadonlyMap<SymbolId, CallableBorrowContract>;
-  }): CallableBorrowContract => {
-    const implementation = abstractTraitContractFromImplementation({
-      contract,
-      named,
-      privateFieldNames: new Set(),
-    });
-    const declaration = declarations.get(named.declaration);
-    return declaration ?? implementation;
-  };
-  markCompilerPerfPhaseDuration(
-    "analyzeBorrowing.computeContracts",
-    summariesStartedAt,
-  );
-  const mutableStorageSymbols = new Set<SymbolId>();
+
+  const diagnostics = checkBodies
+    ? [
+        ...ordinaryMutationDiagnostics({
+          violations,
+          functions,
+          lambdas,
+          symbolTable,
+          hir,
+        }),
+      ]
+    : [];
   const runtimeIdentityGuards = new Map<
     number,
     import("./model.js").RuntimeIdentityGuard[]
   >();
-  const diagnostics: BorrowingResult["diagnostics"][number][] = [];
-  const validationStartedAt = startCompilerPerfPhase();
-  const namedContracts = validateNamedBorrowContracts({
-    hir,
-    typing,
-    symbolTable,
-    callables: inferred.contracts,
-    moduleId,
-    imports,
-    validateBodies: checkBodies,
-  });
-  diagnostics.push(...namedContracts.diagnostics);
-  const callables = new Map(inferred.contracts);
-  namedContracts.declarationCallables.forEach((contract, symbol) => {
-    callables.set(symbol, contract);
-  });
-  namedContracts.contracts.forEach((named, symbol) => {
-    const contract = callables.get(symbol);
-    if (named.implementation === undefined || !contract) {
-      return;
-    }
-    callables.set(symbol, {
-      ...contract,
-      dynamicDispatch: publicDynamicContract({
-        contract,
-        named,
-        declarations: namedContracts.declarationCallables,
-      }),
-    });
-  });
-  effectOperationContracts.forEach((contract, symbol) => {
-    callables.set(symbol, contract);
-  });
-  const resolvedContracts = new Map(callables);
-  inferred.lambdaContracts.forEach((contract, exprId) => {
-    const facts = lambdaFacts.get(exprId);
-    if (facts) resolvedContracts.set(facts.symbol, contract);
-  });
-  const lambdaContracts = new Map(
-    lambdas.flatMap((lambda) => {
-      const contract = resolvedContracts.get((-1 - lambda.id) as SymbolId);
-      return contract ? [[lambda.id, contract] as const] : [];
-    }),
+  const mutableStorageSymbols = new Set<SymbolId>();
+  const functionBySymbol = new Map(
+    functions.map((functionItem) => [functionItem.symbol, functionItem]),
   );
-  indexes.forEach((index, symbol) => {
-    if (capabilities.get(symbol) !== "transient") return;
-    const runtimePlan = planRuntimeBorrowing({
+  const lambdaBySymbol = new Map(
+    lambdas.map((lambda) => [(-1 - lambda.id) as SymbolId, lambda]),
+  );
+  const explicitBorrowFactCount = Array.from(indexes.values()).reduce(
+    (count, index) =>
+      count +
+      index.parameters.filter((parameter) => {
+        if (typeof parameter.type !== "number") return false;
+        return (
+          typing.arena.get(typing.arena.unfoldRecursive(parameter.type))
+            .kind === "borrowed"
+        );
+      }).length,
+    0,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.explicitBorrowFacts",
+    explicitBorrowFactCount,
+  );
+  incrementCompilerPerfCounter("borrowing.fullFacts.materialized", 0);
+  indexes.forEach((index) => {
+    if (!checkBodies) return;
+    const plan = planOrdinaryMutationSafety({
       index,
-      typing,
-      lookup: {
-        localModuleId: moduleId,
-        localCapabilities: capabilities,
-        localContracts: resolvedContracts,
-        importedCallables,
-      },
-    });
-    runtimePlan.mutableStorageSymbols.forEach((storageSymbol) =>
-      mutableStorageSymbols.add(storageSymbol),
-    );
-    runtimePlan.guards.forEach((guards, call) => {
-      const existing = runtimeIdentityGuards.get(call) ?? [];
-      guards.forEach((guard) => {
-        if (
-          !existing.some(
-            (candidate) =>
-              candidate.left.parameter === guard.left.parameter &&
-              candidate.right.parameter === guard.right.parameter,
-          )
-        ) {
-          existing.push(guard);
-        }
-      });
-      runtimeIdentityGuards.set(call, existing);
-    });
-    diagnostics.push(
-      ...checkTransientSameCallOverlaps({
-        index,
-        lookup: {
-          localModuleId: moduleId,
-          localCapabilities: capabilities,
-          localContracts: resolvedContracts,
-          importedCallables,
-        },
-        guardedPairs: runtimePlan.guardedPairs,
-      }),
-    );
-  });
-  const resolveContext: ResolveContext = {
-    hir,
-    typing,
-    symbolTable,
-    moduleId,
-    imports: importMap,
-    dependencies,
-    contracts: resolvedContracts,
-    bindingInitializers: new Map(),
-    callResolutionCache: new Map(),
-    decls,
-  };
-  validateModuleBorrowStorage({
-    hir,
-    typing,
-    symbolTable,
-    resolveContext,
-    diagnostics,
-  });
-  markCompilerPerfPhaseDuration(
-    "analyzeBorrowing.validateContracts",
-    validationStartedAt,
-  );
-  if (checkBodies) {
-    const selectionStartedAt = startCompilerPerfPhase();
-    const checkedFunctions = flowFunctions;
-    const checkedLambdas = flowLambdas;
-    incrementCompilerPerfCounter(
-      "borrowing.body.totalCallables",
-      functions.length + lambdas.length,
-    );
-    incrementCompilerPerfCounter(
-      "borrowing.body.checkedCallables",
-      checkedFunctions.length + checkedLambdas.length,
-    );
-    markCompilerPerfPhaseDuration(
-      "analyzeBorrowing.selectBodies",
-      selectionStartedAt,
-    );
-    const bodiesStartedAt = startCompilerPerfPhase();
-    const localEnvironment = createLocalBorrowingEnvironment({
-      hir: summaryHir,
+      moduleId,
+      localSummaries: ordinaryMutationSummaries,
+      localIndexes: indexes,
+      importedSummaries,
+      defaultIdentityGuardTargets: qualifiedDefaultIdentityGuardTargets,
       typing,
       symbolTable,
-      moduleId,
-      imports: importMap,
-      dependencies,
     });
-    const checkPrepared = ({
-      runtimePlan,
-      check,
-    }: PreparedBorrowingAnalysis): void => {
-      runtimePlan.mutableStorageSymbols.forEach((symbol) =>
-        mutableStorageSymbols.add(symbol),
-      );
-      runtimePlan.runtimeIdentityGuards.forEach((guards, call) => {
-        runtimeIdentityGuards.set(call, [...guards]);
-      });
-      diagnostics.push(...check());
-    };
-    checkedFunctions.forEach((functionItem) => {
-      const facts = callableFacts.get(functionItem.symbol);
-      if (!facts) return;
-      checkPrepared(
-        prepareFunctionBorrowing({
-          functionItem,
-          facts,
-          lambdaFacts,
-          lambdaContracts,
-          hir: summaryHir,
-          typing,
-          symbolTable,
-          moduleId,
-          imports: importMap,
-          dependencies,
-          decls,
-          contracts: resolvedContracts,
-          moduleStorageSymbols,
-          localEnvironment,
-        }),
+    plan.mutableStorageSymbols.forEach((symbol) =>
+      mutableStorageSymbols.add(symbol),
+    );
+    plan.guards.forEach((guards, call) =>
+      runtimeIdentityGuards.set(call, [...guards]),
+    );
+    diagnostics.push(...plan.diagnostics);
+    const callable =
+      functionBySymbol.get(index.symbol) ?? lambdaBySymbol.get(index.symbol);
+    if (!callable) return;
+    diagnostics.push(
+      ...checkOrdinaryLocalMutationSafety({
+        body: callable.body,
+        callableSpan: callable.span,
+        index,
+        hir: summaryHir,
+        typing,
+        symbolTable,
+        resolveContext,
+        moduleId,
+        localSummaries: ordinaryMutationSummaries,
+        importedSummaries,
+        plannedGuards: plan.guards,
+      }),
+    );
+    const hasExplicitBorrow = index.parameters.some((parameter) => {
+      if (typeof parameter.type !== "number") return false;
+      return (
+        typing.arena.get(typing.arena.unfoldRecursive(parameter.type)).kind ===
+        "borrowed"
       );
     });
-    checkedLambdas.forEach((lambda) => {
-      const facts = lambdaFacts.get(lambda.id);
-      if (!facts) return;
-      checkPrepared(
-        prepareLambdaBorrowing({
-          lambda,
-          facts,
-          lambdaFacts,
-          lambdaContracts,
-          hir,
-          typing,
-          symbolTable,
-          moduleId,
-          imports: importMap,
-          dependencies,
-          decls,
-          contracts: resolvedContracts,
-          moduleStorageSymbols,
-          localEnvironment,
-        }),
+    const scopedStartedAt = hasExplicitBorrow
+      ? startCompilerPerfPhase()
+      : undefined;
+    diagnostics.push(
+      ...checkScopedBorrowLocal({
+        body: callable.body,
+        callableSpan: callable.span,
+        index,
+        hir: summaryHir,
+        typing,
+        symbolTable,
+        moduleId,
+        localSummaries: ordinaryMutationSummaries,
+        importedSummaries,
+      }),
+    );
+    if (scopedStartedAt !== undefined) {
+      markCompilerPerfPhaseDuration(
+        "analyzeBorrowing.explicitBorrow",
+        scopedStartedAt,
       );
-    });
-    markCompilerPerfPhaseDuration(
-      "analyzeBorrowing.checkLoans",
-      bodiesStartedAt,
+    }
+  });
+
+  if (explicitBorrowFactCount === 0 || !checkBodies) {
+    addCompilerPerfPhaseDuration("analyzeBorrowing.explicitBorrow", 0);
+  }
+  if (explicitBorrowFactCount === 0) {
+    incrementCompilerPerfCounter(
+      "borrowing.explicitBorrow.skippedOrdinaryCallables",
+      indexes.size,
     );
   }
-  const outputCallables = new Map(
-    Array.from(
-      callables,
-      ([symbol, contract]) =>
-        [
-          symbol,
-          {
-            ...contract,
-            parameters: contract.parameters.map((parameter) => ({
-              ...parameter,
-              readPaths: parameter.readPaths ?? [],
-              writePaths: parameter.writePaths ?? [],
-            })),
-          },
-        ] as const,
-    ),
+  markCompilerPerfPhaseDuration(
+    "analyzeBorrowing.finiteLocal",
+    analysisStartedAt,
   );
-  const reusableData = retainIncrementalData
-    ? buildBorrowingReusableData({
-        inferredQueries: inferred.queries,
-        namedContracts: namedContracts.contracts,
-        outputCallables,
-        dependencies,
-        moduleId,
-      })
-    : undefined;
   return {
-    callables: outputCallables,
-    capabilities,
-    namedContracts: namedContracts.contracts,
+    ordinaryMutationSummaries,
+    defaultIdentityGuardTargets,
     runtimeIdentityGuards,
     mutableStorageSymbols,
-    diagnostics,
-    ...(reusableData
-      ? {
-          analysisMetrics: {
-            fullFactsMaterialized: allCallableFacts.size,
-            fullFactSymbols: Array.from(allCallableFacts.keys()),
-          },
-          summaryDemand: inferred.demand!,
-          queries: reusableData,
-        }
-      : {}),
+    diagnostics: deduplicateDiagnostics(diagnostics),
   };
 };
 
-const buildBorrowingReusableData = ({
-  inferredQueries,
-  namedContracts,
-  outputCallables,
-  dependencies,
+const buildOrdinaryDeclarationBounds = ({
+  hir,
+  typing,
+  symbolTable,
   moduleId,
+  importMap,
+  dependencies,
+  inputs,
 }: {
-  inferredQueries: NonNullable<BorrowingResult["queries"]>;
-  namedContracts: ReadonlyMap<SymbolId, { declaration: SymbolId }>;
-  outputCallables: ReadonlyMap<SymbolId, CallableBorrowContract>;
-  dependencies: ReadonlyMap<string, BorrowingDependency>;
+  hir: HirGraph;
+  typing: TypingResult;
+  symbolTable: SymbolTable;
   moduleId: string;
-}): BorrowingResult["queries"] => {
-  const queryDependencies = new Map(
-    Array.from(inferredQueries, ([symbol, query]) => [
-      symbol,
-      new Map(
-        query.dependencies.map((dependency) => [
-          `${dependency.moduleId}:${dependency.symbol}`,
-          dependency,
-        ]),
-      ),
-    ]),
+  importMap: ReadonlyMap<SymbolId, SymbolRef>;
+  dependencies: ReadonlyMap<string, BorrowingDependency>;
+  inputs: ReadonlyMap<SymbolId, unknown>;
+}): ReadonlyMap<SymbolId, OrdinaryMutationSummary> => {
+  const bounds = new Map<SymbolId, OrdinaryMutationSummary>();
+  const localTraitBounds = new Map(
+    Array.from(hir.items.values()).flatMap((item) =>
+      item.kind === "trait"
+        ? item.methods.map(
+            (method) =>
+              [
+                method.symbol,
+                ordinaryMutationDeclarationBoundForHirParameters(
+                  method.parameters,
+                  callableMaySuspend({
+                    symbol: method.symbol,
+                    fallbackEffectType: method.effectType,
+                    typing,
+                  }),
+                  traitMethodInvokesUnknownCallback(method.symbol, symbolTable),
+                ),
+              ] as const,
+          )
+        : [],
+    ),
   );
-  namedContracts.forEach((named, symbol) => {
-    const dependenciesForCallable =
-      queryDependencies.get(symbol) ?? new Map<string, SymbolRef>();
-    const declaration = { moduleId, symbol: named.declaration };
-    dependenciesForCallable.set(
-      `${declaration.moduleId}:${declaration.symbol}`,
-      declaration,
-    );
-    queryDependencies.set(symbol, dependenciesForCallable);
-  });
-  const queries: Map<
-    SymbolId,
-    NonNullable<BorrowingResult["queries"]> extends ReadonlyMap<
-      SymbolId,
-      infer Query
-    >
-      ? Query
-      : never
-  > = new Map(
-    Array.from(inferredQueries, ([symbol, query]) => [
-      symbol,
-      { ...query, input: persistedBorrowQueryInput(query.input) },
-    ]),
-  );
-  outputCallables.forEach((output, symbol) => {
-    const prior = inferredQueries.get(symbol);
-    const callableDependencies = Array.from(
-      queryDependencies.get(symbol)?.values() ?? [],
-    );
-    queries.set(symbol, {
-      input: persistedBorrowQueryInput(
-        prior?.input ??
-          `${moduleId}:${symbol}:declared:${JSON.stringify(output)}`,
-      ),
-      dependencies: callableDependencies,
-      dependencyOutputs: callableDependencies.map(
-        (dependency) =>
-          [
-            `${dependency.moduleId}:${dependency.symbol}`,
-            dependency.moduleId === moduleId
-              ? (outputCallables.get(dependency.symbol) ?? null)
-              : (dependencies
-                  .get(dependency.moduleId)
-                  ?.callables.get(dependency.symbol)?.contract ??
-                dependencies
-                  .get(dependency.moduleId)
-                  ?.traitMethodContracts.get(dependency.symbol) ??
-                null),
-          ] as const,
-      ),
-      output,
+  typing.traitMethodImpls.forEach((mapping, implementation) => {
+    if (!inputs.has(implementation)) return;
+    const canonicalDeclaration = canonicalSymbolRef({
+      symbol: mapping.traitMethodSymbol,
+      symbolTable,
+      moduleId,
     });
+    const imported =
+      canonicalDeclaration.moduleId === moduleId
+        ? importMap.get(mapping.traitMethodSymbol)
+        : canonicalDeclaration;
+    const declaration =
+      localTraitBounds.get(mapping.traitMethodSymbol) ??
+      (canonicalDeclaration.moduleId === moduleId
+        ? localTraitBounds.get(canonicalDeclaration.symbol)
+        : dependencies
+            .get(canonicalDeclaration.moduleId)
+            ?.ordinaryMutationSummaries.get(canonicalDeclaration.symbol)) ??
+      (imported
+        ? dependencies
+            .get(imported.moduleId)
+            ?.ordinaryMutationSummaries.get(imported.symbol)
+        : undefined);
+    if (declaration) bounds.set(implementation, declaration);
   });
-  return queries;
+  localTraitBounds.forEach((bound, declaration) => {
+    if (inputs.has(declaration)) bounds.set(declaration, bound);
+  });
+  return bounds;
 };
 
-const effectOperationCallableContracts = ({
+const addDeclarationOrdinaryMutationSummaries = ({
   hir,
   typing,
   decls,
+  symbolTable,
+  summaries,
 }: {
   hir: HirGraph;
   typing: TypingResult;
   decls: DeclTable;
-}): ReadonlyMap<SymbolId, CallableBorrowContract> =>
-  new Map(
+  symbolTable: SymbolTable;
+  summaries: Map<SymbolId, OrdinaryMutationSummary>;
+}): void => {
+  Array.from(hir.items.values()).forEach((item) => {
+    if (item.kind === "trait") {
+      item.methods.forEach((method) =>
+        summaries.set(
+          method.symbol,
+          ordinaryMutationDeclarationBoundForHirParameters(
+            method.parameters,
+            callableMaySuspend({
+              symbol: method.symbol,
+              fallbackEffectType: method.effectType,
+              typing,
+            }),
+            traitMethodInvokesUnknownCallback(method.symbol, symbolTable),
+          ),
+        ),
+      );
+      return;
+    }
+    if (item.kind !== "effect") return;
+    item.operations.forEach((operation) => {
+      if (summaries.has(operation.symbol)) return;
+      const signature = ordinaryMutationSignatureForSymbol(
+        operation.symbol,
+        typing,
+      );
+      if (!signature) return;
+      const maySuspend =
+        decls.getEffectOperation(operation.symbol)?.operation.resumable ===
+        "resume";
+      summaries.set(operation.symbol, {
+        ...ordinaryMutationSignatureUpperBound({ signature, maySuspend }),
+        ambientObjectAccess: true,
+      });
+    });
+  });
+};
+
+const ordinaryMutationUpperBoundForHirParameters = (
+  parameters: readonly {
+    bindingKind?: "value" | "mutable-ref" | "immutable-ref";
+  }[],
+): OrdinaryMutationSummary =>
+  ordinaryMutationSignatureUpperBound({
+    signature: {
+      parameters: parameters.map(({ bindingKind }) => ({ bindingKind })),
+    } as unknown as Parameters<
+      typeof ordinaryMutationSignatureUpperBound
+    >[0]["signature"],
+  });
+
+const ordinaryMutationDeclarationBoundForHirParameters = (
+  parameters: readonly {
+    bindingKind?: "value" | "mutable-ref" | "immutable-ref";
+  }[],
+  maySuspend = false,
+  invokesUnknownCallback = false,
+): OrdinaryMutationSummary => {
+  const parameterBound = ordinaryMutationUpperBoundForHirParameters(parameters);
+  return {
+    ...parameterBound,
+    maySuspend,
+    invokesUnknownCallback,
+  };
+};
+
+const traitMethodInvokesUnknownCallback = (
+  symbol: SymbolId,
+  symbolTable: SymbolTable,
+): boolean => {
+  if (!symbolTable.hasSymbol(symbol)) return false;
+  const metadata = symbolTable.getSymbol(symbol).metadata as
+    | { ordinaryMutationInvokesUnknownCallback?: unknown }
+    | undefined;
+  return metadata?.ordinaryMutationInvokesUnknownCallback === true;
+};
+
+const ordinaryMutationSignatureForSymbol = (
+  symbol: SymbolId,
+  typing: TypingResult,
+):
+  | Pick<
+      import("../typing/index.js").FunctionSignature,
+      "parameters" | "effectRow"
+    >
+  | undefined => {
+  const signature = typing.functions.getSignature(symbol);
+  if (signature) return signature;
+  const type = typing.valueTypes.get(symbol);
+  if (typeof type !== "number") return undefined;
+  const descriptor = typing.arena.get(typing.arena.unfoldRecursive(type));
+  return descriptor.kind === "function"
+    ? {
+        parameters: descriptor.parameters,
+        effectRow: descriptor.effectRow,
+      }
+    : undefined;
+};
+
+const callableMaySuspend = ({
+  symbol,
+  fallbackEffectType,
+  typing,
+}: {
+  symbol: SymbolId;
+  fallbackEffectType?: import("../hir/index.js").HirTypeExpr;
+  typing: TypingResult;
+}): boolean => {
+  // A trait method with no written effect row is effect-open: implementations
+  // may refine it with effects. `: ()` is the source spelling for a closed
+  // pure declaration and must remain non-suspending.
+  if (!fallbackEffectType) return true;
+  const signature = ordinaryMutationSignatureForSymbol(symbol, typing);
+  if (signature) return !typing.effects.isEmpty(signature.effectRow);
+  return !(
+    fallbackEffectType.typeKind === "tuple" &&
+    fallbackEffectType.elements.length === 0
+  );
+};
+
+const exclusiveDeclarationSymbolsIn = (hir: HirGraph): ReadonlySet<SymbolId> =>
+  new Set(
     Array.from(hir.items.values()).flatMap((item) =>
-      item.kind === "effect"
-        ? item.operations.flatMap((operation) => {
-            const signature = typing.functions.getSignature(operation.symbol);
-            if (!signature) {
-              return [];
-            }
-            const resultContainsBorrow = typeContainsBorrowed(
-              signature.returnType,
-              typing,
-            );
-            const resultCarriesReference = typeCanCarryReference(
-              signature.returnType,
-              typing,
-            );
-            const resultReferencePaths = resultCarriesReference
-              ? referenceOriginsInType(signature.returnType, typing).map(
-                  (origin) => origin.path,
-                )
-              : [];
-            const maySuspend =
-              decls.getEffectOperation(operation.symbol)?.operation
-                .resumable === "resume";
-            const operationContract = {
-              parameters: signature.parameters.map((parameter) => {
-                const reference = typeCanCarryReference(parameter.type, typing);
-                const access =
-                  parameter.bindingKind === "mutable-ref"
-                    ? ("mutable" as const)
-                    : reference
-                      ? ("shared" as const)
-                      : ("owned" as const);
-                return {
-                  access,
-                  ...(access === "shared" ? { readPaths: [[]] } : {}),
-                  ...(access === "mutable" ? { writePaths: [[]] } : {}),
-                  retained: reference,
-                  returned: reference && resultCarriesReference,
-                  ...(reference && resultCarriesReference
-                    ? {
-                        returnedOrigins: referenceOriginsInType(
-                          parameter.type,
-                          typing,
-                        ).flatMap((source) =>
-                          resultReferencePaths.map((result) => ({
-                            source: source.path,
-                            result,
-                            endpointAccess: source.endpointAccess,
-                          })),
-                        ),
-                      }
-                    : {}),
-                  ...(reference ? { externalRetainedPaths: [[]] } : {}),
-                };
-              }),
-              maySuspend,
-              borrowedResult: resultContainsBorrow
-                ? ("external" as const)
-                : ("none" as const),
-              ...(resultReferencePaths.length > 0
-                ? {
-                    externalReturnedOrigins: referenceOriginsInType(
-                      signature.returnType,
-                      typing,
-                    ).map((result) => ({
-                      result: result.path,
-                      endpointAccess: result.endpointAccess,
-                    })),
-                  }
-                : {}),
-            };
-            return [[operation.symbol, operationContract] as const];
-          })
-        : [],
+      item.kind === "trait"
+        ? item.methods.flatMap((method) =>
+            method.parameters.some(
+              (parameter) => parameter.bindingKind === "mutable-ref",
+            )
+              ? [method.symbol]
+              : [],
+          )
+        : item.kind === "effect"
+          ? item.operations.flatMap((operation) =>
+              operation.parameters.some(
+                (parameter) => parameter.bindingKind === "mutable-ref",
+              )
+                ? [operation.symbol]
+                : [],
+            )
+          : [],
     ),
   );
+
+const collectOrdinaryMutationViolations = ({
+  indexes,
+  summaries,
+  declarationViolations,
+  exclusiveDeclarationSymbols,
+}: {
+  indexes: ReadonlyMap<SymbolId, CallableBorrowIndex>;
+  summaries: ReadonlyMap<SymbolId, OrdinaryMutationSummary>;
+  declarationViolations: readonly OrdinaryMutationBoundViolation[];
+  exclusiveDeclarationSymbols: ReadonlySet<SymbolId>;
+}): readonly OrdinaryMutationBoundViolation[] => {
+  const violations = [...declarationViolations];
+  const addExclusiveObligations = (
+    symbol: SymbolId,
+    summary: OrdinaryMutationSummary,
+    includeAmbient: boolean,
+  ): void => {
+    if (includeAmbient && summary.ambientObjectAccess) {
+      violations.push({ kind: "ambient-object-access", symbol });
+    }
+    if (summary.invokesUnknownCallback) {
+      violations.push({ kind: "unknown-callback", symbol });
+    }
+    if (summary.maySuspend) {
+      violations.push({ kind: "suspension", symbol });
+    }
+  };
+  indexes.forEach((index, symbol) => {
+    const summary = summaries.get(symbol);
+    if (!summary) return;
+    const parameterBound = {
+      ...ordinaryMutationUpperBoundForHirParameters(index.parameters),
+      ambientObjectAccess: true,
+      invokesUnknownCallback: true,
+      maySuspend: true,
+    } satisfies OrdinaryMutationSummary;
+    violations.push(
+      ...validateOrdinaryMutationSummaryBound({
+        implementation: summary,
+        declaration: parameterBound,
+        symbol,
+      }),
+    );
+    if (index.flags.hasMutableParameter) {
+      addExclusiveObligations(symbol, summary, false);
+    }
+  });
+  exclusiveDeclarationSymbols.forEach((symbol) => {
+    if (indexes.has(symbol)) return;
+    const summary = summaries.get(symbol);
+    if (summary) addExclusiveObligations(symbol, summary, true);
+  });
+  return Array.from(
+    new Map(
+      violations.map((violation) => [JSON.stringify(violation), violation]),
+    ).values(),
+  );
+};
+
+const ordinaryMutationDiagnostics = ({
+  violations,
+  functions,
+  lambdas,
+  symbolTable,
+  hir,
+}: {
+  violations: readonly OrdinaryMutationBoundViolation[];
+  functions: readonly HirFunction[];
+  lambdas: readonly HirLambdaExpr[];
+  symbolTable: SymbolTable;
+  hir: HirGraph;
+}): BorrowingResult["diagnostics"] => {
+  const spans = new Map(
+    functions.map((functionItem) => [functionItem.symbol, functionItem.span]),
+  );
+  lambdas.forEach((lambda) =>
+    spans.set((-1 - lambda.id) as SymbolId, lambda.span),
+  );
+  const callableName = (symbol: SymbolId | undefined): string =>
+    symbol !== undefined && symbolTable.hasSymbol(symbol)
+      ? symbolTable.getSymbol(symbol).name
+      : "callback";
+  const accessName = (
+    access: OrdinaryParameterAccess,
+  ): "unused" | "read" | "write" => {
+    switch (access) {
+      case OrdinaryParameterAccess.Unused:
+        return "unused";
+      case OrdinaryParameterAccess.Read:
+        return "read";
+      case OrdinaryParameterAccess.Write:
+        return "write";
+    }
+  };
+  return violations.map((violation) => {
+    const callable = callableName(violation.symbol);
+    const span =
+      (violation.symbol === undefined
+        ? undefined
+        : spans.get(violation.symbol)) ?? hir.module.span;
+    switch (violation.kind) {
+      case "parameter-count":
+        return diagnosticFromCode({
+          code: "TY0055",
+          params: {
+            kind: "ordinary-parameter-count",
+            callable,
+            actual: violation.actual,
+            allowed: violation.allowed,
+          },
+          span,
+        });
+      case "parameter-access":
+        return diagnosticFromCode({
+          code: "TY0055",
+          params: {
+            kind: "ordinary-parameter-bound",
+            callable,
+            parameter: violation.parameter,
+            actual:
+              violation.actual === OrdinaryParameterAccess.Write
+                ? "write"
+                : "read",
+            allowed: accessName(violation.allowed),
+          },
+          span,
+        });
+      case "ambient-object-access":
+        return diagnosticFromCode({
+          code: "TY0055",
+          params: { kind: "ordinary-ambient-access", callable },
+          span,
+        });
+      case "unknown-callback":
+        return diagnosticFromCode({
+          code: "TY0055",
+          params: { kind: "ordinary-unknown-callback", callable },
+          span,
+        });
+      case "suspension":
+        return diagnosticFromCode({
+          code: "TY0055",
+          params: { kind: "ordinary-suspension", callable },
+          span,
+        });
+    }
+  });
+};
 
 const hirWithTraitDefaultFunctions = (hir: HirGraph): HirGraph => {
   const existingSymbols = new Set(
@@ -794,10 +718,7 @@ const hirWithTraitDefaultFunctions = (hir: HirGraph): HirGraph => {
         )
       : [],
   );
-  if (defaultMethods.length === 0) {
-    return hir;
-  }
-
+  if (defaultMethods.length === 0) return hir;
   const items = new Map(hir.items);
   defaultMethods.forEach(({ trait, method }, index) => {
     const id = (-1 - index) as HirItemId;
@@ -806,7 +727,7 @@ const hirWithTraitDefaultFunctions = (hir: HirGraph): HirGraph => {
       id,
       ast: method.returnType?.ast ?? trait.ast,
       span: method.span,
-      visibility: trait.visibility,
+      visibility: trait.visibility as HirVisibility,
       symbol: method.symbol,
       typeParameters: method.typeParameters,
       parameters: method.parameters.map((parameter) => ({
@@ -825,352 +746,19 @@ const hirWithTraitDefaultFunctions = (hir: HirGraph): HirGraph => {
       returnType: method.returnType,
       effectType: method.effectType,
       body: method.defaultBody!,
-      borrowContract: method.borrowContract,
     });
   });
   return { ...hir, items };
 };
 
-type BorrowedResultPresence = "none" | "parameter" | "external";
-
-const combineBorrowedResultPresence = (
-  values: readonly BorrowedResultPresence[],
-): BorrowedResultPresence =>
-  values.includes("external")
-    ? "external"
-    : values.includes("parameter")
-      ? "parameter"
-      : "none";
-
-/**
- * Module storage only needs the caller-visible presence encoded by compact
- * contracts. Function bodies were already analyzed by the shared fact/flow
- * solve; do not recursively reinterpret their HIR here.
- */
-const moduleInitializerBorrowedPresence = ({
-  exprId,
-  path = [],
-  hir,
-  typing,
-  resolveContext,
-  seen = new Set(),
-  borrowedContext = false,
-}: {
-  exprId: HirExprId;
-  path?: readonly PlaceProjection[];
-  hir: HirGraph;
-  typing: TypingResult;
-  resolveContext: ResolveContext;
-  seen?: ReadonlySet<HirExprId>;
-  borrowedContext?: boolean;
-}): BorrowedResultPresence => {
-  if (seen.has(exprId)) {
-    return "external";
-  }
-  const expression = hir.expressions.get(exprId);
-  if (!expression) {
-    return "external";
-  }
-  const type = typing.resolvedExprTypes.get(exprId);
-  if (
-    !borrowedContext &&
-    typeof type === "number" &&
-    projectedTypes(type, path, typing).every(
-      (candidate) =>
-        !typeContainsBorrowed(candidate, typing) &&
-        !typing.arena.containsTypeParams(candidate),
-    )
-  ) {
-    return "none";
-  }
-  const nextSeen = new Set(seen).add(exprId);
-  const presence = (
-    child: HirExprId,
-    childPath: readonly PlaceProjection[] = [],
-    childBorrowedContext = borrowedContext,
-  ): BorrowedResultPresence =>
-    moduleInitializerBorrowedPresence({
-      exprId: child,
-      path: childPath,
-      hir,
-      typing,
-      resolveContext,
-      seen: nextSeen,
-      borrowedContext: childBorrowedContext,
-    });
-  if (path.length > 0) {
-    const [projection, ...remaining] = path;
-    if (expression.exprKind === "tuple" && projection?.kind === "tuple") {
-      const element = expression.elements[projection.index];
-      return typeof element === "number"
-        ? presence(element, remaining)
-        : "external";
-    }
-    if (
-      expression.exprKind === "object-literal" &&
-      projection?.kind === "field"
-    ) {
-      const provider = objectLiteralFieldProvider({
-        expression,
-        field: projection.name,
-        spreadProvidesField: (value) => {
-          const spreadType = typing.resolvedExprTypes.get(value);
-          return (
-            typeof spreadType === "number" &&
-            projectedTypes(spreadType, [projection], typing).length > 0
-          );
-        },
-      });
-      return provider
-        ? presence(
-            provider.value,
-            provider.kind === "spread" ? path : remaining,
-          )
-        : "none";
-    }
-    if (expression.exprKind === "field-access") {
-      const selected = Number.isInteger(Number(expression.field))
-        ? ({ kind: "tuple", index: Number(expression.field) } as const)
-        : ({ kind: "field", name: expression.field } as const);
-      return presence(expression.target, [selected, ...path]);
-    }
-  }
-  switch (expression.exprKind) {
-    case "literal":
-    case "lambda":
-      return borrowedContext ? "external" : "none";
-    case "overload-set":
-    case "continue":
-      return "none";
-    case "identifier":
-      return "external";
-    case "tuple": {
-      const borrowedPaths =
-        typeof type === "number" ? borrowedPathsInType(type, typing) : [];
-      return combineBorrowedResultPresence(
-        borrowedPaths.length > 0
-          ? borrowedPaths.map((borrowedPath) =>
-              moduleInitializerBorrowedPresence({
-                exprId,
-                path: borrowedPath,
-                hir,
-                typing,
-                resolveContext,
-                seen,
-                borrowedContext: true,
-              }),
-            )
-          : expression.elements.map((element) => presence(element)),
-      );
-    }
-    case "object-literal": {
-      if (expression.entries.length === 0) {
-        return "none";
-      }
-      const borrowedPaths =
-        typeof type === "number" ? borrowedPathsInType(type, typing) : [];
-      return combineBorrowedResultPresence(
-        borrowedPaths.length > 0
-          ? borrowedPaths.map((borrowedPath) =>
-              moduleInitializerBorrowedPresence({
-                exprId,
-                path: borrowedPath,
-                hir,
-                typing,
-                resolveContext,
-                seen,
-                borrowedContext: true,
-              }),
-            )
-          : expression.entries.map((entry) => presence(entry.value)),
-      );
-    }
-    case "field-access": {
-      const selected = Number.isInteger(Number(expression.field))
-        ? ({ kind: "tuple", index: Number(expression.field) } as const)
-        : ({ kind: "field", name: expression.field } as const);
-      return presence(expression.target, [selected, ...path]);
-    }
-    case "block":
-      return typeof expression.value === "number"
-        ? presence(expression.value, path)
-        : "none";
-    case "if":
-    case "cond":
-      return combineBorrowedResultPresence([
-        ...expression.branches.map((branch) => presence(branch.value, path)),
-        ...(typeof expression.defaultBranch === "number"
-          ? [presence(expression.defaultBranch, path)]
-          : []),
-      ]);
-    case "match":
-      return combineBorrowedResultPresence(
-        expression.arms.map((arm) => presence(arm.value, path)),
-      );
-    case "effect-handler":
-      return combineBorrowedResultPresence([
-        presence(expression.body, path),
-        ...expression.handlers.map((handler) => presence(handler.body, path)),
-      ]);
-    case "call":
-    case "method-call": {
-      const resolved = resolveBorrowCall(expression, resolveContext);
-      const contract = resolved.contract;
-      const resultPresence = contract?.borrowedResult ?? "external";
-      if (resultPresence === "none") {
-        const returnType = resolved.signature?.returnType;
-        return !borrowedContext ||
-          (typeof returnType === "number" &&
-            (typeContainsBorrowed(returnType, typing) ||
-              typing.arena.containsTypeParams(returnType)))
-          ? "none"
-          : "external";
-      }
-      const hasReturnedArgument =
-        contract?.parameters.some(
-          (parameter, parameterIndex) =>
-            parameter.returned === true &&
-            typeof resolved.arguments[parameterIndex] === "number",
-        ) === true;
-      if (resultPresence !== "parameter" && !hasReturnedArgument) {
-        if (
-          resultPresence === "external" &&
-          contract?.externalReturnedOrigins !== undefined &&
-          contract.externalReturnedOrigins.length > 0 &&
-          contract.externalReturnedOrigins.every(
-            (origin) => origin.fresh === true,
-          )
-        ) {
-          return "none";
-        }
-        return resultPresence;
-      }
-      const inputs =
-        contract?.parameters.flatMap((parameter, index) =>
-          (parameter.returnedOrigins ?? []).flatMap((origin) => {
-            const source = translateProjectionPath({
-              result: origin.result,
-              source: origin.source,
-              requested: path,
-            });
-            return source ? [{ parameter: index, source }] : [];
-          }),
-        ) ?? [];
-      if (inputs.length === 0) {
-        return "external";
-      }
-      const argumentPresence = (
-        parameter: number,
-        source: readonly PlaceProjection[],
-        active: ReadonlySet<number> = new Set(),
-      ): BorrowedResultPresence => {
-        if (active.has(parameter)) {
-          return "external";
-        }
-        const argument = resolved.arguments[parameter];
-        if (typeof argument === "number") {
-          return presence(argument, source, true);
-        }
-        const parameterContract = contract?.parameters[parameter];
-        if (
-          parameterContract?.defaultBorrowedResult === "none" ||
-          parameterContract?.defaultNoBorrowPaths?.some(
-            (noBorrow) =>
-              translateProjectionPath({
-                result: noBorrow,
-                source: [],
-                requested: source,
-              }) !== undefined,
-          )
-        ) {
-          return "none";
-        }
-        const defaultInputs =
-          parameterContract?.defaultOrigins?.flatMap((origin) => {
-            const translated = translateProjectionPath({
-              result: origin.result,
-              source: origin.source,
-              requested: source,
-            });
-            return translated
-              ? [{ parameter: origin.parameter, source: translated }]
-              : [];
-          }) ?? [];
-        return defaultInputs.length > 0
-          ? combineBorrowedResultPresence(
-              defaultInputs.map((input) =>
-                argumentPresence(
-                  input.parameter,
-                  input.source,
-                  new Set(active).add(parameter),
-                ),
-              ),
-            )
-          : "external";
-      };
-      return combineBorrowedResultPresence(
-        inputs.map(({ parameter, source }) =>
-          argumentPresence(parameter, source),
-        ),
-      );
-    }
-    case "assign":
-      return presence(expression.value, path);
-    case "break":
-      return typeof expression.value === "number"
-        ? presence(expression.value, path)
-        : "none";
-    case "loop":
-    case "while":
-      return "none";
-  }
-};
-const validateModuleBorrowStorage = ({
-  hir,
-  typing,
-  symbolTable,
-  resolveContext,
-  diagnostics,
-}: {
-  hir: HirGraph;
-  typing: TypingResult;
-  symbolTable: SymbolTable;
-  resolveContext: ResolveContext;
-  diagnostics: BorrowingResult["diagnostics"][number][];
-}): void => {
-  Array.from(hir.items.values())
-    .filter((item): item is HirModuleLet => item.kind === "module-let")
-    .forEach((item) => {
-      const storedType = typing.valueTypes.get(item.symbol);
-      const initializerType = typing.resolvedExprTypes.get(item.initializer);
-      const type = storedType ?? initializerType;
-      const storedDescriptor =
-        typeof storedType === "number"
-          ? typing.arena.get(typing.arena.unfoldRecursive(storedType))
-          : undefined;
-      if (
-        typeof type !== "number" ||
-        !typeContainsBorrowed(type, typing) ||
-        (storedDescriptor?.kind !== "borrowed" &&
-          moduleInitializerBorrowedPresence({
-            exprId: item.initializer,
-            hir,
-            typing,
-            resolveContext,
-          }) === "none")
-      ) {
-        return;
-      }
-      diagnostics.push(
-        diagnosticFromCode({
-          code: "TY0051",
-          params: {
-            kind: "explicit-borrow-escape",
-            binding: symbolTable.getSymbol(item.symbol).name,
-            through: "module storage",
-          },
-          span: item.span,
-        }),
-      );
-    });
-};
+const deduplicateDiagnostics = (
+  diagnostics: BorrowingResult["diagnostics"],
+): BorrowingResult["diagnostics"] =>
+  Array.from(
+    new Map(
+      diagnostics.map((diagnostic) => [
+        `${diagnostic.code}:${diagnostic.span.file}:${diagnostic.span.start}:${diagnostic.message}`,
+        diagnostic,
+      ]),
+    ).values(),
+  );

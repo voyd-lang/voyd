@@ -6,12 +6,10 @@ import type { ModuleHost, ModuleRoots } from "../modules/types.js";
 import {
   commitDependencySnapshot,
   createCompilerDependencySnapshotCache,
-  exportCompilerDependencyBorrowArtifact,
   prepareDependencySnapshotReuse,
 } from "../modules/dependency-snapshot-cache.js";
 import { analyzeModules, loadModuleGraph } from "../pipeline.js";
 import { projectPackageSemanticInterface } from "../semantics/borrowing/dependency-projection.js";
-import { persistedBorrowQueryInput } from "../semantics/borrowing/query-digest.js";
 import { getSymbolTable } from "../semantics/_internal/symbol-table.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
@@ -42,8 +40,6 @@ const loadAndAnalyze = async ({
     captureDependencySnapshot: Boolean(prepared.key),
     previousSemantics: prepared.previousSemantics,
     typingState: prepared.typingState,
-    reusableBorrowing: prepared.reusableBorrowing,
-    retainBorrowingIncrementalData: cache.artifactEnabled,
   });
   const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
   expect(diagnostics).toHaveLength(0);
@@ -110,7 +106,7 @@ describe("compiler dependency snapshots", () => {
     expect(analyzed.dependencySnapshot).toBeUndefined();
   });
 
-  it("omits borrowing reuse payloads when the caller cannot cache them", async () => {
+  it("omits borrowing query payloads from semantic results", async () => {
     const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
     const graph = await loadModuleGraph({
       entryPath: `${initial.roots.src}${sep}main.voyd`,
@@ -118,16 +114,13 @@ describe("compiler dependency snapshots", () => {
       host: createMemoryHost(initial.files),
     });
 
-    const analyzed = analyzeModules({
-      graph,
-      retainBorrowingIncrementalData: false,
-    });
+    const analyzed = analyzeModules({ graph });
 
     expect(analyzed.diagnostics).toHaveLength(0);
     analyzed.semantics.forEach(({ borrowing }) => {
-      expect(borrowing.queries).toBeUndefined();
-      expect(borrowing.analysisMetrics).toBeUndefined();
-      expect(borrowing.summaryDemand).toBeUndefined();
+      expect("queries" in borrowing).toBe(false);
+      expect("analysisMetrics" in borrowing).toBe(false);
+      expect("summaryDemand" in borrowing).toBe(false);
     });
   });
 
@@ -161,18 +154,71 @@ describe("compiler dependency snapshots", () => {
       cache,
     });
     const mainPath = `${initial.roots.src}${sep}main.voyd`;
-    const changedMain = initial.files[mainPath]!
-      .replace(
-        "use pkg::dep::all",
-        "use pkg::dep::{ pkg_value as selected_value }",
-      )
-      .replace("pkg_value()", "selected_value()");
+    const changedMain = initial.files[mainPath]!.replace(
+      "use pkg::dep::all",
+      "use pkg::dep::{ pkg_value as selected_value }",
+    ).replace("pkg_value()", "selected_value()");
 
     const second = await loadAndAnalyze({
       files: { ...initial.files, [mainPath]: changedMain },
       roots: initial.roots,
       cache,
     });
+
+    expect(second.prepared.hit).toBe(true);
+    expect(second.analyzed.recomputedModuleIds).toEqual(["src::main"]);
+  });
+
+  it("reuses a public package Borrow input through its finite interface", async () => {
+    const srcRoot = resolve("/borrow-package/src");
+    const pkgRoot = resolve("/borrow-package/packages");
+    const roots = { src: srcRoot, pkgDirs: [pkgRoot] };
+    const mainPath = `${srcRoot}${sep}main.voyd`;
+    const packageRootPath = `${pkgRoot}${sep}dep${sep}src${sep}pkg.voyd`;
+    const packageApiPath = `${pkgRoot}${sep}dep${sep}src${sep}api.voyd`;
+    const files = {
+      [mainPath]: [
+        "#!no_prelude",
+        "use pkg::dep::all",
+        "",
+        "pub fn main() -> i32",
+        "  read(PackageBox { value: 7 })",
+      ].join("\n"),
+      [packageRootPath]: ["#!no_prelude", "pub use src::api::all"].join(
+        "\n",
+      ),
+      [packageApiPath]: [
+        "#!no_prelude",
+        "pub obj PackageBox { api value: i32 }",
+        "",
+        "pub fn read(value: Borrow<PackageBox>) -> i32",
+        "  value.value",
+      ].join("\n"),
+    };
+    const cache = createCompilerDependencySnapshotCache();
+    const first = await loadAndAnalyze({ files, roots, cache });
+    const packageInterface = first.analyzed.semantics.get("pkg:dep::api")!
+      .exports.packageSemanticInterface!;
+    const readExport = packageInterface.exports.find(
+      (entry) => entry.name === "read",
+    );
+
+    expect(readExport).toBeDefined();
+    const readParameterType = readExport!.declarations[0]!.signature!
+      .parameters[0]!.type;
+    expect(
+      packageInterface.types.find((type) => type.id === readParameterType)
+        ?.descriptor,
+    ).toEqual(expect.objectContaining({ kind: "borrowed" }));
+    expect(readExport).not.toHaveProperty("borrowing");
+    expect(packageInterface).not.toHaveProperty("summaries");
+    expect(packageInterface).not.toHaveProperty("coercions");
+
+    const editedFiles = {
+      ...files,
+      [mainPath]: files[mainPath]!.replace("value: 7", "value: 8"),
+    };
+    const second = await loadAndAnalyze({ files: editedFiles, roots, cache });
 
     expect(second.prepared.hit).toBe(true);
     expect(second.analyzed.recomputedModuleIds).toEqual(["src::main"]);
@@ -217,241 +263,6 @@ describe("compiler dependency snapshots", () => {
     expect(secondApi?.binding.symbolTable).toBe(secondSymbolTable);
   });
 
-  it("reuses dependency semantics without retaining borrowing artifact queries", async () => {
-    const cache = createCompilerDependencySnapshotCache(undefined, {
-      artifactEnabled: false,
-    });
-    const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
-    const { analyzed } = await loadAndAnalyze({
-      files: initial.files,
-      roots: initial.roots,
-      cache,
-    });
-
-    analyzed.semantics.forEach(({ borrowing }) => {
-      expect(borrowing.queries).toBeUndefined();
-    });
-    expect(exportCompilerDependencyBorrowArtifact(cache)).toBeUndefined();
-  });
-
-  it("reuses versioned borrowing results in a fresh compiler cache", async () => {
-    const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
-    const firstCache = createCompilerDependencySnapshotCache();
-    await loadAndAnalyze({
-      files: initial.files,
-      roots: initial.roots,
-      cache: firstCache,
-    });
-    expect(firstCache.borrowArtifact).toBeUndefined();
-    const artifact = exportCompilerDependencyBorrowArtifact(firstCache);
-    expect(artifact?.schema).toBe("voyd.compiler-dependency-borrow-cache");
-    expect(artifact?.modules.length).toBeGreaterThan(0);
-    expect(exportCompilerDependencyBorrowArtifact(firstCache)).toBe(artifact);
-
-    const freshCache = createCompilerDependencySnapshotCache(
-      JSON.parse(JSON.stringify(artifact)),
-    );
-    const second = await loadAndAnalyze({
-      files: initial.files,
-      roots: initial.roots,
-      cache: freshCache,
-    });
-
-    expect(second.prepared.hit).toBe(false);
-    expect(second.prepared.reusableBorrowing?.size).toBeGreaterThan(0);
-    second.analyzed.semantics.forEach((semantics) => {
-      const packageInterface = semantics.exports.packageSemanticInterface;
-      expect(packageInterface?.schema).toBe("voyd.package-semantic-interface");
-      expect(
-        new Set(packageInterface?.summaries.map(({ id }) => id)).size,
-      ).toBe(packageInterface?.summaries.length);
-      semantics.exports.forEach((entry) => {
-        entry.borrowing?.forEach((borrow) => {
-          expect(
-            packageInterface?.summaries.some(
-              ({ id }) => id === borrow.summaryId,
-            ),
-          ).toBe(true);
-        });
-      });
-    });
-    expect(
-      Array.from(second.analyzed.semantics.values()).flatMap((entry) =>
-        Array.from(entry.borrowing.runtimeIdentityGuards.values()),
-      ),
-    ).toEqual(
-      Array.from(
-        (
-          await loadAndAnalyze({
-            files: initial.files,
-            roots: initial.roots,
-            cache: firstCache,
-          })
-        ).analyzed.semantics.values(),
-      ).flatMap((entry) =>
-        Array.from(entry.borrowing.runtimeIdentityGuards.values()),
-      ),
-    );
-  });
-
-  it("rejects malformed persisted borrowing artifacts as cache misses", () => {
-    const malformed = {
-      schema: "voyd.compiler-dependency-borrow-cache",
-      version: "0.1.0:v448-package-borrow-cache-v2",
-      key: "matching-key",
-      modules: [{ moduleId: "std::bad", fingerprint: "x" }],
-    };
-
-    expect(
-      exportCompilerDependencyBorrowArtifact(
-        createCompilerDependencySnapshotCache(malformed as never),
-      ),
-    ).toBeUndefined();
-  });
-
-  it("rejects malformed nested safety data in persisted artifacts", async () => {
-    const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
-    const cache = createCompilerDependencySnapshotCache();
-    await loadAndAnalyze({ files: initial.files, roots: initial.roots, cache });
-    const artifact = JSON.parse(
-      JSON.stringify(exportCompilerDependencyBorrowArtifact(cache)),
-    );
-    const rehash = (candidate: typeof artifact) => {
-      candidate.payloadHash = persistedBorrowQueryInput(
-        JSON.stringify(candidate.modules),
-      );
-    };
-    artifact.modules[0].borrowing.namedContracts = [[1, {}]];
-    rehash(artifact);
-
-    expect(
-      exportCompilerDependencyBorrowArtifact(
-        createCompilerDependencySnapshotCache(artifact),
-      ),
-    ).toBeUndefined();
-
-    const guardArtifact = JSON.parse(
-      JSON.stringify(exportCompilerDependencyBorrowArtifact(cache)),
-    );
-    guardArtifact.modules[0].borrowing.runtimeIdentityGuards = [[1, [{}]]];
-    rehash(guardArtifact);
-    expect(
-      exportCompilerDependencyBorrowArtifact(
-        createCompilerDependencySnapshotCache(guardArtifact),
-      ),
-    ).toBeUndefined();
-
-    const contractArtifact = JSON.parse(
-      JSON.stringify(exportCompilerDependencyBorrowArtifact(cache)),
-    );
-    contractArtifact.modules[0].borrowing.callables[0][1].transfers = [
-      { parameter: "invalid", path: [{ kind: "field" }] },
-    ];
-    rehash(contractArtifact);
-    expect(
-      exportCompilerDependencyBorrowArtifact(
-        createCompilerDependencySnapshotCache(contractArtifact),
-      ),
-    ).toBeUndefined();
-
-    const diagnosticArtifact = JSON.parse(
-      JSON.stringify(exportCompilerDependencyBorrowArtifact(cache)),
-    );
-    diagnosticArtifact.modules[0].borrowing.diagnostics.push({
-      code: "TY9999",
-      message: "bad",
-      severity: "error",
-      span: { file: "bad", start: 0, end: 1 },
-      phase: "invalid-phase",
-      hints: [{}],
-    });
-    rehash(diagnosticArtifact);
-    expect(
-      exportCompilerDependencyBorrowArtifact(
-        createCompilerDependencySnapshotCache(diagnosticArtifact),
-      ),
-    ).toBeUndefined();
-  });
-
-  it("invalidates changed dependency borrowing through reverse edges", async () => {
-    const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
-    const initialCache = createCompilerDependencySnapshotCache();
-    await loadAndAnalyze({
-      files: initial.files,
-      roots: initial.roots,
-      cache: initialCache,
-    });
-    const artifact = exportCompilerDependencyBorrowArtifact(initialCache);
-    const changed = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 101 });
-    const host = createMemoryHost(changed.files);
-    const graph = await loadModuleGraph({
-      entryPath: `${changed.roots.src}${sep}main.voyd`,
-      roots: changed.roots,
-      host,
-    });
-    const prepared = prepareDependencySnapshotReuse({
-      cache: createCompilerDependencySnapshotCache(
-        JSON.parse(JSON.stringify(artifact)),
-      ),
-      graph,
-      roots: changed.roots,
-    });
-
-    expect(prepared.reusableBorrowing?.has("std::mathdep")).toBe(true);
-    expect(prepared.reusableBorrowing?.has("pkg:dep::api")).toBe(false);
-    expect(prepared.reusableBorrowing?.has("pkg:dep")).toBe(false);
-  });
-
-  it("reuses callable query outputs after an unrelated module edit", async () => {
-    const srcRoot = resolve("/callable-query/src");
-    const roots = { src: srcRoot };
-    const mainPath = `${srcRoot}${sep}main.voyd`;
-    const source = `#!no_prelude
-obj Box { value: i32 }
-
-fn project(value: borrow Box) -> borrow Box
-  value
-
-fn relay(value: borrow Box) -> borrow Box
-  project(value)
-
-pub fn main() -> i32
-  let value = Box { value: 1 }
-  relay(value).value
-`;
-    const firstGraph = await loadModuleGraph({
-      entryPath: mainPath,
-      roots,
-      host: createMemoryHost({ [mainPath]: source }),
-    });
-    const first = analyzeModules({ graph: firstGraph });
-    const firstDemand =
-      first.semantics.get("src::main")?.borrowing.summaryDemand;
-    expect(firstDemand?.evaluations).toBeGreaterThan(0);
-
-    const secondGraph = await loadModuleGraph({
-      entryPath: mainPath,
-      roots,
-      host: createMemoryHost({
-        [mainPath]: source.replace("Box { value: 1 }", "Box { value: 2 }"),
-      }),
-    });
-    const second = analyzeModules({
-      graph: secondGraph,
-      previousSemantics: first.semantics,
-      typingState: first.typingState,
-      changedModuleIds: new Set(["src::main"]),
-    });
-    const secondDemand =
-      second.semantics.get("src::main")?.borrowing.summaryDemand;
-
-    expect(second.diagnostics).toHaveLength(0);
-    expect(secondDemand?.reusedCallables).toBeGreaterThan(0);
-    expect(secondDemand?.evaluations).toBeLessThanOrEqual(
-      firstDemand!.evaluations,
-    );
-  });
-
   it("emits a stable, independently consumable trait and effect interface", async () => {
     const srcRoot = resolve("/package-interface/src");
     const roots = { src: srcRoot };
@@ -468,6 +279,9 @@ pub eff Clock
   now(resume) -> i32
 
 pub fn identity(value: i32) -> i32
+  value
+
+pub fn defaulted(value: i32 = 0) -> i32
   value
 `;
     const interfaceFor = async (privatePrefix: string) => {
@@ -511,353 +325,30 @@ pub fn identity(value: i32) -> i32
     ]);
     expect(projected.callables.size).toBeGreaterThanOrEqual(4);
     expect(projected.effectOperations.size).toBe(1);
+    expect(
+      Array.from(projected.callables.values()).filter(
+        (callable) => callable.ordinaryMutationSummary !== undefined,
+      ).length,
+    ).toBeGreaterThanOrEqual(4);
     expect(JSON.stringify(first)).toContain("visible");
     expect(JSON.stringify(first)).not.toContain("hidden");
-  });
-
-  it("reuses callers when an imported callable contract is unchanged", async () => {
-    const srcRoot = resolve("/external-query/src");
-    const stdRoot = resolve("/external-query/std");
-    const roots = { src: srcRoot, std: stdRoot };
-    const mainPath = `${srcRoot}${sep}main.voyd`;
-    const dependencyPath = `${stdRoot}${sep}box.voyd`;
-    const source = `#!no_prelude
-use std::box::{ Box, project }
-
-fn relay(value: borrow Box) -> borrow Box
-  project(value)
-
-pub fn main() -> i32
-  let value = Box { value: 1 }
-  relay(value).value
-`;
-    const files = {
-      [mainPath]: source,
-      [dependencyPath]: `#!no_prelude
-pub obj Box { api value: i32 }
-pub fn project(value: borrow Box) -> borrow Box
-  value
-`,
-    };
-    const firstGraph = await loadModuleGraph({
-      entryPath: mainPath,
-      roots,
-      host: createMemoryHost(files),
-    });
-    const first = analyzeModules({ graph: firstGraph });
-    const secondGraph = await loadModuleGraph({
-      entryPath: mainPath,
-      roots,
-      host: createMemoryHost({
-        ...files,
-        [mainPath]: source.replace("Box { value: 1 }", "Box { value: 2 }"),
-      }),
-    });
-    const second = analyzeModules({
-      graph: secondGraph,
-      previousSemantics: first.semantics,
-      typingState: first.typingState,
-      changedModuleIds: new Set(["src::main"]),
-    });
-
-    expect(second.diagnostics).toHaveLength(0);
+    expect(first.version).toBe(3);
+    expect(first).not.toHaveProperty("summaries");
+    expect(first).not.toHaveProperty("coercions");
+    expect(first).not.toHaveProperty("callableResultCoercions");
+    expect(first).not.toHaveProperty("traitImplementations");
+    expect(JSON.stringify(first)).not.toContain("freshResult");
     expect(
-      second.semantics.get("src::main")?.borrowing.summaryDemand
-        ?.reusedCallables,
-    ).toBeGreaterThan(0);
-  });
-
-  it("invalidates a flow caller when a compact callee output changes", async () => {
-    const srcRoot = resolve("/compact-query/src");
-    const roots = { src: srcRoot };
-    const mainPath = `${srcRoot}${sep}main.voyd`;
-    const source = (reads: boolean) => `#!no_prelude
-obj Box { value: i32 }
-
-fn inspect(value: Box) -> i32
-  ${reads ? "value.value" : "0"}
-
-fn relay(value: borrow Box) -> borrow Box
-  inspect(value)
-  value
-
-pub fn main() -> i32
-  let value = Box { value: 1 }
-  relay(value).value
-`;
-    const analyze = async (reads: boolean) => {
-      const graph = await loadModuleGraph({
-        entryPath: mainPath,
-        roots,
-        host: createMemoryHost({ [mainPath]: source(reads) }),
-      });
-      return { graph, analyzed: analyzeModules({ graph }) };
-    };
-    const first = await analyze(false);
-    const firstSemantics = first.analyzed.semantics.get("src::main")!;
-    const selectSymbol = Array.from(
-      firstSemantics.borrowing.capabilities.keys(),
-    ).find((symbol) => firstSemantics.symbols.getName(symbol) === "inspect")!;
-    const relaySymbol = Array.from(
-      firstSemantics.borrowing.capabilities.keys(),
-    ).find((symbol) => firstSemantics.symbols.getName(symbol) === "relay")!;
-    expect(firstSemantics.borrowing.capabilities.get(selectSymbol)).not.toBe(
-      "flow-sensitive",
-    );
-    expect(firstSemantics.borrowing.capabilities.get(relaySymbol)).toBe(
-      "flow-sensitive",
-    );
-    const firstRelayOutput =
-      firstSemantics.borrowing.queries?.get(relaySymbol)?.output;
-
-    const secondGraph = await loadModuleGraph({
-      entryPath: mainPath,
-      roots,
-      host: createMemoryHost({ [mainPath]: source(true) }),
-    });
-    const second = analyzeModules({
-      graph: secondGraph,
-      previousSemantics: first.analyzed.semantics,
-      typingState: first.analyzed.typingState,
-      changedModuleIds: new Set(["src::main"]),
-    });
-    const secondSemantics = second.semantics.get("src::main")!;
-
-    expect(second.diagnostics).toHaveLength(0);
+      first.exports.find((entry) => entry.name === "defaulted")?.declarations[0]
+        ?.defaultIdentityGuardProtocol,
+    ).toBe("presence-conflict-bit-v1");
+    const defaulted = first.exports.find(
+      (entry) => entry.name === "defaulted",
+    )!;
     expect(
-      secondSemantics.borrowing.queries?.get(relaySymbol)?.output,
-    ).not.toEqual(firstRelayOutput);
-    expect(
-      secondSemantics.borrowing.summaryDemand?.evaluations,
-    ).toBeGreaterThan(0);
-  });
-
-  it("preserves trait coercion summaries across dependency snapshot hits", async () => {
-    const cache = createCompilerDependencySnapshotCache();
-    const srcRoot = resolve("/view-cache/src");
-    const stdRoot = resolve("/view-cache/std");
-    const roots = { src: srcRoot, std: stdRoot };
-    const mainPath = `${srcRoot}${sep}main.voyd`;
-    const files = {
-      [mainPath]: `#!no_prelude
-use std::views::{ State, View, make_state }
-
-pub fn main() -> i32
-  let ~state = make_state()
-  let view: View = state
-  let item = view.get()
-  state.source.value = 2
-  item.value
-`,
-      [`${stdRoot}${sep}views.voyd`]: `#!no_prelude
-pub obj Item { api value: i32 }
-pub obj State { api source: Item }
-
-pub trait View
-  region source
-  @borrow_contract(returns_from: source)
-  fn get(self) -> borrow Item
-
-impl View for State
-  region source = deref(self.source)
-
-  fn get(self) -> borrow Item
-    self.source
-
-pub fn make_state() -> State
-  State { source: Item { value: 1 } }
-
-`,
-    };
-    const analyzeWithCache = async (sources: Record<string, string>) => {
-      const graph = await loadModuleGraph({
-        entryPath: mainPath,
-        roots,
-        host: createMemoryHost(sources),
-      });
-      const prepared = prepareDependencySnapshotReuse({
-        cache,
-        graph,
-        roots,
-      });
-      const analyzed = analyzeModules({
-        graph,
-        captureDependencySnapshot: Boolean(prepared.key),
-        previousSemantics: prepared.previousSemantics,
-        typingState: prepared.typingState,
-      });
-      commitDependencySnapshot({
-        prepared,
-        dependencySnapshot: analyzed.dependencySnapshot,
-      });
-      return {
-        prepared,
-        analyzed,
-        diagnostics: [...graph.diagnostics, ...analyzed.diagnostics],
-      };
-    };
-
-    const first = await analyzeWithCache(files);
-    expect(first.prepared.hit).toBe(false);
-    expect(first.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
-      "TY0048",
-    );
-    expect(
-      first.analyzed.semantics.get("std::views")?.exports
-        .borrowingTraitImplementations?.length,
-    ).toBeGreaterThan(0);
-
-    const second = await analyzeWithCache({
-      ...files,
-      [mainPath]: `${files[mainPath]}\nfn edit_marker() -> i32\n  0\n`,
-    });
-    expect(second.prepared.hit).toBe(true);
-    expect(second.analyzed.recomputedModuleIds).toEqual(["src::main"]);
-    expect(second.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
-      "TY0048",
-    );
-    expect(
-      second.analyzed.semantics.get("std::views")?.exports
-        .borrowingTraitImplementations?.length,
-    ).toBeGreaterThan(0);
-  });
-
-  it("preserves callable-result and result-path summaries across dependency snapshot hits", async () => {
-    const cache = createCompilerDependencySnapshotCache();
-    const srcRoot = resolve("/callback-cache/src");
-    const stdRoot = resolve("/callback-cache/std");
-    const roots = { src: srcRoot, std: stdRoot };
-    const mainPath = `${srcRoot}${sep}main.voyd`;
-    const files = {
-      [mainPath]: `#!no_prelude
-use std::views::{ Item, View, apply, create_pair, identity_default }
-
-obj LocalState { source: Item }
-
-impl View for LocalState
-  region source = deref(self.source)
-
-  fn get(self) -> borrow Item
-    self.source
-
-pub fn make_view() -> View
-  apply(() => LocalState { source: Item { value: 3 } })
-
-pub fn select_view() -> View
-  create_pair().selected
-
-pub fn default_view() -> View
-  let factory = identity_default()
-  factory()
-
-pub fn main() -> i32
-  make_view().get().value +
-    select_view().get().value +
-    default_view().get().value
-`,
-      [`${stdRoot}${sep}views.voyd`]: `#!no_prelude
-pub obj Item { api value: i32 }
-pub obj Pair { api selected: View, api ignored: View }
-
-pub trait View
-  region source
-  @borrow_contract(returns_from: source)
-  fn get(self) -> borrow Item
-
-obj UsedState { source: Item }
-obj UnusedState { source: Item }
-obj DefaultState { source: Item }
-
-impl View for UsedState
-  region source = deref(self.source)
-
-  fn get(self) -> borrow Item
-    self.source
-
-impl View for UnusedState
-  region source = deref(self.source)
-
-  fn get(self) -> borrow Item
-    self.source
-
-impl View for DefaultState
-  region source = deref(self.source)
-
-  fn get(self) -> borrow Item
-    self.source
-
-pub fn apply(factory: fn() -> View) -> View
-  factory()
-
-pub fn create_pair() -> Pair
-  Pair {
-    selected: UsedState { source: Item { value: 5 } },
-    ignored: UnusedState { source: Item { value: 7 } }
-  }
-
-pub fn identity_default(
-  factory: fn() -> View = () => DefaultState {
-    source: Item { value: 11 }
-  }
-) -> (fn() : () -> View)
-  factory
-`,
-    };
-    const first = await loadAndAnalyze({ files, roots, cache });
-    const firstMain = first.analyzed.semantics.get("src::main");
-    const firstViews = first.analyzed.semantics.get("std::views");
-    expect(first.prepared.hit).toBe(false);
-    expect(
-      Array.from(firstMain?.exports.values() ?? [])
-        .find((entry) => entry.name === "make_view")
-        ?.borrowingCoercions?.map((coercion) => coercion.concrete.moduleId),
-    ).toEqual(["src::main"]);
-    expect(
-      Array.from(firstMain?.exports.values() ?? [])
-        .find((entry) => entry.name === "select_view")
-        ?.borrowingCoercions?.map((coercion) =>
-          firstViews?.symbols.getName(coercion.concrete.symbol),
-        ),
-    ).toEqual(["UsedState"]);
-    expect(
-      Array.from(firstMain?.exports.values() ?? [])
-        .find((entry) => entry.name === "default_view")
-        ?.borrowingCoercions?.map((coercion) =>
-          firstViews?.symbols.getName(coercion.concrete.symbol),
-        ),
-    ).toEqual(["DefaultState"]);
-
-    const second = await loadAndAnalyze({
-      files: {
-        ...files,
-        [mainPath]: `${files[mainPath]}\nfn edit_marker() -> i32\n  0\n`,
-      },
-      roots,
-      cache,
-    });
-    const secondMain = second.analyzed.semantics.get("src::main");
-    const secondViews = second.analyzed.semantics.get("std::views");
-    expect(second.prepared.hit).toBe(true);
-    expect(second.analyzed.recomputedModuleIds).toEqual(["src::main"]);
-    expect(
-      Array.from(secondMain?.exports.values() ?? [])
-        .find((entry) => entry.name === "make_view")
-        ?.borrowingCoercions?.map((coercion) => coercion.concrete.moduleId),
-    ).toEqual(["src::main"]);
-    expect(
-      Array.from(secondMain?.exports.values() ?? [])
-        .find((entry) => entry.name === "select_view")
-        ?.borrowingCoercions?.map((coercion) =>
-          secondViews?.symbols.getName(coercion.concrete.symbol),
-        ),
-    ).toEqual(["UsedState"]);
-    expect(
-      Array.from(secondMain?.exports.values() ?? [])
-        .find((entry) => entry.name === "default_view")
-        ?.borrowingCoercions?.map((coercion) =>
-          secondViews?.symbols.getName(coercion.concrete.symbol),
-        ),
-    ).toEqual(["DefaultState"]);
+      projected.callables.get(defaulted.declarations[0]!.key)
+        ?.defaultIdentityGuardProtocol,
+    ).toBe("presence-conflict-bit-v1");
   });
 
   it("invalidates the dependency snapshot when std source changes", async () => {

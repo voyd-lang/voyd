@@ -92,24 +92,6 @@ test "array iterator advances while prior values remain live":
     None:
       assert(false)
 
-test "array view iterator borrows elements while advancing its cursor":
-  let values = iterator_boxes()
-  let ~iterator = values.view_iter()
-  let first = iterator.next()
-  let second = iterator.next()
-
-  let first_value =
-    match(first)
-      Some<borrow IteratorBox> { value }: value.value
-      None: -1
-  let second_value =
-    match(second)
-      Some<borrow IteratorBox> { value }: value.value
-      None: -1
-
-  assert(first_value, eq: 3)
-  assert(second_value, eq: 5)
-
 test "array from null ref source returns none":
   let fixed = new_fixed_array<FixedArray<i32>>(1)
   let arr = Array<FixedArray<i32>>::from(fixed)
@@ -271,17 +253,6 @@ test "array subscript write":
   let ~arr = array_of_3(10, 20, 30)
   arr[1] = 99
   assert(optional_i32_or(arr[1], -1), eq: 99)
-
-test "array mutating sort":
-  let ~arr = array_of_3(3, 1, 2)
-  arr.sort((left: i32, right: i32) -> i32 =>
-    if left < right: -1
-    left > right: 1
-    else: 0
-  )
-  assert(optional_i32_or(arr.get(0), -1), eq: 1)
-  assert(optional_i32_or(arr.get(1), -1), eq: 2)
-  assert(optional_i32_or(arr.get(2), -1), eq: 3)
 
 test "array mutating extend and splice":
   let ~arr = array_of_3(1, 2, 5)
@@ -464,16 +435,6 @@ test "array sorted by ordering comparator":
   )
   assert(optional_i32_or(sorted.get(0), -1), eq: 1)
   assert(optional_i32_or(source.get(0), -1), eq: 3)
-
-test "array sort by ordering comparator":
-  let source = array_of_4(3, 1, 4, 2)
-  let ~mut = source.copied()
-  mut.sort(by: (left: i32, right: i32) -> Ordering =>
-    if left < right: Less {}
-    left > right: Greater {}
-    else: Equal {}
-  )
-  assert(optional_i32_or(mut.get(0), -1), eq: 1)
 
 test "array extend array overload":
   let source = array_of_4(3, 1, 4, 2)

@@ -1,3 +1,5 @@
+import { COMPILER_PERF_ZERO_PRESENCE_COUNTERS } from "./perf-counter-schema.js";
+
 type CompilerPerfCounterSnapshot = Map<string, number>;
 type CompilerPerfPhaseSnapshot = Map<string, number>;
 
@@ -16,6 +18,8 @@ export type CompilerPerfSession = {
   startedAt: number;
   countersBefore?: CompilerPerfCounterSnapshot;
   phasesBefore?: CompilerPerfPhaseSnapshot;
+  observedCounters?: Set<string>;
+  observedPhases?: Set<string>;
   overlapped?: boolean;
   completed?: boolean;
 };
@@ -59,9 +63,10 @@ export const incrementCompilerPerfCounter = (
   name: string,
   amount = 1,
 ): void => {
-  if (!PERF_ENABLED || amount === 0) {
+  if (!PERF_ENABLED) {
     return;
   }
+  activeSessions.forEach((session) => session.observedCounters?.add(name));
   counters.set(name, (counters.get(name) ?? 0) + amount);
 };
 
@@ -72,9 +77,10 @@ export const addCompilerPerfPhaseDuration = (
   name: string,
   durationMs: number,
 ): void => {
-  if (!PERF_ENABLED || durationMs <= 0) {
+  if (!PERF_ENABLED || durationMs < 0) {
     return;
   }
+  activeSessions.forEach((session) => session.observedPhases?.add(name));
   phaseDurationsMs.set(name, (phaseDurationsMs.get(name) ?? 0) + durationMs);
 };
 
@@ -110,19 +116,26 @@ export const snapshotCompilerPerfPhases = (): CompilerPerfPhaseSnapshot =>
 export const diffCompilerPerfCounters = ({
   before,
   after,
+  include = [],
 }: {
   before: ReadonlyMap<string, number>;
   after: ReadonlyMap<string, number>;
+  include?: Iterable<string>;
 }): Record<string, number> => {
   if (!PERF_ENABLED) {
     return {};
   }
 
-  const keys = new Set<string>([...before.keys(), ...after.keys()]);
+  const included = new Set(include);
+  const keys = new Set<string>([
+    ...before.keys(),
+    ...after.keys(),
+    ...included,
+  ]);
   const delta = new Map<string, number>();
   keys.forEach((key) => {
     const diff = (after.get(key) ?? 0) - (before.get(key) ?? 0);
-    if (diff !== 0) {
+    if (diff !== 0 || included.has(key)) {
       delta.set(key, diff);
     }
   });
@@ -132,19 +145,26 @@ export const diffCompilerPerfCounters = ({
 export const diffCompilerPerfPhases = ({
   before,
   after,
+  include = [],
 }: {
   before: ReadonlyMap<string, number>;
   after: ReadonlyMap<string, number>;
+  include?: Iterable<string>;
 }): Record<string, number> => {
   if (!PERF_ENABLED) {
     return {};
   }
 
-  const keys = new Set<string>([...before.keys(), ...after.keys()]);
+  const included = new Set(include);
+  const keys = new Set<string>([
+    ...before.keys(),
+    ...after.keys(),
+    ...included,
+  ]);
   const delta = new Map<string, number>();
   keys.forEach((key) => {
     const diff = (after.get(key) ?? 0) - (before.get(key) ?? 0);
-    if (diff !== 0) {
+    if (diff !== 0 || included.has(key)) {
       delta.set(key, diff);
     }
   });
@@ -204,6 +224,8 @@ export const startCompilerPerfSession = ({
     startedAt: performance.now(),
     countersBefore: snapshotCompilerPerfCounters(),
     phasesBefore: snapshotCompilerPerfPhases(),
+    observedCounters: new Set(),
+    observedPhases: new Set(),
   };
   if (activeSessions.size > 0) {
     session.overlapped = true;
@@ -212,6 +234,9 @@ export const startCompilerPerfSession = ({
     });
   }
   activeSessions.add(session);
+  COMPILER_PERF_ZERO_PRESENCE_COUNTERS.forEach((name) =>
+    incrementCompilerPerfCounter(name, 0),
+  );
   return session;
 };
 
@@ -240,6 +265,7 @@ export const completeCompilerPerfSession = ({
   const phases = diffCompilerPerfPhases({
     before: session.phasesBefore,
     after: snapshotCompilerPerfPhases(),
+    include: session.observedPhases,
   });
 
   logCompilerPerfSummary({
@@ -253,6 +279,7 @@ export const completeCompilerPerfSession = ({
     counters: diffCompilerPerfCounters({
       before: session.countersBefore,
       after: snapshotCompilerPerfCounters(),
+      include: session.observedCounters,
     }),
     overlapped: session.overlapped,
   });
