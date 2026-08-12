@@ -1,36 +1,31 @@
 import binaryen from "binaryen";
-import {
-  arrayGet,
-  initDefaultStruct,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
+import { initDefaultStruct } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   FunctionContext,
   FunctionMetadata,
   TypeId,
 } from "../context.js";
-import type { SerializerMetadata } from "../../semantics/symbol-index.js";
-import { findSerializerForType } from "../serializer.js";
 import {
-  coerceValueToType,
-  initStructuralValue,
   liftHeapValueToInline,
-  lowerValueForHeapField,
+  loadStructuralField,
   storeValueIntoStorageRef,
 } from "../structural.js";
-import {
-  abiTypeFor,
-  getSignatureSpillBoxType,
-  getStructuralTypeInfo,
-  wasmTypeFor,
-} from "../types.js";
+import { abiTypeFor, getSignatureSpillBoxType, wasmTypeFor } from "../types.js";
 import { ensureLinearMemoryExport } from "../memory-exports.js";
-import { ensureMsgPackFunctions } from "../effects/host-boundary/msgpack.js";
-import { deriveBoundarySchema } from "../boundary/schema.js";
+import { ensureSelectedHostTransportProvider } from "../host-transport/selected-provider.js";
+import { withDtoFingerprint, type BoundarySchema } from "../boundary/schema.js";
 import {
-  packBoundaryValueAsMsgPack,
-  unpackBoundaryValueFromMsgPack,
-} from "../boundary/msgpack-codec.js";
+  readDtoValueFromHostStream,
+  readHostStreamValue,
+  resultMember,
+  resultPayload,
+} from "../boundary/dto-stream-reader.js";
+import {
+  hostStreamWriterResultTypeId,
+  writeDtoValueToHostStream,
+  writeHostStreamEvent,
+} from "../boundary/dto-stream-writer.js";
 import {
   allocateTempLocal,
   loadLocalValue,
@@ -42,53 +37,35 @@ import {
   unboxSignatureSpillValue,
 } from "../signature-spill.js";
 import {
-  boundaryMsgPackPayloadField,
-  isBoundaryMsgPackValue,
-} from "../boundary-metadata.js";
-import { compileOptionalNoneValue } from "../optionals.js";
-
-export type SerializedExportTypeAdapter = {
-  acceptsType?: (params: { typeId: TypeId; ctx: CodegenContext }) => boolean;
-  packResultValue?: (params: {
-    value: binaryen.ExpressionRef;
-    typeId: TypeId;
-    ctx: CodegenContext;
-    fnCtx: FunctionContext;
-    exportName: string;
-  }) => binaryen.ExpressionRef | undefined;
-};
+  SELECTED_HOST_FRAME_TAG,
+  SELECTED_HOST_FRAME_VERSION,
+} from "../host-transport/frame-codec.js";
+import { hostExportId } from "./export-abi.js";
+import { emitStringLiteral } from "../expressions/primitives.js";
+import {
+  requiredField,
+  requiredStructuralInfo,
+  variantMatches,
+} from "../boundary/dto-tree-codec.js";
 
 export const emitSerializedExportWrapper = ({
   ctx,
   meta,
   exportName,
+  schemas,
   wrapperExportName = exportName,
-  typeAdapter,
-  paramSerializerOverrides,
-  returnSerializerOverride,
 }: {
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
+  schemas: { params: BoundarySchema[]; result: BoundarySchema };
   wrapperExportName?: string;
-  typeAdapter?: SerializedExportTypeAdapter;
-  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
-  returnSerializerOverride?: SerializerMetadata;
-}): { wrapperName: string; formatId: "msgpack" } => {
+}): { wrapperName: string } => {
   ensureLinearMemoryExport(ctx);
-  validateExportTypes({
-    ctx,
-    meta,
-    exportName,
-    typeAdapter,
-    paramSerializerOverrides,
-    returnSerializerOverride,
-  });
 
-  const msgpack = ensureMsgPackFunctions(ctx);
-  const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
-  const arrayType = msgpack.arrayWithCapacity.resultType;
-  const storageType = msgpack.arrayRawStorage.resultType;
+  const provider = ensureSelectedHostTransportProvider(ctx);
+  const readerType = wasmTypeFor(provider.readerTypeId, ctx);
+  const writerType = wasmTypeFor(provider.writerTypeId, ctx);
 
   const wrapperName = `${meta.wasmName}__serialized_export_${sanitizeIdentifier(exportName)}`;
   const paramCount = 4;
@@ -98,20 +75,13 @@ export const emitSerializedExportWrapper = ({
     binaryen.i32,
     binaryen.i32,
   ]);
-  const locals: binaryen.Type[] = [
-    msgPackType, // decodedLocal
-    arrayType, // argsArrayLocal
-    storageType, // storageLocal
-    binaryen.i32, // argsCountLocal
-  ];
+  const locals: binaryen.Type[] = [readerType, writerType];
   const argsPtrLocal = 0;
   const argsLenLocal = 1;
   const outPtrLocal = 2;
   const outLenLocal = 3;
-  const decodedLocal = 4;
-  const argsArrayLocal = 5;
-  const storageLocal = 6;
-  const argsCountLocal = 7;
+  const readerLocal = 4;
+  const writerLocal = 5;
   const fnCtx: FunctionContext = {
     bindings: new Map(),
     tempLocals: new Map(),
@@ -122,101 +92,173 @@ export const emitSerializedExportWrapper = ({
     effectful: false,
   };
 
-  const decoded = ctx.mod.call(
-    msgpack.decodeValue.wasmName,
-    [
+  const readerRef = () => ctx.mod.local.get(readerLocal, readerType);
+  const writerRef = () => ctx.mod.local.get(writerLocal, writerType);
+  const returnCustomDecodeFailure = ({
+    code,
+    message,
+    path,
+  }: {
+    code: binaryen.ExpressionRef;
+    message: binaryen.ExpressionRef;
+    path: binaryen.ExpressionRef;
+  }): binaryen.ExpressionRef => {
+    const createFailureWriter = lowerSerializedExportCall({
+      meta: provider.createWriter,
+      args: [
+        ctx.mod.local.get(outPtrLocal, binaryen.i32),
+        ctx.mod.local.get(outLenLocal, binaryen.i32),
+      ],
+      ctx,
+      fnCtx,
+    });
+    const writeFailure = (
+      name: string,
+      args: readonly binaryen.ExpressionRef[] = [],
+    ) =>
+      writeHostStreamEvent({
+        writer: writerRef(),
+        writerTypeId: provider.writerTypeId,
+        name,
+        args,
+        ctx,
+        fnCtx,
+      });
+    const finishFailureWriter = lowerSerializedExportCall({
+      meta: provider.finishWriter,
+      args: [writerRef()],
+      ctx,
+      fnCtx,
+    });
+    return ctx.mod.block(null, [
+      ...createFailureWriter.setup,
+      ctx.mod.local.set(writerLocal, createFailureWriter.value),
+      writeFailure("begin_array", [ctx.mod.i32.const(4)]),
+      writeFailure("write_i32", [
+        ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+      ]),
+      writeFailure("write_i32", [
+        ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportCompletion),
+      ]),
+      writeFailure("write_i32", [
+        ctx.mod.i32.const(hostExportId(exportName)),
+      ]),
+      writeFailure("begin_array", [ctx.mod.i32.const(2)]),
+      writeFailure("write_i32", [ctx.mod.i32.const(1)]),
+      writeFailure("begin_array", [ctx.mod.i32.const(8)]),
+      writeFailure("write_string", [emitStringLiteral("host->vm", ctx)]),
+      writeFailure("write_string", [
+        emitStringLiteral("export-invocation", ctx),
+      ]),
+      writeFailure("write_string", [emitStringLiteral("decode", ctx)]),
+      writeFailure("write_string", [emitStringLiteral("custom", ctx)]),
+      writeFailure("write_string", [code]),
+      writeFailure("write_string", [
+        emitStringLiteral(provider.identity.id, ctx),
+      ]),
+      writeFailure("write_string", [message]),
+      writeFailure("begin_array", [ctx.mod.i32.const(1)]),
+      writeFailure("write_string", [path]),
+      writeFailure("end_array"),
+      writeFailure("end_array"),
+      writeFailure("end_array"),
+      writeFailure("end_array"),
+      ...finishFailureWriter.setup,
+      ctx.mod.return(finishFailureWriter.value),
+    ]);
+  };
+  const createReader = lowerSerializedExportCall({
+    meta: provider.createReader,
+    args: [
       ctx.mod.local.get(argsPtrLocal, binaryen.i32),
       ctx.mod.local.get(argsLenLocal, binaryen.i32),
     ],
-    msgPackType,
+    ctx,
+    fnCtx,
+  });
+  const read = (name: string) =>
+    readHostStreamValue({
+      reader: readerRef(),
+      readerTypeId: provider.readerTypeId,
+      name,
+      ctx,
+      fnCtx,
+    });
+  const checkFrame = ctx.mod.if(
+    ctx.mod.i32.or(
+      ctx.mod.i32.or(
+        ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(4)),
+        ctx.mod.i32.ne(
+          read("read_i32"),
+          ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+        ),
+      ),
+      ctx.mod.i32.or(
+        ctx.mod.i32.ne(
+          read("read_i32"),
+          ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportInvocation),
+        ),
+        ctx.mod.i32.ne(
+          read("read_i32"),
+          ctx.mod.i32.const(hostExportId(exportName)),
+        ),
+      ),
+    ),
+    ctx.mod.unreachable(),
+    ctx.mod.nop(),
   );
-
-  const argsArray = ctx.mod.call(
-    msgpack.unpackArray.wasmName,
-    [ctx.mod.local.get(decodedLocal, msgPackType)],
-    arrayType,
-  );
-  const argsCount = ctx.mod.call(
-    msgpack.arrayLength.wasmName,
-    [ctx.mod.local.get(argsArrayLocal, arrayType)],
-    binaryen.i32,
-  );
-  const storage = ctx.mod.call(
-    msgpack.arrayRawStorage.wasmName,
-    [ctx.mod.local.get(argsArrayLocal, arrayType)],
-    storageType,
-  );
-
   const checkArgs = ctx.mod.if(
-    ctx.mod.i32.lt_s(
-      ctx.mod.local.get(argsCountLocal, binaryen.i32),
+    ctx.mod.i32.ne(
+      read("begin_array"),
       ctx.mod.i32.const(meta.paramTypeIds.length),
     ),
     ctx.mod.unreachable(),
     ctx.mod.nop(),
   );
 
-  const buildParamExpr = (
-    typeId: number,
-    index: number,
-  ): binaryen.ExpressionRef => {
-    const element = arrayGet(
-      ctx.mod,
-      ctx.mod.local.get(storageLocal, storageType),
-      ctx.mod.i32.const(index),
-      msgPackType,
-      false,
-    );
-    const serializer =
-      paramSerializerOverrides?.[index] ?? findSerializerForType(typeId, ctx);
-    if (serializer) {
-      if (serializer.formatId !== "msgpack") {
-        throw new Error(
-          `unsupported export serializer format for ${exportName}: ${serializer.formatId}`,
-        );
-      }
-      return coerceValueToType({
-        value: element,
-        actualType: msgpack.msgPackTypeId,
-        targetType: typeId,
-        ctx,
-        fnCtx,
-      });
-    }
-    if (isBoundaryMsgPackValue(typeId, ctx)) {
-      return coerceValueToType({
-        value: element,
-        actualType: msgpack.msgPackTypeId,
-        targetType: typeId,
-        ctx,
-        fnCtx,
-      });
-    }
-    const payloadField = boundaryMsgPackPayloadField(typeId, ctx);
-    if (payloadField) {
-      return buildPayloadEnvelopeParamExpr({
-        value: element,
-        typeId,
-        payloadField,
-        ctx,
-        fnCtx,
-        label: `${exportName} arg${index}`,
-      });
-    }
-    return unpackBoundaryValueFromMsgPack({
-      ctx,
-      value: element,
-      schema: deriveBoundarySchema({
-        typeId,
-        ctx,
-        label: `${exportName} arg${index}`,
-      }),
+  const buildParamExpr = (index: number): binaryen.ExpressionRef => {
+    const schema = schemas.params[index]!;
+    const value = allocateTempLocal(
+      wasmTypeFor(schema.typeId, ctx),
       fnCtx,
-    });
+      schema.typeId,
+      ctx,
+    );
+    const fingerprint = withDtoFingerprint(schema).fingerprint;
+    if (!fingerprint)
+      throw new Error(
+        `missing DTO fingerprint for ${exportName} argument ${index}`,
+      );
+    return ctx.mod.block(
+      null,
+      [
+        ctx.mod.if(
+          ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(2)),
+          ctx.mod.unreachable(),
+        ),
+        ctx.mod.drop(read("read_string")),
+        storeLocalValue({
+          binding: value,
+          value: readDtoValueFromHostStream({
+            reader: readerRef(),
+            readerTypeId: provider.readerTypeId,
+            schema,
+            onCustomError: returnCustomDecodeFailure,
+            ctx,
+            fnCtx,
+          }),
+          ctx,
+          fnCtx,
+        }),
+        ctx.mod.drop(read("end_array")),
+        loadLocalValue(value, ctx),
+      ],
+      wasmTypeFor(schema.typeId, ctx),
+    );
   };
 
-  const callArgs = meta.paramTypeIds.map((typeId, index) =>
-    buildParamExpr(typeId, index),
+  const callArgs = meta.paramTypeIds.map((_typeId, index) =>
+    buildParamExpr(index),
   );
   const loweredCall = lowerSerializedExportCall({
     meta,
@@ -224,24 +266,117 @@ export const emitSerializedExportWrapper = ({
     ctx,
     fnCtx,
   });
-  const encodeValue = packSerializedResultValue({
-    value: loweredCall.value,
-    typeId: meta.resultTypeId,
-    ctx,
-    fnCtx,
-    exportName,
-    typeAdapter,
-    serializerOverride: returnSerializerOverride,
-  });
-  const encodedLength = ctx.mod.call(
-    msgpack.encodeValue.wasmName,
-    [
-      encodeValue,
+  const loweredResultType = binaryen.getExpressionType(loweredCall.value);
+  const resultLocal =
+    loweredResultType === binaryen.none
+      ? undefined
+      : allocateTempLocal(loweredResultType, fnCtx, meta.resultTypeId, ctx);
+  const evaluateCall = resultLocal
+    ? storeLocalValue({
+        binding: resultLocal,
+        value: loweredCall.value,
+        ctx,
+        fnCtx,
+      })
+    : loweredCall.value;
+  const resultValue = () =>
+    resultLocal ? loadLocalValue(resultLocal, ctx) : ctx.mod.nop();
+  const resultFingerprint = withDtoFingerprint(schemas.result).fingerprint;
+  if (!resultFingerprint) {
+    throw new Error(`missing DTO fingerprint for ${exportName} result`);
+  }
+  const createWriter = lowerSerializedExportCall({
+    meta: provider.createWriter,
+    args: [
       ctx.mod.local.get(outPtrLocal, binaryen.i32),
       ctx.mod.local.get(outLenLocal, binaryen.i32),
     ],
-    binaryen.i32,
+    ctx,
+    fnCtx,
+  });
+  const write = (name: string, args: readonly binaryen.ExpressionRef[] = []) =>
+    writeHostStreamEvent({
+      writer: writerRef(),
+      writerTypeId: provider.writerTypeId,
+      name,
+      args,
+      ctx,
+      fnCtx,
+    });
+  const dtoWriteResultTypeId = hostStreamWriterResultTypeId({
+    writerTypeId: provider.writerTypeId,
+    ctx,
+  });
+  const dtoWriteResult = allocateTempLocal(
+    wasmTypeFor(dtoWriteResultTypeId, ctx),
+    fnCtx,
+    dtoWriteResultTypeId,
+    ctx,
   );
+  const dtoWriteResultRef = () => loadLocalValue(dtoWriteResult, ctx);
+  const dtoWriteErrorMember = resultMember({
+    resultTypeId: dtoWriteResultTypeId,
+    name: "Err",
+    ctx,
+  });
+  const dtoWriteError = resultPayload({
+    value: dtoWriteResultRef(),
+    resultTypeId: dtoWriteResultTypeId,
+    memberTypeId: dtoWriteErrorMember,
+    fieldName: "error",
+    ctx,
+    fnCtx,
+  });
+  const dtoWriteErrorField = requiredField(
+    requiredStructuralInfo(dtoWriteErrorMember, ctx).fieldMap,
+    "error",
+    dtoWriteErrorMember,
+  );
+  const dtoWriteErrorTypeId = dtoWriteErrorField.typeId;
+  const dtoWriteErrorValueInfo = requiredStructuralInfo(
+    dtoWriteErrorTypeId,
+    ctx,
+  );
+  const dtoWriteErrorMessageField = requiredField(
+    dtoWriteErrorValueInfo.fieldMap,
+    "message",
+    dtoWriteErrorTypeId,
+  );
+  const dtoWriteErrorMessage = () =>
+    loadStructuralField({
+      structInfo: dtoWriteErrorValueInfo,
+      field: dtoWriteErrorMessageField,
+      pointer: () => dtoWriteError,
+      ctx,
+      fnCtx,
+    });
+  const readerCompleteCall = lowerSerializedExportCall({
+    meta: provider.readerComplete,
+    args: [readerRef()],
+    ctx,
+    fnCtx,
+  });
+  const finishWriterCall = lowerSerializedExportCall({
+    meta: provider.finishWriter,
+    args: [writerRef()],
+    ctx,
+    fnCtx,
+  });
+  const resetWriterCall = lowerSerializedExportCall({
+    meta: provider.createWriter,
+    args: [
+      ctx.mod.local.get(outPtrLocal, binaryen.i32),
+      ctx.mod.local.get(outLenLocal, binaryen.i32),
+    ],
+    ctx,
+    fnCtx,
+  });
+  const finishFailureWriterCall = lowerSerializedExportCall({
+    meta: provider.finishWriter,
+    args: [writerRef()],
+    ctx,
+    fnCtx,
+  });
 
   ctx.mod.addFunction(
     wrapperName,
@@ -249,85 +384,93 @@ export const emitSerializedExportWrapper = ({
     binaryen.i32,
     locals,
     ctx.mod.block(null, [
-      ctx.mod.local.set(decodedLocal, decoded),
-      ctx.mod.local.set(argsArrayLocal, argsArray),
-      ctx.mod.local.set(storageLocal, storage),
-      ctx.mod.local.set(argsCountLocal, argsCount),
+      ...createReader.setup,
+      ctx.mod.local.set(readerLocal, createReader.value),
+      checkFrame,
       checkArgs,
       ...loweredCall.setup,
-      ctx.mod.return(encodedLength),
+      evaluateCall,
+      ctx.mod.drop(read("end_array")),
+      ctx.mod.drop(read("end_array")),
+      ...readerCompleteCall.setup,
+      ctx.mod.if(
+        ctx.mod.i32.eqz(readerCompleteCall.value),
+        ctx.mod.unreachable(),
+      ),
+      ...createWriter.setup,
+      ctx.mod.local.set(writerLocal, createWriter.value),
+      write("begin_array", [ctx.mod.i32.const(4)]),
+      write("write_i32", [ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION)]),
+      write("write_i32", [
+        ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportCompletion),
+      ]),
+      write("write_i32", [ctx.mod.i32.const(hostExportId(exportName))]),
+      write("begin_array", [ctx.mod.i32.const(2)]),
+      write("write_i32", [ctx.mod.i32.const(0)]),
+      write("begin_array", [ctx.mod.i32.const(2)]),
+      write("write_string", [emitStringLiteral(resultFingerprint, ctx)]),
+      storeLocalValue({
+        binding: dtoWriteResult,
+        value: writeDtoValueToHostStream({
+          writer: writerRef,
+          writerTypeId: provider.writerTypeId,
+          value: resultValue(),
+          schema: schemas.result,
+          resultTypeId: dtoWriteResultTypeId,
+          ctx,
+          fnCtx,
+        }),
+        ctx,
+        fnCtx,
+      }),
+      ctx.mod.if(
+        variantMatches({
+          unionValue: dtoWriteResultRef(),
+          unionTypeId: dtoWriteResultTypeId,
+          variant: { name: "Err", typeId: dtoWriteErrorMember, fields: [] },
+          ctx,
+        }),
+        ctx.mod.block(null, [
+          ...resetWriterCall.setup,
+          ctx.mod.local.set(writerLocal, resetWriterCall.value),
+          write("begin_array", [ctx.mod.i32.const(4)]),
+          write("write_i32", [ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION)]),
+          write("write_i32", [
+            ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportCompletion),
+          ]),
+          write("write_i32", [ctx.mod.i32.const(hostExportId(exportName))]),
+          write("begin_array", [ctx.mod.i32.const(2)]),
+          write("write_i32", [ctx.mod.i32.const(1)]),
+          write("begin_array", [ctx.mod.i32.const(8)]),
+          write("write_string", [emitStringLiteral("vm->host", ctx)]),
+          write("write_string", [
+            emitStringLiteral("export-completion", ctx),
+          ]),
+          write("write_string", [emitStringLiteral("encode", ctx)]),
+          write("write_string", [emitStringLiteral("sink", ctx)]),
+          write("write_string", [emitStringLiteral("dto.write", ctx)]),
+          write("write_string", [
+            emitStringLiteral(provider.identity.id, ctx),
+          ]),
+          write("write_string", [dtoWriteErrorMessage()]),
+          write("write_null"),
+          write("end_array"),
+          write("end_array"),
+          write("end_array"),
+          ...finishFailureWriterCall.setup,
+          ctx.mod.return(finishFailureWriterCall.value),
+        ]),
+      ),
+      write("end_array"),
+      write("end_array"),
+      write("end_array"),
+      ...finishWriterCall.setup,
+      ctx.mod.return(finishWriterCall.value),
     ]),
   );
 
   ctx.mod.addFunctionExport(wrapperName, wrapperExportName);
-  return { wrapperName: wrapperExportName, formatId: "msgpack" };
-};
-
-const buildPayloadEnvelopeParamExpr = ({
-  value,
-  typeId,
-  payloadField,
-  ctx,
-  fnCtx,
-  label,
-}: {
-  value: binaryen.ExpressionRef;
-  typeId: TypeId;
-  payloadField: NonNullable<ReturnType<typeof boundaryMsgPackPayloadField>>;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-  label: string;
-}): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
-  const structInfo = getStructuralTypeInfo(typeId, ctx);
-  if (!structInfo) {
-    throw new Error(
-      `boundary payload envelope ${label} is missing structural info`,
-    );
-  }
-
-  const fieldValues = structInfo.fields.map((field) => {
-    if (field.name === payloadField.name) {
-      const payload = coerceValueToType({
-        value,
-        actualType: msgpack.msgPackTypeId,
-        targetType: field.typeId,
-        ctx,
-        fnCtx,
-      });
-      return structInfo.layoutKind === "value-object"
-        ? payload
-        : lowerValueForHeapField({
-            value: payload,
-            typeId: field.typeId,
-            targetType: field.heapWasmType,
-            ctx,
-            fnCtx,
-          });
-    }
-
-    if (!field.optional) {
-      throw new Error(
-        `boundary payload envelope ${label} has non-payload field ${field.name}`,
-      );
-    }
-    const none = compileOptionalNoneValue({
-      targetTypeId: field.typeId,
-      ctx,
-      fnCtx,
-    });
-    return structInfo.layoutKind === "value-object"
-      ? none
-      : lowerValueForHeapField({
-          value: none,
-          typeId: field.typeId,
-          targetType: field.heapWasmType,
-          ctx,
-          fnCtx,
-        });
-  });
-
-  return initStructuralValue({ structInfo, fieldValues, ctx, fnCtx });
+  return { wrapperName: wrapperExportName };
 };
 
 const lowerSerializedExportCall = ({
@@ -574,104 +717,6 @@ const stabilizeMultivalueResult = ({
   return captured.setup.length === 0
     ? tuple
     : ctx.mod.block(null, [...captured.setup, tuple], abiTypeFor(abiTypes));
-};
-
-const validateExportTypes = ({
-  ctx,
-  meta,
-  exportName,
-  typeAdapter,
-  paramSerializerOverrides,
-  returnSerializerOverride,
-}: {
-  ctx: CodegenContext;
-  meta: FunctionMetadata;
-  exportName: string;
-  typeAdapter?: SerializedExportTypeAdapter;
-  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
-  returnSerializerOverride?: SerializerMetadata;
-}): void => {
-  const allTypes = [...meta.paramTypeIds, meta.resultTypeId];
-  allTypes.forEach((typeId, index) => {
-    const serializer =
-      index < meta.paramTypeIds.length
-        ? (paramSerializerOverrides?.[index] ??
-          findSerializerForType(typeId, ctx))
-        : (returnSerializerOverride ?? findSerializerForType(typeId, ctx));
-    if (serializer) {
-      if (serializer.formatId !== "msgpack") {
-        throw new Error(
-          `unsupported serializer format for ${exportName}: ${serializer.formatId}`,
-        );
-      }
-      return;
-    }
-    if (typeAdapter?.acceptsType?.({ typeId, ctx }) === true) {
-      return;
-    }
-    const target =
-      index < meta.paramTypeIds.length ? `parameter ${index + 1}` : "return";
-    deriveBoundarySchema({
-      typeId,
-      ctx,
-      label: `${exportName} ${target}`,
-    });
-  });
-};
-
-const packSerializedResultValue = ({
-  value,
-  typeId,
-  ctx,
-  fnCtx,
-  exportName,
-  typeAdapter,
-  serializerOverride,
-}: {
-  value: binaryen.ExpressionRef;
-  typeId: TypeId;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-  exportName: string;
-  typeAdapter?: SerializedExportTypeAdapter;
-  serializerOverride?: SerializerMetadata;
-}): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
-  const serializer = serializerOverride ?? findSerializerForType(typeId, ctx);
-  if (serializer) {
-    if (serializer.formatId !== "msgpack") {
-      throw new Error(
-        `unsupported serializer format for ${exportName}: ${serializer.formatId}`,
-      );
-    }
-    return coerceValueToType({
-      value,
-      actualType: typeId,
-      targetType: msgpack.msgPackTypeId,
-      ctx,
-      fnCtx,
-    });
-  }
-  const adapted = typeAdapter?.packResultValue?.({
-    value,
-    typeId,
-    ctx,
-    fnCtx,
-    exportName,
-  });
-  if (adapted) {
-    return adapted;
-  }
-  return packBoundaryValueAsMsgPack({
-    value,
-    schema: deriveBoundarySchema({
-      typeId,
-      ctx,
-      label: `${exportName} result`,
-    }),
-    ctx,
-    fnCtx,
-  });
 };
 
 const sanitizeIdentifier = (value: string): string =>

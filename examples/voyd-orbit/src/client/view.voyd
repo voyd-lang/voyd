@@ -13,7 +13,6 @@ use super::update::Msg
 use src::shared::SimulationSummary
 use src::simulation::{ Body, BodyKind, BuiltInScenario, built_in_scenarios }
 use std::array::Array
-use std::msgpack::MsgPack
 use std::number::cast::{ format_fixed, format_significant, to_string }
 use std::optional::types::all
 use std::result::types::all
@@ -92,7 +91,7 @@ fn SimulationCanvas({ model: Model }) -> Html<Msg>
         }
       )
     ],
-    children: Array<MsgPack>::init()
+    children: Array<Html<void>>::init()
   )
 
 fn TopBar({ model: Model }) -> Html<Msg>
@@ -157,7 +156,7 @@ fn ScenarioPicker({ model: Model }) -> Html<Msg>
     </select>
   </div>
 
-fn ScenarioOption({ scenario: BuiltInScenario, selected: bool }) -> Html<Msg>
+fn ScenarioOption({ scenario: BuiltInScenario, selected: bool }) -> Html<void>
   <option value={scenario.slug} selected={selected}>{scenario.name}</option>
 
 fn ToolShelf({ model: Model }) -> Html<Msg>
@@ -192,7 +191,7 @@ fn BodyTool({ model: Model, kind: BodyKind, label: String, color: String }) -> H
     <span class="tooltip">{label} · click then drag</span>
   </button>
 
-fn BodyGlyph({ kind: BodyKind, color: String }) -> Html<Msg>
+fn BodyGlyph({ kind: BodyKind, color: String }) -> Html<void>
   element(
     tag: "span",
     attrs: [
@@ -202,10 +201,10 @@ fn BodyGlyph({ kind: BodyKind, color: String }) -> Html<Msg>
       style(name: "--glyph-size", value: glyph_size(kind)),
       style(name: "--glyph-glow", value: glyph_glow(kind))
     ],
-    children: Array<MsgPack>::init()
+    children: Array<Html<void>>::init()
   )
 
-fn PlacementHint({ model: Model }) -> Html<Msg>
+fn PlacementHint({ model: Model }) -> Html<void>
   match(model.ui.interaction)
     Interaction::PlacingBody:
       <div class="chrome placement-hint glass" role="status">
@@ -220,7 +219,7 @@ fn PlacementHint({ model: Model }) -> Html<Msg>
             <kbd>Esc</kbd>
           </div>
         Tool::Navigate:
-          empty()
+          fragment(Array<Html<void>>::init())
 
 fn Inspector({ model: Model }) -> Html<Msg>
   let content = match(selected_body(model))
@@ -232,7 +231,7 @@ fn Inspector({ model: Model }) -> Html<Msg>
     {content}
   </aside>
 
-fn EmptyInspector(_props: {}) -> Html<Msg>
+fn EmptyInspector(_props: {}) -> Html<void>
   <div class="selection-empty">
     <strong>No body selected</strong>
     Click a body in the simulation to inspect its mass, orbit, velocity, and appearance.
@@ -465,7 +464,7 @@ fn ToggleChip({ label: String, active: bool, message: Msg }) -> Html<Msg>
     on_click={message}
   >{label}</button>
 
-fn ShortcutHints(_props: {}) -> Html<Msg>
+fn ShortcutHints(_props: {}) -> Html<void>
   <div class="chrome shortcut-hints" aria-label="Keyboard shortcuts">
     <span class="shortcut"><kbd>Space</kbd><span>Play / pause</span></span>
     <span class="shortcut"><kbd>R</kbd><span>Reset</span></span>
@@ -475,7 +474,7 @@ fn ShortcutHints(_props: {}) -> Html<Msg>
     <span class="shortcut"><kbd>Esc</kbd><span>Deselect</span></span>
   </div>
 
-fn MetricReadout({ model: Model }) -> Html<Msg>
+fn MetricReadout({ model: Model }) -> Html<void>
   <div class="chrome metric-readout" aria-label="Simulation metrics">
     <span>{elapsed_label(model.session.simulation.elapsed_days)}</span>
     <span>{to_string(model.session.simulation.bodies.len()).concat(" bodies")}</span>
@@ -485,10 +484,10 @@ fn MetricReadout({ model: Model }) -> Html<Msg>
     ).concat(" px/AU")}</span>
   </div>
 
-fn NoticeToast({ notice: Notice }) -> Html<Msg>
+fn NoticeToast({ notice: Notice }) -> Html<void>
   match(notice)
     Notice::Hidden:
-      empty()
+      fragment(Array<Html<void>>::init())
     Notice::Visible { kind, message }:
       <div class={notice_class(kind)} role="status" aria-live="polite">{message}</div>
 
@@ -530,10 +529,11 @@ fn Library({ model: Model }) -> Html<Msg>
 
 fn SavedList({ model: Model }) -> Html<Msg>
   if model.ui.saved_simulations.is_empty():
-    <div class="library-empty">
+    let static: Html<void> = <div class="library-empty">
       <strong>Your observatory is empty</strong>
       Save the current system, then return here to load, duplicate, or remove it.
     </div>
+    html_child<Msg>(static)
   else:
     <div class="saved-list">
       {model.ui.saved_simulations.map((summary: SimulationSummary) =>
@@ -730,4 +730,4 @@ fn library_status(model: Model) -> String
   to_string(count).concat(" saved systems")
 
 fn empty() -> Html<Msg>
-  fragment(Array<MsgPack>::init())
+  html_child<Msg>(fragment(Array<Html<void>>::init()))

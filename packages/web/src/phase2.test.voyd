@@ -38,7 +38,6 @@ use src::routes::{
   timeout_millis
 }
 use std::http::{ Body, Headers, IncomingRequest, Method, QueryString, Response }
-use std::msgpack::MsgPack
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::String
@@ -790,7 +789,7 @@ test "record route helpers compose with timeout policies":
   assert(true, eq: true)
 
 test "html document can include hydration model and client entry":
-  let page: MsgPack =
+  let page: Html<void> =
     <html>
       <body>
         <main id="app">

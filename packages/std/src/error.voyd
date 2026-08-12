@@ -76,6 +76,10 @@ pub fn panic(message: String) -> void
 pub fn panic(message: StringSlice) -> void
   panic(message.to_string())
 
+/// Stops execution immediately without allocating a diagnostic message.
+pub fn panic() -> void
+  panic_trap(0, 0)
+
 fn reserve_panic_message_storage(byte_count: i32): () -> i32
   if byte_count <= 0:
     return 0

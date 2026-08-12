@@ -1,24 +1,37 @@
 //! Standard input helpers backed by host-provided input streams.
 //!
 //! `std::input` supports line-based reads, raw byte reads, and terminal detection.
-//! Host interactions are encoded as MessagePack DTOs and decoded into typed results.
+//! Host interactions use automatic DTO conversion.
 
-use std::array::Array
-use std::bytes::{ ByteBuffer, Bytes }
+use std::bytes::Bytes
 use std::error::{ HostError, IoError, IoOther }
-use std::host_dto::HostDto
-use std::math::{ MathError, mod_euclid }
-use std::msgpack::MsgPack
-use std::msgpack::MsgPackError
-use std::msgpack::Null
-use std::msgpack::self as msgpack
 use std::optional::all
 use std::result::types::all
-use std::string::type::{ String, StringSlice, new_string }
+use std::string::type::{ String, StringSlice }
 
 pub obj InputRequest {
   /// Optional prompt shown before reading input.
   api prompt?: String
+}
+
+pub obj InputReadBytesRequest {
+  api max_bytes: i32
+}
+
+pub obj InputLineResult {
+  api ok: bool,
+  api found: bool,
+  api value: String,
+  api code: i32,
+  api message: String
+}
+
+pub obj InputBytesResult {
+  api ok: bool,
+  api found: bool,
+  api value: Bytes,
+  api code: i32,
+  api message: String
 }
 
 impl InputRequest
@@ -31,21 +44,12 @@ impl InputRequest
     InputRequest::init(prompt.as_slice())
 
 /// Host input effect used by `std::input`.
-///
-/// Operations in this effect map host stdin facilities into typed MessagePack
-/// DTOs consumed by this module.
 @effect(id: "voyd.std.input")
 pub eff Input
-  /// Reads one line using the provided payload.
-  ///
-  /// `payload` may include a `prompt` field (`string` or `null`).
-  /// Returns `{ ok, value }` where `value` is a string or null, or an error DTO.
-  read_line(tail, payload: MsgPack) -> MsgPack
+  /// Reads one line using the provided request.
+  read_line(tail, request: InputRequest) -> InputLineResult
   /// Reads up to `max_bytes` bytes from standard input.
-  ///
-  /// `payload` contains `{ max_bytes }`.
-  /// Returns `{ ok, value }` where `value` is a byte array or null, or an error DTO.
-  read_bytes_op(tail, payload: MsgPack) -> MsgPack
+  read_bytes_op(tail, request: InputReadBytesRequest) -> InputBytesResult
   /// Reports whether stdin is attached to an interactive terminal.
   is_tty_op(tail) -> bool
 
@@ -68,13 +72,13 @@ pub fn read_line(prompt: String): Input -> Result<Option<String>, HostError>
 
 /// Reads a line using an explicit request value.
 pub fn read_line(request: InputRequest): Input -> Result<Option<String>, HostError>
-  decode_read_line_result(Input::read_line(encode_read_line_payload(request)))
+  decode_read_line_result(Input::read_line(request))
 
 /// Reads up to `max_bytes` raw bytes from stdin.
 ///
 /// Returns `Ok(None)` when no more bytes are available.
 pub fn read_bytes(max_bytes: i32): Input -> Result<Option<Bytes>, IoError>
-  decode_read_bytes_result(Input::read_bytes_op(encode_read_bytes_payload(max_bytes)))
+  decode_read_bytes_result(Input::read_bytes_op(InputReadBytesRequest { max_bytes: max_bytes }))
 
 /// Returns true when stdin is attached to an interactive terminal.
 pub fn is_tty(): Input -> bool
@@ -83,136 +87,26 @@ pub fn is_tty(): Input -> bool
 fn input_request_with_prompt(prompt?: String): () -> InputRequest
   InputRequest { prompt }
 
-fn encode_read_line_payload(request: InputRequest): () -> MsgPack
-  match(request.prompt)
-    Some<String> { value }:
-      HostDto::init()
-        .set("prompt", msgpack::make_string(value))
-        .pack()
-    None:
-      HostDto::init()
-        .set("prompt", msgpack::make_null())
-        .pack()
+fn decode_read_line_result(result: InputLineResult): () -> Result<Option<String>, HostError>
+  if result.ok == false:
+    return Err<HostError> {
+      error: HostError { code: result.code, message: result.message }
+    }
+  if result.found:
+    Ok<Option<String>> { value: Some<String> { value: result.value } }
+  else:
+    Ok<Option<String>> { value: None {} }
 
-fn decode_read_line_result(payload: MsgPack): () -> Result<Option<String>, HostError>
-  match(HostDto::unpack(payload))
-    Err<HostError> { error }:
-      Err<HostError> { error: error }
-    Ok<HostDto> { value: decoded }:
-      match(decoded.read_bool("ok"))
-        Err<HostError> { error }:
-          Err<HostError> { error: error }
-        Ok<bool> { value }:
-          if value == false:
-            decode_host_error_result(decoded)
-          else:
-            match(decoded.read_msgpack("value"))
-              Err<HostError> { error }:
-                Err<HostError> { error: error }
-              Ok<MsgPack> { value }:
-                decode_optional_string(value)
-
-fn decode_optional_string(payload: MsgPack): () -> Result<Option<String>, HostError>
-  payload.match(active)
-    Null:
-      Ok<Option<String>> { value: None {} }
-    else:
-      match(msgpack::unpack_string(payload))
-        Ok<String> { value }:
-          Ok<Option<String>> { value: Some<String> { value: value } }
-        Err<MsgPackError> { error }:
-          Err<HostError> { error: msgpack_error_to_host_error(error) }
-
-fn encode_read_bytes_payload(max_bytes: i32): () -> MsgPack
-  HostDto::init()
-    .set("max_bytes", msgpack::make_i32(max_bytes))
-    .pack()
-
-fn decode_read_bytes_result(payload: MsgPack): () -> Result<Option<Bytes>, IoError>
-  match(HostDto::unpack(payload))
-    Err<HostError> { error }:
-      Err<IoError> { error: host_error_to_io_error(error) }
-    Ok<HostDto> { value: decoded }:
-      match(decoded.read_bool("ok"))
-        Err<HostError> { error }:
-          Err<IoError> { error: host_error_to_io_error(error) }
-        Ok<bool> { value }:
-          if value == false:
-            decode_io_error_result(decoded)
-          else:
-            match(decoded.read_msgpack("value"))
-              Err<HostError> { error }:
-                Err<IoError> { error: host_error_to_io_error(error) }
-              Ok<MsgPack> { value }:
-                decode_optional_bytes(value)
-
-fn decode_optional_bytes(payload: MsgPack): () -> Result<Option<Bytes>, IoError>
-  payload.match(active)
-    Null:
-      Ok<Option<Bytes>> { value: None {} }
-    else:
-      match(msgpack::unpack_array(payload))
-        Err<MsgPackError> { error }:
-          Err<IoError> { error: msgpack_error_to_io_error(error) }
-        Ok<Array<MsgPack>> { value }:
-          match(decode_bytes_array(value))
-            Ok<Bytes> { value }:
-              Ok<Option<Bytes>> { value: Some<Bytes> { value: value } }
-            Err<IoError> { error }:
-              Err<IoError> { error: error }
-
-fn decode_bytes_array(source: Array<MsgPack>): () -> Result<Bytes, IoError>
-  let ~buffer = ByteBuffer::with_capacity(source.len())
-  var index = 0
-  while index < source.len():
-    match(source.get(index))
-      Some<MsgPack> { value }:
-        match(msgpack::unpack_i32(value))
-          Ok<i32> { value }:
-            buffer.push(normalize_byte(value))
-          Err<MsgPackError> { error }:
-            return Err<IoError> { error: msgpack_error_to_io_error(error) }
-      None:
-        void
-    index = index + 1
-  Ok<Bytes> { value: buffer.as_bytes() }
-
-fn normalize_byte(value: i32): () -> i32
-  match(mod_euclid(value, 256))
-    Ok<i32> { value }:
-      value
-    Err<MathError>:
-      0
-
-fn decode_io_error_result(payload: HostDto): () -> Result<Option<Bytes>, IoError>
-  match(payload.read_i32("code"))
-    Err<HostError> { error }:
-      Err<IoError> { error: host_error_to_io_error(error) }
-    Ok<i32> { value: code }:
-      match(payload.read_string("message"))
-        Err<HostError> { error }:
-          Err<IoError> { error: host_error_to_io_error(error) }
-        Ok<String> { value: message }:
-          Err<IoError> {
-            error: IoError { kind: IoOther {}, code: code, message: message }
-          }
-
-fn decode_host_error_result(payload: HostDto): () -> Result<Option<String>, HostError>
-  match(payload.read_i32("code"))
-    Err<HostError> { error }:
-      Err<HostError> { error: error }
-    Ok<i32> { value: code }:
-      match(payload.read_string("message"))
-        Err<HostError> { error }:
-          Err<HostError> { error: error }
-        Ok<String> { value: message }:
-          Err<HostError> { error: HostError { code: code, message: message } }
-
-fn host_error_to_io_error(error: HostError): () -> IoError
-  IoError { kind: IoOther {}, code: error.code, message: error.message }
-
-fn msgpack_error_to_io_error(error: MsgPackError): () -> IoError
-  IoError { kind: IoOther {}, code: error.code, message: error.message }
-
-fn msgpack_error_to_host_error(error: MsgPackError): () -> HostError
-  HostError { code: error.code, message: error.message }
+fn decode_read_bytes_result(result: InputBytesResult): () -> Result<Option<Bytes>, IoError>
+  if result.ok == false:
+    return Err<IoError> {
+      error: IoError {
+        kind: IoOther {},
+        code: result.code,
+        message: result.message
+      }
+    }
+  if result.found:
+    Ok<Option<Bytes>> { value: Some<Bytes> { value: result.value } }
+  else:
+    Ok<Option<Bytes>> { value: None {} }

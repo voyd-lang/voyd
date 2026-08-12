@@ -1,5 +1,5 @@
 use std::enums::{ enum }
-use std::msgpack::pack_boundary_value
+use std::data::encode
 use std::string::type::String
 
 enum AmbiguousBoundaryValue
@@ -8,5 +8,5 @@ enum AmbiguousBoundaryValue
 
 pub fn main() -> void
   let value: AmbiguousBoundaryValue = AmbiguousBoundaryValue::Tagged { tag: "payload" }
-  pack_boundary_value(value)
+  encode(value)
   void

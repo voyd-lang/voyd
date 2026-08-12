@@ -57,7 +57,7 @@ const compileFixture = async () => {
     options: { validate: true, boundaryExports: false },
   });
   const baseline = codegenProgram({
-    program: optimized.program,
+    program,
     entryModuleId: prepared.entryModuleId,
     options: { validate: true, boundaryExports: false },
   });

@@ -11,6 +11,7 @@ import type {
   HostProtocolTable,
   SignatureHash,
 } from "../protocol/types.js";
+import { msgPackHostTransport } from "../transports/msgpack.js";
 import {
   registerDefaultHostAdapters,
   type DefaultAdapterHost,
@@ -43,6 +44,7 @@ const createFakeHost = (
   const handlers: HandlerRegistry = new Map();
   const host: DefaultAdapterHost = {
     table,
+    encodedPayloadSize: msgPackHostTransport.encodedPayloadSize,
     registerHandler: (
       effectId: string,
       opId: number,
@@ -163,7 +165,7 @@ describe("registerDefaultHostAdapters", () => {
     const getEnvHandler = getHandler("voyd.std.env", "get");
     const getResult = await getEnvHandler(tailContinuation, envKey);
     expect(getResult.kind).toBe("tail");
-    expect(getResult.value).toBe("hello");
+    expect(getResult.value).toEqual({ found: true, value: "hello" });
   });
 
   it("registers bun env handlers through node-compatible process env", async () => {
@@ -191,13 +193,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     expect(
       getHandler("voyd.std.env", "get")(tailContinuation, "VOYD_BUN_ENV_TEST")
     ).toEqual({
       kind: "tail",
-      value: "ok",
+      value: { found: true, value: "ok" },
     });
   });
 
@@ -242,8 +244,8 @@ describe("registerDefaultHostAdapters", () => {
       tailContinuation,
       8
     );
-    expect(Array.isArray(randomBytes.value)).toBe(true);
-    expect((randomBytes.value as unknown[]).length).toBe(8);
+    expect(randomBytes.value).toBeInstanceOf(Uint8Array);
+    expect((randomBytes.value as Uint8Array).length).toBe(8);
 
     const mono = await getHandler("voyd.std.time", "monotonic_now_millis")(
       tailContinuation
@@ -403,7 +405,10 @@ describe("registerDefaultHostAdapters", () => {
       "/this/path/does/not/exist"
     );
     expect(result.kind).toBe("tail");
-    expect(result.value).toMatchObject({ ok: false, kind: "not-found" });
+    expect(result.value).toMatchObject({
+      ok: false,
+      error_kind: "not-found",
+    });
   });
 
   it("creates directories and renames paths through the node fs adapter", async () => {
@@ -430,25 +435,25 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         nestedDirectory
       );
-      expect(createResult).toEqual({ kind: "tail", value: { ok: true } });
+      expect(createResult).toMatchObject({ kind: "tail", value: { ok: true } });
 
       const writeResult = await getHandler("voyd.std.fs", "write_string")(
         tailContinuation,
         { path: sourcePath, value: "orbit" }
       );
-      expect(writeResult).toEqual({ kind: "tail", value: { ok: true } });
+      expect(writeResult).toMatchObject({ kind: "tail", value: { ok: true } });
 
       const renameResult = await getHandler("voyd.std.fs", "rename")(
         tailContinuation,
         { from: sourcePath, to: destinationPath }
       );
-      expect(renameResult).toEqual({ kind: "tail", value: { ok: true } });
+      expect(renameResult).toMatchObject({ kind: "tail", value: { ok: true } });
 
       const readResult = await getHandler("voyd.std.fs", "read_string")(
         tailContinuation,
         destinationPath
       );
-      expect(readResult).toEqual({
+      expect(readResult).toMatchObject({
         kind: "tail",
         value: { ok: true, value: "orbit" },
       });
@@ -487,7 +492,7 @@ describe("registerDefaultHostAdapters", () => {
           value: "replacement",
         },
       );
-      expect(atomicResult).toEqual({ kind: "tail", value: { ok: true } });
+      expect(atomicResult).toMatchObject({ kind: "tail", value: { ok: true } });
       await expect(readFile(destination, "utf8")).resolves.toBe("replacement");
       await expect(readdir(root)).resolves.toEqual(["orbit.json"]);
 
@@ -513,7 +518,8 @@ describe("registerDefaultHostAdapters", () => {
       expect(
         contenders.filter(
           (result) =>
-            (result.value as Record<string, unknown>).kind === "already-exists",
+            (result.value as Record<string, unknown>).error_kind ===
+            "already-exists",
         ),
       ).toHaveLength(1);
       expect(["first", "second"]).toContain(
@@ -557,13 +563,13 @@ describe("registerDefaultHostAdapters", () => {
 
     const listDir = getHandler("voyd.std.fs", "list_dir");
     const rootResult = await listDir(tailContinuation, "/");
-    expect(rootResult).toEqual({
+    expect(rootResult).toMatchObject({
       kind: "tail",
       value: { ok: true, value: ["/tmp", "/var"] },
     });
 
     const nestedResult = await listDir(tailContinuation, "/tmp/");
-    expect(nestedResult).toEqual({
+    expect(nestedResult).toMatchObject({
       kind: "tail",
       value: { ok: true, value: ["/tmp/child"] },
     });
@@ -607,7 +613,7 @@ describe("registerDefaultHostAdapters", () => {
       "/tmp/old.log"
     );
 
-    expect(result).toEqual({ kind: "tail", value: { ok: true } });
+    expect(result).toMatchObject({ kind: "tail", value: { ok: true } });
     expect(removedPaths).toEqual(["/tmp/old.log"]);
 
     const errorResult = await getHandler("voyd.std.fs", "remove")(
@@ -618,9 +624,10 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: {
         ok: false,
-        code: 13,
-        kind: "permission-denied",
-        message: "permission denied",
+        value: {},
+        error_code: 13,
+        error_kind: "permission-denied",
+        error_message: "permission denied",
       },
     });
   });
@@ -656,14 +663,14 @@ describe("registerDefaultHostAdapters", () => {
       tailContinuation,
       "/tmp/orbit/data"
     );
-    expect(createResult).toEqual({ kind: "tail", value: { ok: true } });
+    expect(createResult).toMatchObject({ kind: "tail", value: { ok: true } });
     expect(mkdir).toHaveBeenCalledWith("/tmp/orbit/data", { recursive: true });
 
     const renameResult = await getHandler("voyd.std.fs", "rename")(
       tailContinuation,
       { from: "/tmp/orbit.tmp", to: "/tmp/orbit.json" }
     );
-    expect(renameResult).toEqual({ kind: "tail", value: { ok: true } });
+    expect(renameResult).toMatchObject({ kind: "tail", value: { ok: true } });
     expect(rename).toHaveBeenCalledWith("/tmp/orbit.tmp", "/tmp/orbit.json");
   });
 
@@ -727,7 +734,7 @@ describe("registerDefaultHostAdapters", () => {
         value: "complete",
       },
     );
-    expect(atomicResult).toEqual({ kind: "tail", value: { ok: true } });
+    expect(atomicResult).toMatchObject({ kind: "tail", value: { ok: true } });
     expect(files.get("/tmp/orbit.json")).toBe("complete");
     expect([...files.keys()]).toEqual(["/tmp/orbit.json"]);
 
@@ -742,8 +749,8 @@ describe("registerDefaultHostAdapters", () => {
     );
     expect(exclusiveResult.value).toMatchObject({
       ok: false,
-      kind: "already-exists",
-      message: "already exists",
+      error_kind: "already-exists",
+      error_message: "already exists",
     });
     expect(files.get("/tmp/existing.txt")).toBe("owner");
 
@@ -755,7 +762,10 @@ describe("registerDefaultHostAdapters", () => {
         value: "temporary",
       },
     );
-    expect(failedResult.value).toMatchObject({ ok: false, kind: "conflict" });
+    expect(failedResult.value).toMatchObject({
+      ok: false,
+      error_kind: "conflict",
+    });
     expect(removed).toHaveLength(1);
     expect(removed[0]).toContain("/tmp/rename-fails.txt.voyd-tmp-");
   });
@@ -800,10 +810,10 @@ describe("registerDefaultHostAdapters", () => {
     expect(readBytesResult.kind).toBe("tail");
     expect(readBytesResult.value).toMatchObject({
       ok: false,
-      code: 1,
+      error_code: 1,
     });
     expect(
-      toStringOrUndefinedFromRecord(readBytesResult.value, "message")
+      toStringOrUndefinedFromRecord(readBytesResult.value, "error_message")
     ).toMatch(/read_bytes response exceeds effect transport buffer/i);
 
     const readStringResult = await getHandler("voyd.std.fs", "read_string")(
@@ -813,10 +823,10 @@ describe("registerDefaultHostAdapters", () => {
     expect(readStringResult.kind).toBe("tail");
     expect(readStringResult.value).toMatchObject({
       ok: false,
-      code: 1,
+      error_code: 1,
     });
     expect(
-      toStringOrUndefinedFromRecord(readStringResult.value, "message")
+      toStringOrUndefinedFromRecord(readStringResult.value, "error_message")
     ).toMatch(/read_string response exceeds effect transport buffer/i);
 
     const listDirResult = await getHandler("voyd.std.fs", "list_dir")(
@@ -826,10 +836,10 @@ describe("registerDefaultHostAdapters", () => {
     expect(listDirResult.kind).toBe("tail");
     expect(listDirResult.value).toMatchObject({
       ok: false,
-      code: 1,
+      error_code: 1,
     });
     expect(
-      toStringOrUndefinedFromRecord(listDirResult.value, "message")
+      toStringOrUndefinedFromRecord(listDirResult.value, "error_message")
     ).toMatch(/list_dir response exceeds effect transport buffer/i);
   });
 
@@ -891,11 +901,13 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: {
         ok: true,
+        error_code: 0,
+        error_message: "",
         value: {
           status: 201,
           reason: "Created",
           headers: [{ name: "content-type", value: "text/plain" }],
-          body: [104, 101, 108, 108, 111],
+          body: Uint8Array.from([104, 101, 108, 108, 111]),
         },
       },
     });
@@ -949,12 +961,12 @@ describe("registerDefaultHostAdapters", () => {
         timeout_millis: 5,
       }
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       kind: "tail",
       value: {
         ok: false,
-        code: 2,
-        message: "fetch request timed out or was aborted",
+        error_code: 2,
+        error_message: "fetch request timed out or was aborted",
       },
     });
   });
@@ -1006,12 +1018,12 @@ describe("registerDefaultHostAdapters", () => {
       { url: "https://example.test/first", redirect: "manual" },
       { url: "https://example.test/second", redirect: "manual" },
     ]);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       kind: "tail",
       value: {
         ok: false,
-        code: 1,
-        message: "http redirect limit exceeded (1)",
+        error_code: 1,
+        error_message: "http redirect limit exceeded (1)",
       },
     });
   });
@@ -1227,12 +1239,12 @@ describe("registerDefaultHostAdapters", () => {
         timeout_millis: 5,
       }
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       kind: "tail",
       value: {
         ok: false,
-        code: 1,
-        message: "http client timeout_millis requires AbortController support",
+        error_code: 1,
+        error_message: "http client timeout_millis requires AbortController support",
       },
     });
   });
@@ -1275,7 +1287,7 @@ describe("registerDefaultHostAdapters", () => {
 
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -1318,7 +1330,7 @@ describe("registerDefaultHostAdapters", () => {
 
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -1372,7 +1384,7 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: false,
-        code: 1,
+        error_code: 1,
       },
     });
     expect(responses).toEqual([
@@ -1430,7 +1442,7 @@ describe("registerDefaultHostAdapters", () => {
     });
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -1520,7 +1532,7 @@ describe("registerDefaultHostAdapters", () => {
           },
         }
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "write_response_raw")(
         tailContinuation,
@@ -1529,7 +1541,7 @@ describe("registerDefaultHostAdapters", () => {
           chunk: Array.from(new TextEncoder().encode("data: one\n\n")),
         }
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await expect(firstChunk).resolves.toBe("data: one\n\n");
     await expect(
       getHandler("voyd.std.http.server", "write_response_raw")(
@@ -1539,13 +1551,13 @@ describe("registerDefaultHostAdapters", () => {
           chunk: Array.from(new TextEncoder().encode("data: two\n\n")),
         }
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "finish_response_raw")(
         tailContinuation,
         requestId
       )
-    ).resolves.toEqual({ kind: "resume", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "resume", value: { ok: true } });
     await expect(responsePromise).resolves.toEqual({
       status: 200,
       contentType: "text/event-stream",
@@ -1556,7 +1568,7 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("finishes cleanly after a streamed response write detects disconnect", async () => {
@@ -1635,20 +1647,23 @@ describe("registerDefaultHostAdapters", () => {
       )
     ).resolves.toMatchObject({
       kind: "tail",
-      value: { ok: false, message: "client disconnected during streamed response" },
+      value: {
+        ok: false,
+        error_message: "client disconnected during streamed response",
+      },
     });
     await expect(
       getHandler("voyd.std.http.server", "finish_response_raw")(
         tailContinuation,
         requestId
       )
-    ).resolves.toEqual({ kind: "resume", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "resume", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("finishes cleanly when a client disconnects after the final stream write", async () => {
@@ -1722,7 +1737,7 @@ describe("registerDefaultHostAdapters", () => {
           chunk: Array.from(new TextEncoder().encode("data: final\n\n")),
         }
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await disconnected;
 
     await expect(
@@ -1730,13 +1745,13 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         requestId
       )
-    ).resolves.toEqual({ kind: "resume", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "resume", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("closes an abandoned started response without corrupting streamed bytes", async () => {
@@ -1827,7 +1842,7 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("accepts node request headers before consuming a streamed request body", async () => {
@@ -1891,7 +1906,7 @@ describe("registerDefaultHostAdapters", () => {
         ok: true,
         value: {
           path: "/stream-upload",
-          body: [],
+          body: new Uint8Array(),
           body_streaming: true,
         },
       },
@@ -2128,7 +2143,7 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: false,
-        message: "request 7 already has a body read in progress",
+        error_message: "request 7 already has a body read in progress",
       },
     });
     expect(readRequest).toHaveBeenCalledOnce();
@@ -2153,7 +2168,7 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: false,
-        message: "request 7 has no open request body stream",
+        error_message: "request 7 has no open request body stream",
       },
     });
 
@@ -2161,7 +2176,7 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: true,
-        value: { chunk: [2], done: true },
+        value: { chunk: Uint8Array.from([2]), done: true },
       },
     });
     expect(readRequest).toHaveBeenCalledTimes(2);
@@ -2235,14 +2250,14 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: false,
-        message: "request 8 has no open request body stream",
+        error_message: "request 8 has no open request body stream",
       },
     });
     await expect(read(tailContinuation, 8)).resolves.toMatchObject({
       kind: "resume",
       value: {
         ok: false,
-        message: "request 8 has no open request body stream",
+        error_message: "request 8 has no open request body stream",
       },
     });
     expect(readRequest).toHaveBeenCalledOnce();
@@ -2316,7 +2331,7 @@ describe("registerDefaultHostAdapters", () => {
       kind: "resume",
       value: {
         ok: false,
-        message: `request ${requestId} has no open request body stream`,
+        error_message: `request ${requestId} has no open request body stream`,
       },
     });
     await getHandler("voyd.std.http.server", "close_raw")(
@@ -2400,7 +2415,7 @@ describe("registerDefaultHostAdapters", () => {
           method: "POST",
           path: "/deno",
           query: "x=1",
-          body: [104, 105],
+          body: Uint8Array.from([104, 105]),
         },
       },
     });
@@ -2414,7 +2429,7 @@ describe("registerDefaultHostAdapters", () => {
           body: [111, 107],
         },
       })
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -2423,7 +2438,7 @@ describe("registerDefaultHostAdapters", () => {
     await expect(response.text()).resolves.toBe("ok");
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -2501,7 +2516,7 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("clears web response stream timeouts when the server closes", async () => {
@@ -2576,7 +2591,7 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await expect(bodyPromise).resolves.toBe("data: partial\n\n");
     expect(clearTimeoutSpy).toHaveBeenCalledTimes(clearedBeforeClose + 1);
     clearTimeoutSpy.mockRestore();
@@ -2655,20 +2670,20 @@ describe("registerDefaultHostAdapters", () => {
       )
     ).resolves.toMatchObject({
       kind: "tail",
-      value: { ok: false, message: "client disconnected" },
+      value: { ok: false, error_message: "client disconnected" },
     });
     await expect(
       getHandler("voyd.std.http.server", "finish_response_raw")(
         tailContinuation,
         requestId
       )
-    ).resolves.toEqual({ kind: "resume", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "resume", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("finishes cleanly when a web client disconnects after the final stream write", async () => {
@@ -2742,7 +2757,7 @@ describe("registerDefaultHostAdapters", () => {
           chunk: Array.from(new TextEncoder().encode("data: final\n\n")),
         }
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
     await expect(firstChunk).resolves.toMatchObject({ done: false });
     await reader.cancel(new Error("client disconnected"));
 
@@ -2751,13 +2766,13 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         requestId
       )
-    ).resolves.toEqual({ kind: "resume", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "resume", value: { ok: true } });
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(
         tailContinuation,
         serverId
       )
-    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    ).resolves.toMatchObject({ kind: "tail", value: { ok: true } });
   });
 
   it("omits Deno/Bun web response bodies for null-body statuses", async () => {
@@ -2806,7 +2821,7 @@ describe("registerDefaultHostAdapters", () => {
           body: [],
         },
       })
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -2815,7 +2830,7 @@ describe("registerDefaultHostAdapters", () => {
     await expect(response.text()).resolves.toBe("");
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -2867,7 +2882,7 @@ describe("registerDefaultHostAdapters", () => {
         value: {
           method: "GET",
           path: "/bun",
-          body: [],
+          body: new Uint8Array(),
         },
       },
     });
@@ -2881,7 +2896,7 @@ describe("registerDefaultHostAdapters", () => {
           body: [98, 117, 110],
         },
       })
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -2890,7 +2905,7 @@ describe("registerDefaultHostAdapters", () => {
     await expect(response.text()).resolves.toBe("bun");
     await expect(
       getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       kind: "tail",
       value: { ok: true },
     });
@@ -2936,7 +2951,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: "voyd" },
+      value: { ok: true, found: true, value: "voyd", code: 0, message: "" },
     });
 
     await expect(
@@ -2945,7 +2960,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: null },
+      value: { ok: true, found: false, value: "", code: 0, message: "" },
     });
 
     await expect(
@@ -2956,6 +2971,8 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: {
         ok: false,
+        found: false,
+        value: "",
         code: 1,
         message: "input unavailable",
       },
@@ -2967,7 +2984,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: [7, 8] },
+      value: {
+        ok: true,
+        found: true,
+        value: Uint8Array.from([7, 8]),
+        code: 0,
+        message: "",
+      },
     });
 
     await expect(
@@ -2976,7 +2999,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: [7, 8, 9] },
+      value: {
+        ok: true,
+        found: true,
+        value: Uint8Array.from([7, 8, 9]),
+        code: 0,
+        message: "",
+      },
     });
 
     await expect(
@@ -2985,7 +3014,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: null },
+      value: {
+        ok: true,
+        found: false,
+        value: new Uint8Array(),
+        code: 0,
+        message: "",
+      },
     });
 
     await expect(
@@ -2996,6 +3031,8 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: {
         ok: false,
+        found: false,
+        value: new Uint8Array(),
         code: 1,
         message: "bytes unavailable",
       },
@@ -3047,7 +3084,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
 
     await expect(
@@ -3066,11 +3103,11 @@ describe("registerDefaultHostAdapters", () => {
     await expect(
       getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
         target: "stderr",
-        bytes: [7, 8, 9],
+        bytes: Uint8Array.from([7, 8, 9]),
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
 
     await expect(
@@ -3079,7 +3116,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
 
     expect(
@@ -3157,7 +3194,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: [7, 8] },
+      value: {
+        ok: true,
+        found: true,
+        value: Uint8Array.from([7, 8]),
+        code: 0,
+        message: "",
+      },
     });
     expect(getHandler("voyd.std.input", "is_tty")(tailContinuation)).toEqual({
       kind: "tail",
@@ -3197,7 +3240,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: null },
+      value: {
+        ok: true,
+        found: false,
+        value: new Uint8Array(),
+        code: 0,
+        message: "",
+      },
     });
   });
 
@@ -3229,6 +3278,8 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: {
         ok: false,
+        found: false,
+        value: new Uint8Array(),
         code: 1,
         message:
           "stdin is configured for text decoding; read_bytes requires raw byte chunks",
@@ -3289,12 +3340,12 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     await expect(
       (async () =>
         getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
-          bytes: [1, 2, 3],
+          bytes: Uint8Array.from([1, 2, 3]),
         }))()
     ).rejects.toThrow(/does not implement op write_bytes/i);
     await expect(
@@ -3303,7 +3354,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     expect(
       getHandler("voyd.std.output", "is_tty")(tailContinuation, {
@@ -3348,16 +3399,16 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     await expect(
       getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
         target: "stderr",
-        bytes: [255, 0, 1],
+        bytes: Uint8Array.from([255, 0, 1]),
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     await expect(
       getHandler("voyd.std.output", "flush")(tailContinuation, {
@@ -3365,7 +3416,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     expect(
       getHandler("voyd.std.output", "is_tty")(tailContinuation, {
@@ -3430,7 +3481,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     expect(byteWrites).toEqual([
       { target: "stdout", bytes: [104, 101, 108, 108, 111] },
@@ -3474,16 +3525,16 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     await expect(
       getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
         target: "stderr",
-        bytes: [4, 5, 6],
+        bytes: Uint8Array.from([4, 5, 6]),
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     await expect(
       getHandler("voyd.std.output", "flush")(tailContinuation, {
@@ -3491,7 +3542,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     expect(
       getHandler("voyd.std.output", "is_tty")(tailContinuation, {
@@ -3538,8 +3589,8 @@ describe("registerDefaultHostAdapters", () => {
       70_000
     );
     expect(result.kind).toBe("tail");
-    expect(Array.isArray(result.value)).toBe(true);
-    expect((result.value as unknown[]).length).toBe(70_000);
+    expect(result.value).toBeInstanceOf(Uint8Array);
+    expect((result.value as Uint8Array).length).toBe(70_000);
     expect(chunkSizes).toEqual([65_536, 4_464]);
   });
 
@@ -3563,11 +3614,11 @@ describe("registerDefaultHostAdapters", () => {
 
     expect(() =>
       getHandler("voyd.std.random", "fill_bytes")(tailContinuation, 100)
-    ).toThrow(/exact-response maximum of 30 bytes/i);
+    ).toThrow(/exact-response maximum of 62 bytes/i);
     expect(randomBytes).not.toHaveBeenCalled();
   });
 
-  it("accounts for array32 header overhead when rejecting oversized random fills", async () => {
+  it("accounts for binary header overhead when rejecting oversized random fills", async () => {
     const table = buildTable([
       { effectId: "voyd.std.random", opName: "fill_bytes", opId: 0 },
     ]);
@@ -3590,7 +3641,7 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         1_000_000
       )
-    ).toThrow(/exact-response maximum of 65536 bytes/i);
+    ).toThrow(/exact-response maximum of 131073 bytes/i);
     expect(randomBytes).not.toHaveBeenCalled();
   });
 
@@ -3698,12 +3749,12 @@ describe("registerDefaultHostAdapters", () => {
     );
     expect(fillBytesResult).toEqual({
       kind: "tail",
-      value: [17, 18, 19, 20],
+      value: Uint8Array.from([17, 18, 19, 20]),
     });
     expect(randomBytes).toHaveBeenCalledTimes(3);
   });
 
-  it("returns null for denied deno env reads", async () => {
+  it("returns a missing result for denied deno env reads", async () => {
     const table = buildTable([
       { effectId: "voyd.std.env", opName: "get", opId: 0 },
       { effectId: "voyd.std.env", opName: "set", opId: 1 },
@@ -3728,6 +3779,6 @@ describe("registerDefaultHostAdapters", () => {
       "HOME"
     );
     expect(result.kind).toBe("tail");
-    expect(result.value).toBeNull();
+    expect(result.value).toEqual({ found: false, value: "" });
   });
 });

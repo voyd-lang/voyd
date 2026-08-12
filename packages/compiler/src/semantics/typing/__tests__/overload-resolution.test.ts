@@ -373,6 +373,42 @@ describe("overload resolution", () => {
     expect(matches).toEqual([concrete]);
   });
 
+  it("prefers the overload requiring fewer argument conversions", () => {
+    const { ctx, state } = createScoringContext();
+    const exact = createCandidate(
+      1,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+    const widened = createCandidate(
+      2,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+
+    const matches = findOverloadMatches({
+      name: "conversion_specificity",
+      candidates: [widened, exact],
+      args: [{ type: ctx.primitives.i32 }],
+      typeArguments: undefined,
+      span: DUMMY_SPAN,
+      ctx,
+      state,
+      matchesCandidate: () => true,
+      scoreMatches: () =>
+        new Map([
+          [exact, { argumentConversionPenalty: 0 }],
+          [widened, { argumentConversionPenalty: 1 }],
+        ]),
+    });
+
+    expect(matches).toEqual([exact]);
+  });
+
   it("uses genericity penalty after dominance", () => {
     const { ctx, state } = createScoringContext();
     const fieldParam = createTypeParam(ctx);

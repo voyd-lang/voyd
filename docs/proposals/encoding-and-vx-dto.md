@@ -211,17 +211,17 @@ write_bytes(value)
 begin_array(length:)
 end_array()
 
-begin_record(shape:, field_count:)
-write_field(field:)
+begin_record(name:, field_count:)
+write_field(name)
 end_record()
 
-begin_variant(union:, variant:)
+begin_variant(union:, variant:, field_count:)
 end_variant()
 ```
 
-`field`, `union`, and `variant` are compact descriptors from `Shape`. A normal
-writer must not require the generated traversal to allocate or repeat a field
-string for every record.
+The names are interned literals from the compiler-derived plan. A normal writer
+does not require the generated traversal to allocate a reflective `Shape` graph
+or a new field string for every record.
 
 Writer calls form a balanced stream. Each `begin_*` has exactly one matching
 `end_*`; a scalar fills one expected value; a field label is followed by exactly
@@ -507,8 +507,9 @@ frame categories are:
 
 Each typed payload position has the relevant emitted schema fingerprint. The
 frame version defines field ordering, discriminator rules, and failure shape.
-The transport owns encoding those frames; the DTO plan owns the meaning of
-their typed payloads.
+Compiler-generated wrappers own that frame structure, the selected transport
+owns its byte representation, and the DTO plan owns the meaning of its typed
+payloads.
 
 Frames carry immutable byte buffers. Implementations may borrow Wasm memory,
 transfer ownership, share immutable buffers, or use runtime-local handles when
@@ -551,55 +552,66 @@ and useful error paths. It cannot become a second source of DTO truth.
 ## Host transport providers
 
 The compiler must know the selected provider before it generates Wasm wrappers.
-An emitted string alone is insufficient: the wrapper needs concrete reader,
-writer, and frame entry points to compile and link.
+An emitted string alone is insufficient: the wrapper needs concrete reader and
+writer lifecycle operations to compile and link.
 
-Use a narrow declaration on a stateless provider object. This is conceptual
-syntax:
+Host transports use the compiler contract and registered implementation
+mechanism defined in
+[`docs/architecture/compiler-contracts.md`](../architecture/compiler-contracts.md).
+The provider interface is a compiler-contract trait:
 
 ```voyd
-@host_transport(
-  id: "voyd.std.msgpack",
-  version: 1
-)
-pub obj MsgPackHostTransport
-
-impl HostTransportProvider for MsgPackHostTransport
+@compiler_contract(id: "voyd.std.host-transport-provider")
+trait HostTransportProvider<Reader, Writer>
+  fn create_reader(ptr: i32, len: i32) -> Reader
+  fn reader_complete(reader: Reader) -> bool
+  fn create_writer(ptr: i32, len: i32) -> Writer
+  fn finish_writer(writer: Writer) -> i32
 ```
 
-`@host_transport` is the only new identity annotation proposed here. Do not
-add broad `@obj(id:)`. A transport identity has compiler and host ABI meaning;
-an ordinary object identity should not acquire that meaning accidentally.
+Each selectable transport is a versioned implementation of that contract:
 
-`HostTransportProvider` is a compiler-known intrinsic trait with a stable
-compiler-contract identity. The attribute supplies the static ID and version;
-the trait and provider contract establish that the object is a valid provider.
-The marker object is never constructed, passed to user code, or dynamically
-trait-dispatched.
+```voyd
+obj MsgPackHostTransport {}
 
-The provider contract binds concrete, compiler-validated roles for:
+@compiler_impl(id: "voyd.std.msgpack", version: 1)
+impl HostTransportProvider<MsgPackReader, MsgPackWriter>
+  for MsgPackHostTransport
+  // static method implementations
+```
 
-- inbound `DataReader` construction;
-- outbound `DataWriter` construction and finalization;
-- each ABI v2 envelope/frame operation;
-- provider error conversion; and
-- buffer ownership and cleanup.
+The compiler infers the contract ID from the implemented trait. The annotation
+supplies the transport implementation ID and version used for build selection
+and host negotiation. No separate `@host_transport` annotation exists, and an
+ordinary object does not acquire compiler or host ABI identity. The provider
+object is stateless and is never constructed, passed to user code, or
+dynamically trait-dispatched.
 
-The exact role spelling is intentionally deferred. It may be explicit role
-references in the attribute/manifest or fixed static provider members. It must
-not depend on guessed method names or ordinary dynamic trait lookup. The
-compiler needs exact symbols and signatures to retain and specialize.
+`Reader` must implement the provider-neutral `DataReader` contract and `Writer`
+must implement `DataWriter`. The compiler obtains those concrete types from the
+specialized provider impl and resolves all four operations through semantic
+trait-method metadata. It does not guess method names or look up ordinary source
+symbols. Reader and writer contracts carry structural operations and provider
+errors; the provider lifecycle methods adapt Wasm memory, require complete frame
+consumption, finalize output, and enforce buffer limits.
+
+ABI v2 frame layouts remain compiler-owned. Generated wrappers traverse those
+layouts through the selected reader and writer, so a provider chooses the byte
+encoding without redefining export, effect, callback, cancellation, or VX frame
+semantics.
 
 ### Build-time resolution
 
 The build selects a package, ID, and version. The SDK/compiler resolver loads
 that package as a link root, then the compiler:
 
-1. Finds exactly one matching `@host_transport` provider.
-2. Validates the intrinsic trait, provider ownership, all role signatures, and
-   frame contract.
+1. Finds exactly one `@compiler_impl` of the host transport contract with the
+   selected implementation ID and version.
+2. Validates the compiler-contract trait, provider ownership, stateless target,
+   specialized method signatures, and required `DataReader` and `DataWriter`
+   implementations.
 3. Specializes host wrappers for its concrete reader/writer implementation.
-4. Keeps all selected provider symbols reachable.
+4. Keeps the resolved provider, reader, and writer methods reachable.
 5. Emits the provider's ID/version with `hostAbi` and `dtoSchemaAbi` metadata.
 
 The JavaScript SDK registers the matching host adapter under the same identity.
@@ -610,18 +622,18 @@ Only `std` and explicitly registered, lockfile-resolved packages may provide a
 host transport. This prevents an incidental dependency from shadowing a host
 ABI identity.
 
-Within one linked program, `(id, version)` has exactly one provider
-declaration. A duplicate is an error, even when declarations look identical.
-Different versions of an ID may exist in dependencies, but the build selects
-one exact version. Unknown IDs, an unlinked provider package, a wrong package,
-a missing role, a duplicate, or a signature mismatch fail before code
-generation.
+Within one linked program, `(contract ID, implementation ID, version)` has
+exactly one registered implementation. A duplicate is an error, even when
+declarations look identical. Different versions of an implementation ID may
+exist in dependencies, but the build selects one exact version. Unknown IDs, an
+unlinked provider package, a wrong package, a missing implementation, a
+duplicate, or a signature mismatch fail before code generation.
 
-The transport version changes for incompatible wire or frame semantics. The
-host ABI and DTO-schema ABI are separate versions; they must not be overloaded
-into the transport version. Provider-internal ABI details remain compiler-owned
-and are validated at build time rather than exposed as a general application
-protocol.
+The transport version changes for incompatible byte encoding or
+provider-specific buffer semantics. Frame changes use the host ABI version, and
+DTO-shape changes use the DTO-schema ABI version; neither is overloaded into the
+transport version. Provider-internal ABI details remain compiler-owned and are
+validated at build time rather than exposed as a general application protocol.
 
 MessagePack can remain the toolchain's initial default transport. The first
 public release does not need a public source-level transport-selection API.
@@ -825,9 +837,10 @@ on optimizer fusion to remove a mandatory tree is not acceptable.
    APIs, including the explicit JSON `i64` policy.
 5. Define and implement the custom DTO representation contract. Migrate every
    current non-ordinary serializer use to Auto DTO or that contract.
-6. Define ABI v2 frames and the compiler-known host transport provider
-   contract. Convert the current MessagePack implementation into the first
-   selected provider; add emitted metadata and SDK adapter negotiation.
+6. Define ABI v2 frames, extend compiler contracts to traits and registered
+   implementations, and define the host transport provider contract. Convert
+   the current MessagePack implementation into the first selected provider;
+   add emitted metadata and SDK adapter negotiation.
 7. Migrate exports, effects, callbacks, and external package calls to the one
    selected provider. Delete the legacy compiler contracts, traversal,
    hard-coded format IDs, and generic host MessagePack dependency; add the
@@ -861,6 +874,9 @@ on optimizer fusion to remove a mandatory tree is not acceptable.
 - Normal SDK calls still exchange plain JavaScript values without application
   encoding calls.
 - A module uses one negotiated transport for every automatic boundary route.
+- The selected transport resolves through one exact `@compiler_impl` of the
+  compiler-contract provider trait; codegen does not use format-specific
+  function contracts or name-based lookup.
 - A missing or incompatible host adapter fails before user code executes.
 - VX commands preserve structure until final lowering and use erased payloads
   only at true existential boundaries.
@@ -873,8 +889,6 @@ on optimizer fusion to remove a mandatory tree is not acceptable.
 
 ## Open decisions
 
-- Choose the final source syntax for provider role binding: explicit manifest
-  references or compiler-validated static provider members.
 - Choose the exact public spelling of generic data errors and reader/writer
   lifetime/ownership APIs after validating it against Voyd's trait system.
 - Decide whether the first release permits non-std registered transport

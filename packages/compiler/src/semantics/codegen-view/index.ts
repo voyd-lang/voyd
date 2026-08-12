@@ -43,12 +43,22 @@ import type {
   SymbolRefKey,
   TraitImplInstance,
 } from "../typing/types.js";
+import {
+  createAutoDtoPlanIndex,
+  type AutoDtoPlanIndex,
+} from "./auto-dto-plan.js";
+
+export type {
+  AutoDtoFieldPlan,
+  AutoDtoPlan,
+  AutoDtoPlanIndex,
+  AutoDtoPrimitivePlan,
+} from "./auto-dto-plan.js";
 import { cloneNestedMap } from "../typing/call-resolution.js";
 import {
   getOptionalInfo,
   type OptionalResolverContext,
 } from "../typing/optionals.js";
-import type { SerializerMetadata } from "../symbol-index.js";
 import { buildProgramSymbolArena } from "../program-symbol-arena.js";
 import type { ProgramSymbolArena, SymbolRef } from "../program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "../canonical-symbol-ref.js";
@@ -244,7 +254,6 @@ export type CodegenFunctionSignature = {
   parameters: readonly {
     typeId: TypeId;
     declaredType?: HirTypeExpr;
-    declaredSerializer?: SerializerMetadata;
     label?: string;
     optional: boolean;
     defaulted?: boolean;
@@ -255,7 +264,6 @@ export type CodegenFunctionSignature = {
   }[];
   returnType: TypeId;
   declaredReturnType?: HirTypeExpr;
-  declaredReturnSerializer?: SerializerMetadata;
   effectRow: number;
   typeParams: readonly {
     symbol: SymbolId;
@@ -506,6 +514,7 @@ export type ProgramCodegenView = {
   callableAccesses: CallableAccessIndex;
   instances: MonomorphizedInstanceIndex;
   imports: ImportWiringIndex;
+  dtoPlans: AutoDtoPlanIndex;
   modules: ReadonlyMap<string, ModuleCodegenView>;
 };
 
@@ -2561,7 +2570,6 @@ export const buildProgramCodegenView = (
         parameters: signature.parameters.map((param) => ({
           typeId: param.type,
           declaredType: param.declaredType,
-          declaredSerializer: param.declaredSerializer,
           label: param.label,
           optional: param.optional === true,
           defaulted: param.defaulted === true,
@@ -2577,7 +2585,6 @@ export const buildProgramCodegenView = (
         })),
         returnType: signature.returnType,
         declaredReturnType: signature.declaredReturnType,
-        declaredReturnSerializer: signature.declaredReturnSerializer,
         effectRow: signature.effectRow,
         typeParams: (signature.typeParams ?? []).map((param) => ({
           symbol: param.symbol,
@@ -2730,7 +2737,9 @@ export const buildProgramCodegenView = (
     });
   });
 
-  return {
+  let program!: ProgramCodegenView;
+  const dtoPlans = createAutoDtoPlanIndex(() => program);
+  program = {
     effects,
     primitives: {
       bool: first.typing.primitives.bool,
@@ -2755,6 +2764,8 @@ export const buildProgramCodegenView = (
     callableAccesses,
     instances,
     imports,
+    dtoPlans,
     modules: moduleViews,
   };
+  return program;
 };

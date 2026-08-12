@@ -101,7 +101,7 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
   [
-    "__boundary_retain_callback",
+    "__host_retain_callback",
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
   [
@@ -113,25 +113,14 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
   [
-    "__boundary_value_to_msgpack",
+    "__dto_value_to_data",
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
-  [
-    "__boundary_msgpack_to_value",
-    { intrinsicUsesSignature: false, access: "std-only" },
-  ],
-  [
-    "__boundary_msgpack_to_value_or_identity",
-    { intrinsicUsesSignature: false, access: "std-only" },
-  ],
-  [
-    "__boundary_shape_of",
-    { intrinsicUsesSignature: false, access: "std-only" },
-  ],
-  [
-    "__boundary_try_shape_of",
-    { intrinsicUsesSignature: false, access: "std-only" },
-  ],
+  ["__dto_write", { intrinsicUsesSignature: false, access: "std-only" }],
+  ["__dto_read", { intrinsicUsesSignature: false, access: "std-only" }],
+  ["__dto_fingerprint", { intrinsicUsesSignature: false, access: "std-only" }],
+  ["__dto_shape_of", { intrinsicUsesSignature: false, access: "std-only" }],
+  ["__dto_try_shape_of", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__shift_l", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__shift_ru", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__bit_and", { intrinsicUsesSignature: false, access: "std-only" }],

@@ -5,27 +5,35 @@ import type {
   HirCallExpr,
 } from "../context.js";
 import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
-import { allocateTempLocal } from "../locals.js";
+import {
+  allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "../locals.js";
 import { ensureLinearMemoryExport } from "../memory-exports.js";
-import { ensureMsgPackFunctions } from "../effects/host-boundary/msgpack.js";
+import { ensureSelectedHostTransportProvider } from "../host-transport/selected-provider.js";
+import { wasmTypeFor, getRequiredExprType } from "../types.js";
 import {
-  wasmTypeFor,
-  getStructuralTypeInfo,
-  getRequiredExprType,
-} from "../types.js";
-import { deriveBoundarySchema, type BoundarySchema } from "../boundary/schema.js";
+  deriveBoundarySchema,
+  withDtoFingerprint,
+  type BoundarySchema,
+} from "../boundary/schema.js";
 import {
-  packBoundaryValueAsMsgPack,
-  unpackBoundaryValueFromMsgPack,
-} from "../boundary/msgpack-codec.js";
-import { findSerializerForType } from "../serializer.js";
+  hostStreamWriterResultTypeId,
+  writeDtoValueToHostStream,
+  writeHostStreamEvent,
+} from "../boundary/dto-stream-writer.js";
 import {
-  boundaryMsgPackPayloadField,
-  isBoundaryMsgPackValue,
-} from "../boundary-metadata.js";
-import { coerceValueToType, loadStructuralField } from "../structural.js";
+  readDtoValueFromHostStream,
+  readHostStreamValue,
+} from "../boundary/dto-stream-reader.js";
 import type { EffectRegistry } from "../effects/effect-registry.js";
 import { murmurHash3 } from "@voyd-lang/lib/murmur-hash.js";
+import {
+  SELECTED_HOST_FRAME_TAG,
+  SELECTED_HOST_FRAME_VERSION,
+} from "../host-transport/frame-codec.js";
+import { emitStringLiteral } from "../expressions/primitives.js";
 
 export const EXTERNAL_IMPORT_MODULE = "voyd.external";
 export const EXTERNAL_REQUIREMENTS_SECTION = "voyd.external_requirements";
@@ -65,27 +73,33 @@ export const compileExternalCall = ({
   instanceId?: ProgramFunctionInstanceId;
   paramTypeIds?: readonly TypeId[];
 }): binaryen.ExpressionRef => {
-  const paramTypeIds = plannedParamTypeIds ?? call.args.map((arg) =>
-    getRequiredExprType(arg.expr, ctx, instanceId),
-  );
+  const paramTypeIds =
+    plannedParamTypeIds ??
+    call.args.map((arg) => getRequiredExprType(arg.expr, ctx, instanceId));
   if (paramTypeIds.length !== args.length) {
-    throw new Error(`external call argument plan mismatch for ${identity.interfaceId}::${identity.functionName}`);
+    throw new Error(
+      `external call argument plan mismatch for ${identity.interfaceId}::${identity.functionName}`,
+    );
   }
   const resultTypeId = getRequiredExprType(call.id, ctx, instanceId);
   const params = paramTypeIds.map((typeId, index) =>
+    withDtoFingerprint(
+      deriveBoundarySchema({
+        typeId,
+        ctx,
+        label: `${identity.interfaceId}::${identity.functionName} arg${index}`,
+        options: { tagStandaloneVariants: true },
+      }),
+    ),
+  );
+  const result = withDtoFingerprint(
     deriveBoundarySchema({
-      typeId,
+      typeId: resultTypeId,
       ctx,
-      label: `${identity.interfaceId}::${identity.functionName} arg${index}`,
+      label: `${identity.interfaceId}::${identity.functionName} result`,
       options: { tagStandaloneVariants: true },
     }),
   );
-  const result = deriveBoundarySchema({
-    typeId: resultTypeId,
-    ctx,
-    label: `${identity.interfaceId}::${identity.functionName} result`,
-    options: { tagStandaloneVariants: true },
-  });
 
   recordExternalRequirement({
     ctx,
@@ -100,20 +114,97 @@ export const compileExternalCall = ({
   const importName = ensureExternalFunctionImport({ ctx, ...identity });
   const bufferSizeImport = ensureExternalBufferSizeImport(ctx);
   const bufferErrorImport = ensureExternalBufferErrorImport(ctx);
-  const msgpack = ensureMsgPackFunctions(ctx);
-  const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
-  const arrayType = msgpack.arrayWithCapacity.resultType;
-  const arrayLocal = allocateTempLocal(arrayType, fnCtx);
+  const provider = ensureSelectedHostTransportProvider(ctx);
+  const writerType = wasmTypeFor(provider.writerTypeId, ctx);
+  const readerType = wasmTypeFor(provider.readerTypeId, ctx);
   const capacityLocal = allocateTempLocal(binaryen.i32, fnCtx);
   const encodedLengthLocal = allocateTempLocal(binaryen.i32, fnCtx);
   const writtenLocal = allocateTempLocal(binaryen.i32, fnCtx);
-  const arrayRef = () => ctx.mod.local.get(arrayLocal.index, arrayType);
+  const writerLocal = allocateTempLocal(
+    writerType,
+    fnCtx,
+    provider.writerTypeId,
+    ctx,
+  );
+  const readerLocal = allocateTempLocal(
+    readerType,
+    fnCtx,
+    provider.readerTypeId,
+    ctx,
+  );
+  const resultLocal = allocateTempLocal(
+    wasmTypeFor(resultTypeId, ctx),
+    fnCtx,
+    resultTypeId,
+    ctx,
+  );
   const capacityRef = () =>
     ctx.mod.local.get(capacityLocal.index, binaryen.i32);
   const encodedLengthRef = () =>
     ctx.mod.local.get(encodedLengthLocal.index, binaryen.i32);
-  const writtenRef = () =>
-    ctx.mod.local.get(writtenLocal.index, binaryen.i32);
+  const writtenRef = () => ctx.mod.local.get(writtenLocal.index, binaryen.i32);
+  const writerRef = () => loadLocalValue(writerLocal, ctx);
+  const readerRef = () => loadLocalValue(readerLocal, ctx);
+  const write = (
+    name: string,
+    writeArgs: readonly binaryen.ExpressionRef[] = [],
+  ) =>
+    writeHostStreamEvent({
+      writer: writerRef(),
+      writerTypeId: provider.writerTypeId,
+      name,
+      args: writeArgs,
+      ctx,
+      fnCtx,
+    });
+  const read = (name: string) =>
+    readHostStreamValue({
+      reader: readerRef(),
+      readerTypeId: provider.readerTypeId,
+      name,
+      ctx,
+      fnCtx,
+    });
+  const dtoWriteResultTypeId = hostStreamWriterResultTypeId({
+    writerTypeId: provider.writerTypeId,
+    ctx,
+  });
+  const writeInvocation = [
+    write("begin_array", [ctx.mod.i32.const(5)]),
+    write("write_i32", [ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION)]),
+    write("write_i32", [
+      ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.externalInvocation),
+    ]),
+    write("write_string", [emitStringLiteral(identity.interfaceId, ctx)]),
+    write("write_string", [emitStringLiteral(identity.functionName, ctx)]),
+    write("begin_array", [ctx.mod.i32.const(args.length)]),
+    ...args.flatMap((arg, index) => {
+      const schema = params[index]!;
+      if (!schema.fingerprint) {
+        throw new Error(
+          `missing DTO fingerprint for ${identity.interfaceId}::${identity.functionName} arg${index}`,
+        );
+      }
+      return [
+        write("begin_array", [ctx.mod.i32.const(2)]),
+        write("write_string", [emitStringLiteral(schema.fingerprint, ctx)]),
+        ctx.mod.drop(
+          writeDtoValueToHostStream({
+            writer: writerRef,
+            writerTypeId: provider.writerTypeId,
+            value: arg,
+            schema,
+            resultTypeId: dtoWriteResultTypeId,
+            ctx,
+            fnCtx,
+          }),
+        ),
+        write("end_array"),
+      ];
+    }),
+    write("end_array"),
+    write("end_array"),
+  ];
 
   const setup: binaryen.ExpressionRef[] = [
     ctx.mod.local.set(
@@ -121,43 +212,20 @@ export const compileExternalCall = ({
       ctx.mod.call(bufferSizeImport, [], binaryen.i32),
     ),
     ctx.mod.local.set(
-      arrayLocal.index,
+      writerLocal.index,
       ctx.mod.call(
-        msgpack.arrayWithCapacity.wasmName,
-        [ctx.mod.i32.const(args.length)],
-        arrayType,
+        provider.createWriter.wasmName,
+        [ctx.mod.i32.const(0), capacityRef()],
+        provider.createWriter.resultType,
       ),
     ),
-    ...args.map((arg, index) =>
-      ctx.mod.local.set(
-        arrayLocal.index,
-        ctx.mod.call(
-          msgpack.arrayPush.wasmName,
-          [
-            arrayRef(),
-            packExternalValue({
-              value: arg,
-              typeId: paramTypeIds[index]!,
-              schema: params[index]!,
-              ctx,
-              fnCtx,
-              label: `${identity.interfaceId}::${identity.functionName} arg${index}`,
-            }),
-          ],
-          arrayType,
-        ),
-      ),
-    ),
+    ...writeInvocation,
     ctx.mod.local.set(
       encodedLengthLocal.index,
       ctx.mod.call(
-        msgpack.encodeValue.wasmName,
-        [
-          ctx.mod.call(msgpack.makeArray.wasmName, [arrayRef()], msgPackType),
-          ctx.mod.i32.const(0),
-          capacityRef(),
-        ],
-        binaryen.i32,
+        provider.finishWriter.wasmName,
+        [writerRef()],
+        provider.finishWriter.resultType,
       ),
     ),
     ctx.mod.if(
@@ -165,7 +233,10 @@ export const compileExternalCall = ({
       ctx.mod.block(null, [
         ctx.mod.call(
           bufferErrorImport,
-          [ctx.mod.i32.sub(ctx.mod.i32.const(0), encodedLengthRef()), ctx.mod.i32.const(0)],
+          [
+            ctx.mod.i32.sub(ctx.mod.i32.const(0), encodedLengthRef()),
+            ctx.mod.i32.const(0),
+          ],
           binaryen.none,
         ),
         ctx.mod.unreachable(),
@@ -185,22 +256,79 @@ export const compileExternalCall = ({
       ),
     ),
     trapIfNegative(writtenRef(), ctx),
+    storeLocalValue({
+      binding: readerLocal,
+      value: ctx.mod.call(
+        provider.createReader.wasmName,
+        [capacityRef(), writtenRef()],
+        provider.createReader.resultType,
+      ),
+      ctx,
+      fnCtx,
+    }),
+    ctx.mod.if(
+      ctx.mod.i32.or(
+        ctx.mod.i32.or(
+          ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(5)),
+          ctx.mod.i32.ne(
+            read("read_i32"),
+            ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+          ),
+        ),
+        ctx.mod.i32.ne(
+          read("read_i32"),
+          ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.externalCompletion),
+        ),
+      ),
+      ctx.mod.unreachable(),
+    ),
+    ctx.mod.drop(read("read_string")),
+    ctx.mod.drop(read("read_string")),
+    ctx.mod.if(
+      ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(2)),
+      ctx.mod.unreachable(),
+    ),
+    ctx.mod.if(
+      ctx.mod.i32.ne(read("read_i32"), ctx.mod.i32.const(0)),
+      ctx.mod.unreachable(),
+    ),
+    ctx.mod.if(
+      ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(2)),
+      ctx.mod.unreachable(),
+    ),
+    ctx.mod.drop(read("read_string")),
+    storeLocalValue({
+      binding: resultLocal,
+      value: readDtoValueFromHostStream({
+        reader: readerRef(),
+        readerTypeId: provider.readerTypeId,
+        schema: result,
+        ctx,
+        fnCtx,
+      }),
+      ctx,
+      fnCtx,
+    }),
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.if(
+      ctx.mod.i32.eqz(
+        ctx.mod.call(
+          provider.readerComplete.wasmName,
+          [readerRef()],
+          provider.readerComplete.resultType,
+        ),
+      ),
+      ctx.mod.unreachable(),
+    ),
   ];
-
-  const decoded = ctx.mod.call(
-    msgpack.decodeValue.wasmName,
-    [capacityRef(), writtenRef()],
-    msgPackType,
-  );
-  const value = unpackExternalValue({
-    value: decoded,
-    typeId: resultTypeId,
-    schema: result,
-    ctx,
-    fnCtx,
-  });
   const resultType = wasmTypeFor(resultTypeId, ctx);
-  return ctx.mod.block(null, [...setup, value], resultType);
+  return ctx.mod.block(
+    null,
+    [...setup, loadLocalValue(resultLocal, ctx)],
+    resultType,
+  );
 };
 
 export const emitExternalRequirementsSection = ({
@@ -219,7 +347,11 @@ export const emitExternalRequirementsSection = ({
     () => new Map<string, ExternalFunctionRequirement>(),
   );
   effectRegistry.entries.forEach((entry) => {
-    if (!entry.external || (entry.external.declaredOnly && !includeDeclarations)) return;
+    if (
+      !entry.external ||
+      (entry.external.declaredOnly && !includeDeclarations)
+    )
+      return;
     const requirement: ExternalFunctionRequirement = {
       kind: "async",
       interfaceId: entry.effectId.id,
@@ -257,16 +389,21 @@ const assertComponentCompatibleSchemas = (
   const register = (schema: BoundarySchema): void => {
     if (schema.kind === "ref") return;
     if (
-      (schema.kind === "array" || schema.kind === "record" || schema.kind === "union") &&
+      (schema.kind === "array" ||
+        schema.kind === "record" ||
+        schema.kind === "union") &&
       schema.typeId !== undefined
     ) {
       declarations.set(schema.typeId, schema);
       schema.aliases?.forEach((alias) => declarations.set(alias, schema));
     }
     if (schema.kind === "array") register(schema.element);
-    if (schema.kind === "record") schema.fields.forEach((field) => register(field.schema));
+    if (schema.kind === "record")
+      schema.fields.forEach((field) => register(field.schema));
     if (schema.kind === "union") {
-      schema.variants.forEach((variant) => variant.fields.forEach((field) => register(field.schema)));
+      schema.variants.forEach((variant) =>
+        variant.fields.forEach((field) => register(field.schema)),
+      );
     }
   };
   const roots = functions.flatMap((fn) => [...fn.params, fn.result]);
@@ -278,13 +415,17 @@ const assertComponentCompatibleSchemas = (
     if (schema.kind === "ref") {
       const target = declarations.get(schema.typeId);
       if (!target) {
-        throw new Error(`external DTO ${label} references unknown type ${schema.typeId}`);
+        throw new Error(
+          `external DTO ${label} references unknown type ${schema.typeId}`,
+        );
       }
       visit(target, label);
       return;
     }
     const typeId =
-      schema.kind === "array" || schema.kind === "record" || schema.kind === "union"
+      schema.kind === "array" ||
+      schema.kind === "record" ||
+      schema.kind === "union"
         ? schema.typeId
         : undefined;
     if (typeId !== undefined) {
@@ -297,9 +438,12 @@ const assertComponentCompatibleSchemas = (
       active.add(typeId);
     }
     if (schema.kind === "array") visit(schema.element, label);
-    if (schema.kind === "record") schema.fields.forEach((field) => visit(field.schema, label));
+    if (schema.kind === "record")
+      schema.fields.forEach((field) => visit(field.schema, label));
     if (schema.kind === "union") {
-      schema.variants.forEach((variant) => variant.fields.forEach((field) => visit(field.schema, label)));
+      schema.variants.forEach((variant) =>
+        variant.fields.forEach((field) => visit(field.schema, label)),
+      );
     }
     if (typeId !== undefined) {
       active.delete(typeId);
@@ -405,84 +549,11 @@ const recordExternalRequirement = ({
 };
 
 const externalRequirementKey = (
-  requirement: Pick<ExternalFunctionRequirement, "interfaceId" | "functionName">,
+  requirement: Pick<
+    ExternalFunctionRequirement,
+    "interfaceId" | "functionName"
+  >,
 ): string => `${requirement.interfaceId}::${requirement.functionName}`;
-
-const packExternalValue = ({
-  value,
-  typeId,
-  schema,
-  ctx,
-  fnCtx,
-  label,
-}: {
-  value: binaryen.ExpressionRef;
-  typeId: TypeId;
-  schema: BoundarySchema;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-  label: string;
-}): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
-  const serializer = findSerializerForType(typeId, ctx);
-  if (serializer) {
-    if (serializer.formatId !== "msgpack") {
-      throw new Error(`unsupported external serializer for ${label}`);
-    }
-    return coerceValueToType({
-      value,
-      actualType: typeId,
-      targetType: msgpack.msgPackTypeId,
-      ctx,
-      fnCtx,
-    });
-  }
-  if (isBoundaryMsgPackValue(typeId, ctx)) return value;
-  const payloadField = boundaryMsgPackPayloadField(typeId, ctx);
-  if (payloadField) {
-    const info = getStructuralTypeInfo(typeId, ctx);
-    if (!info) throw new Error(`external payload ${label} is missing structural info`);
-    return loadStructuralField({
-      structInfo: info,
-      field: payloadField,
-      pointer: () => value,
-      ctx,
-      fnCtx,
-    });
-  }
-  return packBoundaryValueAsMsgPack({ value, schema, ctx, fnCtx });
-};
-
-const unpackExternalValue = ({
-  value,
-  typeId,
-  schema,
-  ctx,
-  fnCtx,
-}: {
-  value: binaryen.ExpressionRef;
-  typeId: TypeId;
-  schema: BoundarySchema;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackFunctions(ctx);
-  const serializer = findSerializerForType(typeId, ctx);
-  if (serializer) {
-    if (serializer.formatId !== "msgpack") {
-      throw new Error("unsupported external result serializer");
-    }
-    return coerceValueToType({
-      value,
-      actualType: msgpack.msgPackTypeId,
-      targetType: typeId,
-      ctx,
-      fnCtx,
-    });
-  }
-  if (isBoundaryMsgPackValue(typeId, ctx)) return value;
-  return unpackBoundaryValueFromMsgPack({ value, schema, ctx, fnCtx });
-};
 
 const trapIfNegative = (
   value: binaryen.ExpressionRef,

@@ -8,8 +8,6 @@ const IMPORTABLE_KEYS = [
   "intrinsicUsesSignature",
   "externalFunction",
   "intrinsicType",
-  "serializer",
-  "boundary",
   "methodAlias",
   "overloadPreference",
   "enumNamespaceMembers",

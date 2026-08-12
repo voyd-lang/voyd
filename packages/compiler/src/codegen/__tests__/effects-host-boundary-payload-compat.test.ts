@@ -15,7 +15,7 @@ const fixturePath = (name: string) =>
   resolve(import.meta.dirname, "__fixtures__", name);
 
 const dtoShimFixturePath = fixturePath("effects-export-dto-shim.voyd");
-const unsupportedReturnFixturePath = fixturePath(
+const objectReturnFixturePath = fixturePath(
   "effects-export-object-return-unsupported.voyd",
 );
 const sameNameFixturePath = fixturePath("effects-op-wrapper-same-name.voyd");
@@ -57,18 +57,24 @@ describe("host boundary payload compatibility", () => {
     expect(result.value).toBe(42);
   });
 
-  it("reports unsupported effect return payloads at compile time", async () => {
-    const result = await compileEffectFixture({
-      entryPath: unsupportedReturnFixturePath,
-      throwOnError: false,
+  it("supports object return payloads", async () => {
+    const { module } = await compileEffectFixture({
+      entryPath: objectReturnFixturePath,
     });
-    const diagnostic = result.diagnostics.find(
-      (diag) =>
-        diag.code === "CG0001" &&
-        diag.message.includes("HostOnly.roundtrip return value") &&
-        diag.message.includes("unsupported type Box"),
+    const op = parseEffectTable(module).ops.find((entry) =>
+      entry.label.endsWith("HostOnly.roundtrip"),
     );
-    expect(diagnostic).toBeDefined();
+    if (!op) throw new Error("missing HostOnly.roundtrip op entry");
+
+    const result = await runEffectfulExport<number>({
+      wasm: module,
+      entryName: "main",
+      handlers: {
+        [`${op.opIndex}`]: (_request, value: unknown) => ({ v: value }),
+      },
+    });
+
+    expect(result.value).toBe(1);
   });
 
   it("resolves same-name wrapper calls to functions instead of effect ops", async () => {

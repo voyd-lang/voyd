@@ -1,8 +1,12 @@
 # MsgPack Host Interop and Std Module
 
-Status: Implemented
+Status: Superseded by V-499
 Owner: Runtime + Stdlib
 Scope: `packages/std/src`, `packages/compiler/src`, `packages/sdk/src/shared/types.ts`, `packages/js-host/src`
+
+This document records the former MessagePack-specific boundary design. The
+current provider-neutral DTO and host transport contract is defined in
+[`encoding-and-vx-dto.md`](encoding-and-vx-dto.md).
 
 ## Goal
 

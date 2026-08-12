@@ -1,7 +1,5 @@
 import {
   globalRecord,
-  hostError,
-  hostOk,
   isNodeCompatibleRuntime,
   readField,
   toStringOrUndefined,
@@ -63,10 +61,10 @@ export const envCapabilityDefinition: CapabilityDefinition = {
             : denoEnv?.get
               ? denoEnv.get(key)
               : undefined;
-          return tail(value ?? null);
+          return tail({ found: value !== undefined, value: value ?? "" });
         } catch {
           // Deno can throw when env access is denied; treat as unavailable key.
-          return tail(null);
+          return tail({ found: false, value: "" });
         }
       },
     });
@@ -85,10 +83,10 @@ export const envCapabilityDefinition: CapabilityDefinition = {
           } else if (denoEnv?.set) {
             denoEnv.set(key, value);
           }
-          return tail(hostOk());
+          return tail({ ok: true, code: 0, message: "" });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          return tail(hostError(message));
+          return tail({ ok: false, code: 1, message });
         }
       },
     });

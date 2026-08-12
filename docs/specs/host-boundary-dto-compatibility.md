@@ -2,40 +2,38 @@
 
 Status: Active
 Owner: Compiler + Stdlib
-Scope: effect host boundary payloads (`main_effectful` / `resume_effectful`)
+Scope: every automatic Wasm/host boundary
 
 ## Purpose
 
-Define the payload contract used by the host boundary and the required stdlib
-shim pattern so public APIs can stay ergonomic while host payloads stay stable.
+Define the DTO contract shared by exports, effects, callbacks, external package
+calls, and lowered runtime values.
 
 ## Payload Contract
 
-Effect operation arguments and resume values that cross the host boundary must be
-one of:
+Every closed DTO-eligible type has one compiler-derived `AutoDtoPlan`. The plan
+owns field names and order, optionality, primitive widths, bytes, variants,
+recursive references, validation, and its canonical schema fingerprint.
 
-- `bool`
-- `i32`
-- `i64`
-- `f32`
-- `f64`
-- `void`
-- Any type annotated with `@serializer("msgpack", ...)`
+Ordinary structural objects, arrays, unions, primitives, and `Bytes` are
+eligible when every reachable value is eligible. Functions, effects, borrowed
+references, mutable identity-bearing state, and host resources are rejected
+with a diagnostic at the boundary that requires a DTO.
 
-Anything else is rejected at compile time with `CG0001` and an explicit message
-that points at the specific op payload (`argN` or return value).
+An exceptional nominal type may implement `CustomDto<T, Representation>`.
+`Representation` must itself be DTO-eligible and is shared by every format and
+host route. There are no format-specific serializers.
 
-## Shim Pattern (Required)
+## Transport contract
 
-When a public std API uses richer types (for example `Option`, unions, objects,
-or collections), keep that API shape and convert at the effect boundary:
+One build-selected host transport carries ABI-v2 frames for every automatic
+route. Each typed position includes the fingerprint from its DTO plan. The
+module metadata records `hostAbi`, `dtoSchemaAbi`, and the exact transport ID
+and version. Host initialization fails before user code runs when the matching
+adapter is unavailable.
 
-1. Public wrapper API uses ergonomic types.
-2. Internal effect op signature uses a host DTO-compatible type from this contract.
-3. Conversion helpers map `API shape -> host DTO` before `Effect::op(...)`.
-4. Conversion helpers map `host DTO -> API shape` for resumed values.
-
-This keeps host protocol compatibility isolated to a narrow boundary.
+The transport is an outer framing protocol. Application JSON and MessagePack
+remain explicit structured-format APIs and never select the host transport.
 
 ## Naming Rule
 
@@ -46,3 +44,6 @@ value resolution treat these as distinct call paths:
 - `op(...)` resolves to the wrapper function in value position.
 
 No wrapper renaming/module-split workaround is required.
+
+The complete design and migration requirements are specified in
+[`docs/proposals/encoding-and-vx-dto.md`](../proposals/encoding-and-vx-dto.md).

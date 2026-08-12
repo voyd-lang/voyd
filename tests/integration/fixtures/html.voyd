@@ -10,7 +10,7 @@ pub fn main()
 
 pub fn empty_children_with_shadows()
   let Array = 1
-  let HtmlNode = 2
+  let Html = 2
   <input />
 
 pub fn option_attributes()

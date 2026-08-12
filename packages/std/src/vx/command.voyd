@@ -1,35 +1,52 @@
 //! Core VX command envelope and constructors shared by VX feature modules.
 
 use std::array::Array
-use std::dict::{ Dict, DictKey }
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
+use std::enums::{ enum }
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
-use std::task::{ Task, TaskRuntime }
+use std::task::Task
 use std::task::self as tasks
+use super::payload::{ EncodedPayload, encode_payload }
 
-@boundary(type: "payload", field: "payload")
-pub obj Cmd<Msg> {
-  api payload: MsgPack
-}
+pub enum CommandWire
+  CommandNone
+  CommandMessage { payload: EncodedPayload }
+  CommandBatch { children: Array<CommandWire> }
+  CommandMap { child: CommandWire, handler_id: i32 }
+  CommandRuntime { kind: String, payload?: EncodedPayload }
+  CommandReadClipboard { handler_ref: i32 }
+  CommandTask { task_ref: i32, handler_ref: i32 }
+  CommandDelay { millis: i64, payload: EncodedPayload }
+  CommandCanvasRender { payload: EncodedPayload }
+  CommandCanvasMeasureText { selector: String, value: String, font: String, handler_ref: i32 }
+  CommandOwned { child: CommandWire, handler_ref: i32 }
+
+type CommandLower = fn() : () -> CommandWire
+type RuntimeValueLower = fn() : () -> EncodedPayload
+
+obj WindowScrollPayload { x: f64, y: f64 }
+obj StorageEntryPayload { key: String, value: String }
+obj OpenUrlPayload { url: String, target: String }
+
+pub obj Cmd<Msg> { thunk: Array<CommandLower> }
+
+pub fn command_plan<Msg>(run: CommandLower) -> Cmd<Msg>
+  let ~thunk = Array<CommandLower>::with_capacity(1)
+  thunk.push(run)
+  Cmd<Msg> { thunk: thunk }
+
+pub fn lower_command<Msg>(value: Cmd<Msg>) -> CommandWire
+  let run = value.thunk.at(0)
+  run()
 
 pub obj Ref<T> {
   api id: String
 }
 
-@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
-fn retain_message_mapper_id(handler: fn(MsgPack) -> MsgPack): () -> i32
-  0
-
-@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+@intrinsic(name: "__host_retain_callback", uses_signature: true)
 fn retain_typed_message_mapper_id<From, To>(handler: fn(From) -> To): () -> i32
-  __boundary_retain_callback(handler)
-
-/// Retains a pure Voyd message mapper for commands, subscriptions, or events.
-pub fn retain_message_mapper(handler: fn(MsgPack) -> MsgPack): () -> i32
-  retain_message_mapper_id(handler)
+  __host_retain_callback(handler)
 
 /// Retains a pure typed Voyd message mapper for commands, subscriptions, or events.
 pub fn retain_typed_message_mapper<From, To>(handler: fn(From) -> To): () -> i32
@@ -38,105 +55,90 @@ pub fn retain_typed_message_mapper<From, To>(handler: fn(From) -> To): () -> i32
 impl<Msg> Cmd<Msg>
   /// Creates an empty command.
   api fn none() -> Cmd<Msg>
-    Cmd<Msg> { payload: command_payload("none") }
-
-  /// Creates a command that dispatches a serialized host/runtime message.
-  api fn message_serialized(value: MsgPack) -> Cmd<Msg>
-    let ~out = command_map("message")
-    out.set("value", value)
-    Cmd<Msg> { payload: msgpack::make_map(out) }
+    command_plan<Msg>(() -> CommandWire => CommandWire::CommandNone {})
 
   /// Creates a command that dispatches a typed application message.
   api fn message(value: Msg) -> Cmd<Msg>
-    let ~out = command_map("message")
-    out.set("value", boundary_value_to_msgpack(value))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
+    command_plan<Msg>(() -> CommandWire =>
+      CommandWire::CommandMessage { payload: encode_payload(value) }
+    )
 
   /// Creates a command batch from existing command values.
   api fn batch(values: Array<Cmd<Msg>>) -> Cmd<Msg>
-    let ~children = Array<MsgPack>::with_capacity(values.len())
-    var index = 0
-    while index < values.len():
-      let value = values.at(index)
-      children.push(value.payload)
-      index = index + 1
-
-    let ~out = command_map("batch")
-    out.set("children", msgpack::make_array(children))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
+    command_plan<Msg>(() -> CommandWire =>
+      let ~children = Array<CommandWire>::with_capacity(values.len())
+      var index = 0
+      while index < values.len():
+        children.push(lower_command(values.at(index)))
+        index = index + 1
+      CommandWire::CommandBatch { children }
+    )
 
   /// Lifts a child command through a retained message mapper.
-  api fn map<NextMsg>(self, { handler_id: i32 }) -> Cmd<NextMsg>
-    let ~out = command_map("map")
-    out.set("child", self.payload)
-    out.set("handlerId", msgpack::make_i32(handler_id))
-    Cmd<NextMsg> { payload: msgpack::make_map(out) }
-
-  /// Lifts a child command through a retained serialized message mapper.
-  api fn map_serialized<NextMsg>(self, handler: fn(MsgPack) -> MsgPack) -> Cmd<NextMsg>
-    let handler_id = retain_message_mapper(handler)
-    Cmd<NextMsg> { payload: msgpack::make_map(command_map_with_owned_handler(self.payload, handler_id)) }
+  fn map_with_handler_id<NextMsg>(self, handler_id: i32) -> Cmd<NextMsg>
+    command_plan<NextMsg>(() -> CommandWire =>
+      CommandWire::CommandMap { child: lower_command(self), handler_id }
+    )
 
   /// Lifts a child command through a retained typed message mapper.
   api fn map<NextMsg>(self, handler: fn(Msg) -> NextMsg) -> Cmd<NextMsg>
     let handler_id = retain_typed_message_mapper(handler)
-    Cmd<NextMsg> { payload: msgpack::make_map(command_map_with_owned_handler(self.payload, handler_id)) }
+    mark_owned_handler(self.map_with_handler_id<NextMsg>(handler_id), handler_id)
 
   /// Creates a host/runtime command envelope for a registered VX command executor.
-  api fn runtime({ kind: String, value?: MsgPack }) -> Cmd<Msg>
-    let out = command_map(kind)
-    let complete =
+  fn runtime({ kind: String, value?: RuntimeValueLower }) -> Cmd<Msg>
+    command_plan<Msg>(() -> CommandWire =>
       match(value)
-        Some<MsgPack> { value: payload }:
-          out.setting("value", payload)
+        Some<RuntimeValueLower> { value: lower_value }:
+          CommandWire::CommandRuntime { kind, payload: lower_value() }
         None:
-          out
-    Cmd<Msg> { payload: msgpack::make_map(complete) }
+          CommandWire::CommandRuntime { kind }
+    )
 
-  api fn runtime({ kind: StringSlice, value?: MsgPack }) -> Cmd<Msg>
+  fn runtime({ kind: StringSlice, value?: RuntimeValueLower }) -> Cmd<Msg>
     Cmd<Msg>::runtime(kind: kind.to_string(), value: value)
 
   /// Copies text to the browser clipboard through the VX runtime host.
   api fn copy_to_clipboard(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "copy_to_clipboard", value: msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "copy_to_clipboard", value: () -> EncodedPayload => encode_payload(value))
 
   api fn copy_to_clipboard(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::copy_to_clipboard(value.to_string())
 
   /// Reads text from the browser clipboard and dispatches the handler result.
-  api fn read_clipboard({ handler_id: i32 }) -> Cmd<Msg>
-    let ~out = command_map("read_clipboard")
-    out.set("handlerId", msgpack::make_i32(handler_id))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
+  fn read_clipboard_with_handler_id(handler_id: i32) -> Cmd<Msg>
+    command_plan<Msg>(() -> CommandWire =>
+      CommandWire::CommandReadClipboard { handler_ref: handler_id }
+    )
 
   api fn read_clipboard(handler: fn(String) -> Msg) -> Cmd<Msg>
     let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::read_clipboard(handler_id: handler_id), handler_id)
+    mark_owned_handler(Cmd<Msg>::read_clipboard_with_handler_id(handler_id), handler_id)
 
   /// Sets the browser document title through the VX runtime host.
   api fn set_document_title(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "set_document_title", value: msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "set_document_title", value: () -> EncodedPayload => encode_payload(value))
 
   api fn set_document_title(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::set_document_title(value.to_string())
 
   /// Pushes a URL into browser history through the VX runtime host.
   api fn push_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "push_url", value: msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "push_url", value: () -> EncodedPayload => encode_payload(value))
 
   api fn push_url(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::push_url(value.to_string())
 
   /// Replaces the current browser history URL through the VX runtime host.
   api fn replace_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "replace_url", value: msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "replace_url", value: () -> EncodedPayload => encode_payload(value))
 
   api fn replace_url(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::replace_url(value.to_string())
 
   /// Replaces the browser location hash through the VX runtime host.
   api fn set_hash(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "set_hash", value: msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "set_hash", value: () -> EncodedPayload => encode_payload(value))
 
   api fn set_hash(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::set_hash(value.to_string())
@@ -151,35 +153,35 @@ impl<Msg> Cmd<Msg>
 
   /// Opens a URL in a browser window or tab.
   api fn open_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "open_url", value: msgpack::make_string(value))
+    Cmd<Msg>::runtime(kind: "open_url", value: () -> EncodedPayload => encode_payload(value))
 
   api fn open_url(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::open_url(value.to_string())
 
   api fn open_url({ url: String, target: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "open_url", value: open_url_value(url: url, target: target))
+    Cmd<Msg>::runtime(kind: "open_url", value: () -> EncodedPayload => encode_payload(open_url_value(url: url, target: target)))
 
   api fn open_url({ url: StringSlice, target: StringSlice }) -> Cmd<Msg>
     Cmd<Msg>::open_url(url: url.to_string(), target: target.to_string())
 
   /// Scrolls the browser window to an absolute coordinate.
   api fn scroll_window_to({ x: f64, y: f64 }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_window_to", value: window_scroll_value(x: x, y: y))
+    Cmd<Msg>::runtime(kind: "scroll_window_to", value: () -> EncodedPayload => encode_payload(window_scroll_value(x: x, y: y)))
 
   /// Scrolls the browser window by a relative coordinate.
   api fn scroll_window_by({ x: f64, y: f64 }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_window_by", value: window_scroll_value(x: x, y: y))
+    Cmd<Msg>::runtime(kind: "scroll_window_by", value: () -> EncodedPayload => encode_payload(window_scroll_value(x: x, y: y)))
 
   /// Writes a string value into localStorage.
   api fn local_storage_set({ key: String, value: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "local_storage_set", value: storage_entry_value(key: key, value: value))
+    Cmd<Msg>::runtime(kind: "local_storage_set", value: () -> EncodedPayload => encode_payload(storage_entry_value(key: key, value: value)))
 
   api fn local_storage_set({ key: StringSlice, value: StringSlice }) -> Cmd<Msg>
     Cmd<Msg>::local_storage_set(key: key.to_string(), value: value.to_string())
 
   /// Removes a localStorage key.
   api fn local_storage_remove(key: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "local_storage_remove", value: msgpack::make_string(key))
+    Cmd<Msg>::runtime(kind: "local_storage_remove", value: () -> EncodedPayload => encode_payload(key))
 
   api fn local_storage_remove(key: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::local_storage_remove(key.to_string())
@@ -190,14 +192,14 @@ impl<Msg> Cmd<Msg>
 
   /// Writes a string value into sessionStorage.
   api fn session_storage_set({ key: String, value: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "session_storage_set", value: storage_entry_value(key: key, value: value))
+    Cmd<Msg>::runtime(kind: "session_storage_set", value: () -> EncodedPayload => encode_payload(storage_entry_value(key: key, value: value)))
 
   api fn session_storage_set({ key: StringSlice, value: StringSlice }) -> Cmd<Msg>
     Cmd<Msg>::session_storage_set(key: key.to_string(), value: value.to_string())
 
   /// Removes a sessionStorage key.
   api fn session_storage_remove(key: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "session_storage_remove", value: msgpack::make_string(key))
+    Cmd<Msg>::runtime(kind: "session_storage_remove", value: () -> EncodedPayload => encode_payload(key))
 
   api fn session_storage_remove(key: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::session_storage_remove(key.to_string())
@@ -207,128 +209,57 @@ impl<Msg> Cmd<Msg>
     Cmd<Msg>::runtime(kind: "session_storage_clear")
 
   /// Creates a task command envelope for a retained result mapper.
-  api fn perform({ task_id: i32, handler_id: i32 }) -> Cmd<Msg>
-    let ~out = command_map("task")
-    out.set("taskId", msgpack::make_i32(task_id))
-    out.set("handlerId", msgpack::make_i32(handler_id))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
-
-  /// Creates a task command envelope for a retained Voyd result mapper.
-  api fn perform({ task_id: i32, handler: fn(MsgPack) -> MsgPack }) -> Cmd<Msg>
-    let handler_id = retain_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform(task_id: task_id, handler_id: handler_id), handler_id)
-
-  /// Creates a task command envelope for a retained typed result mapper.
-  api fn perform<T>({ task_id: i32, handler: fn(T) -> Msg }) -> Cmd<Msg>
-    let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform(task_id: task_id, handler_id: handler_id), handler_id)
+  fn perform_with_ids({ task_id: i32, handler_id: i32 }) -> Cmd<Msg>
+    command_plan<Msg>(() -> CommandWire =>
+      CommandWire::CommandTask { task_ref: task_id, handler_ref: handler_id }
+    )
 
   /// Creates a task command envelope from a Voyd task and retained result mapper.
-  api fn perform<T>({ task: Task<T>, handler_id: i32 }) -> Cmd<Msg>
-    let ~out = command_map("task")
-    out.set("taskId", msgpack::make_i32(task.id))
-    out.set("handlerId", msgpack::make_i32(handler_id))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
-
-  /// Creates a task command envelope from a Voyd task and retained result mapper.
-  api fn perform<T>({ task: Task<T>, handler: fn(MsgPack) -> MsgPack }) -> Cmd<Msg>
-    let handler_id = retain_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform<T>(task: task, handler_id: handler_id), handler_id)
+  fn perform_task_with_handler_id<T>({ task: Task<T>, handler_id: i32 }) -> Cmd<Msg>
+    let task_id = task.id
+    Cmd<Msg>::perform_with_ids(task_id: task_id, handler_id: handler_id)
 
   /// Creates a task command envelope from a Voyd task and retained typed result mapper.
   api fn perform<T>({ task: Task<T>, handler: fn(T) -> Msg }) -> Cmd<Msg>
     let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform<T>(task: task, handler_id: handler_id), handler_id)
+    mark_owned_handler(Cmd<Msg>::perform_task_with_handler_id<T>(task: task, handler_id: handler_id), handler_id)
 
-  /// Starts one-off async work and dispatches the mapped result when it completes.
-  api fn task<T>({
-    work: fn() : (open) -> T,
-    handler: fn(T) -> Msg
-  }): (TaskRuntime, open) -> Cmd<Msg>
-    let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform<T>(
-      task: tasks::detach(work),
-      handler_id: handler_id
-    ), handler_id)
-
-  /// Creates a timer command that dispatches a serialized value after the delay.
-  api fn delay_serialized({ millis: i64, value: MsgPack }) -> Cmd<Msg>
-    let ~out = command_map("delay")
-    out.set("ms", msgpack::make_i64(millis))
-    out.set("value", value)
-    Cmd<Msg> { payload: msgpack::make_map(out) }
+  /// Detaches effectful work and dispatches its typed result through a retained mapper.
+  api fn perform<T>({ work: fn() : (open) -> T, handler: fn(T) -> Msg }): tasks::TaskRuntime -> Cmd<Msg>
+    Cmd<Msg>::perform<T>(task: tasks::detach(work), handler: handler)
 
   /// Creates a timer command that dispatches a typed message after the delay.
   api fn delay({ millis: i64, value: Msg }) -> Cmd<Msg>
-    let ~out = command_map("delay")
-    out.set("ms", msgpack::make_i64(millis))
-    out.set("value", boundary_value_to_msgpack(value))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
+    command_plan<Msg>(() -> CommandWire =>
+      CommandWire::CommandDelay { millis, payload: encode_payload(value) }
+    )
 
   /// Creates a DOM focus command for a constrained VX ref.
   api fn focus<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "focus", value: msgpack::make_string(target.id))
+    Cmd<Msg>::runtime(kind: "focus", value: () -> EncodedPayload => encode_payload(target.id))
 
   /// Creates a scroll-into-view command for a constrained VX ref.
   api fn scroll_into_view<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_into_view", value: msgpack::make_string(target.id))
+    Cmd<Msg>::runtime(kind: "scroll_into_view", value: () -> EncodedPayload => encode_payload(target.id))
 
   /// Selects text in an input-like DOM element found by `data-vx-ref`.
   api fn select_text<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "select_text", value: msgpack::make_string(target.id))
+    Cmd<Msg>::runtime(kind: "select_text", value: () -> EncodedPayload => encode_payload(target.id))
 
 
-@intrinsic(name: "__boundary_value_to_msgpack")
-fn boundary_value_to_msgpack<Msg>(message: Msg): () -> MsgPack
-  __boundary_value_to_msgpack(message)
+fn window_scroll_value({ x: f64, y: f64 }) -> WindowScrollPayload
+  WindowScrollPayload { x, y }
 
-fn window_scroll_value({ x: f64, y: f64 }) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("x", msgpack::make_f64(x))
-  out.set("y", msgpack::make_f64(y))
-  msgpack::make_map(out)
+fn storage_entry_value({ key: String, value: String }) -> StorageEntryPayload
+  StorageEntryPayload { key, value }
 
-fn storage_entry_value({ key: String, value: String }) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("key", key)
-  out.set("value", value)
-  msgpack::make_map(out)
+fn open_url_value({ url: String, target: String }) -> OpenUrlPayload
+  OpenUrlPayload { url, target }
 
-fn open_url_value({ url: String, target: String }) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("url", url)
-  out.set("target", target)
-  msgpack::make_map(out)
-
-fn command_payload(kind: String) -> MsgPack
-  msgpack::make_map(command_map(kind))
-
-fn command_map(kind: String) -> Dict<String, MsgPack>
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("type", "cmd")
-  out.set("kind", kind)
-  out
-
-fn command_map_with_owned_handler(child: MsgPack, handler_id: i32) -> Dict<String, MsgPack>
-  let ~out = command_map("map")
-  out.set("child", child)
-  out.set("handlerId", msgpack::make_i32(handler_id))
-  set_owned_handler(~out, handler_id)
-  out
-
-fn mark_owned_handler<Msg>(cmd: Cmd<Msg>, handler_id: i32) -> Cmd<Msg>
-  match(msgpack::unpack_map(cmd.payload))
-    Ok<Dict<String, MsgPack>> { value }:
-      Cmd<Msg> { payload: msgpack::make_map(with_owned_handler(value, handler_id)) }
-    Err:
-      cmd
-
-fn set_owned_handler(~out: Dict<String, MsgPack>, handler_id: i32) -> void
-  let ~owned = Array<MsgPack>::with_capacity(1)
-  owned.push(msgpack::make_i32(handler_id))
-  out.set("__vxOwnedMapHandlerIds", msgpack::make_array(owned))
-
-fn with_owned_handler(out: Dict<String, MsgPack>, handler_id: i32) -> Dict<String, MsgPack>
-  let ~owned = Array<MsgPack>::with_capacity(1)
-  owned.push(msgpack::make_i32(handler_id))
-  out.setting("__vxOwnedMapHandlerIds", msgpack::make_array(owned))
+pub fn mark_owned_handler<Msg>(cmd: Cmd<Msg>, handler_id: i32) -> Cmd<Msg>
+  command_plan<Msg>(() -> CommandWire =>
+    CommandWire::CommandOwned {
+      child: lower_command(cmd),
+      handler_ref: handler_id
+    }
+  )

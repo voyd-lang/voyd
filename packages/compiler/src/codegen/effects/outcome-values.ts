@@ -6,7 +6,6 @@ import {
   structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { CodegenContext, FunctionContext, TypeId } from "../context.js";
-import type { SerializerMetadata } from "../../semantics/symbol-index.js";
 import { captureMultivalueLanes } from "../multivalue.js";
 
 export interface OutcomeValueBox {
@@ -14,7 +13,6 @@ export interface OutcomeValueBox {
   boxType: binaryen.Type;
   valueType: binaryen.Type;
   typeId?: TypeId;
-  serializer?: SerializerMetadata;
   abiTypes: readonly binaryen.Type[];
   storageTypes: readonly binaryen.Type[];
   markerValue?: number;
@@ -60,12 +58,10 @@ const makeInlineValue = ({
 const ensureOutcomeValueBox = ({
   valueType,
   typeId,
-  serializer,
   ctx,
 }: {
   valueType: binaryen.Type;
   typeId?: TypeId;
-  serializer?: SerializerMetadata;
   ctx: CodegenContext;
 }): OutcomeValueBox => {
   const key = valueTypeKey({ valueType, typeId, ctx });
@@ -99,7 +95,6 @@ const ensureOutcomeValueBox = ({
     boxType,
     valueType,
     typeId,
-    serializer,
     abiTypes,
     storageTypes,
     markerValue,
@@ -111,31 +106,27 @@ const ensureOutcomeValueBox = ({
 export const getOutcomeValueBoxType = ({
   valueType,
   typeId,
-  serializer,
   ctx,
 }: {
   valueType: binaryen.Type;
   typeId?: TypeId;
-  serializer?: SerializerMetadata;
   ctx: CodegenContext;
-}): binaryen.Type =>
-  ensureOutcomeValueBox({ valueType, typeId, serializer, ctx }).boxType;
+}): binaryen.Type => ensureOutcomeValueBox({ valueType, typeId, ctx }).boxType;
 
-export const getOutcomeValueBoxes = (ctx: CodegenContext): readonly OutcomeValueBox[] =>
-  Array.from(ctx.outcomeValueTypes.values());
+export const getOutcomeValueBoxes = (
+  ctx: CodegenContext,
+): readonly OutcomeValueBox[] => Array.from(ctx.outcomeValueTypes.values());
 
 export const boxOutcomeValue = ({
   value,
   valueType,
   typeId,
-  serializer,
   ctx,
   fnCtx,
 }: {
   value: binaryen.ExpressionRef;
   valueType: binaryen.Type;
   typeId?: TypeId;
-  serializer?: SerializerMetadata;
   ctx: CodegenContext;
   fnCtx?: Pick<FunctionContext, "locals" | "nextLocalIndex">;
 }): binaryen.ExpressionRef => {
@@ -143,7 +134,7 @@ export const boxOutcomeValue = ({
     return ctx.mod.ref.null(binaryen.eqref);
   }
 
-  const box = ensureOutcomeValueBox({ valueType, typeId, serializer, ctx });
+  const box = ensureOutcomeValueBox({ valueType, typeId, ctx });
   if (box.abiTypes.length === 1) {
     return initStruct(ctx.mod, box.boxType, [
       value,
@@ -161,16 +152,12 @@ export const boxOutcomeValue = ({
     ctx,
     fnCtx: fnCtx as FunctionContext,
   });
-  const boxed = initStruct(
-    ctx.mod,
-    box.boxType,
-    [
-      ...(captured.lanes as binaryen.ExpressionRef[]),
-      ...(typeof box.markerValue === "number"
-        ? [ctx.mod.i32.const(box.markerValue)]
-        : []),
-    ],
-  );
+  const boxed = initStruct(ctx.mod, box.boxType, [
+    ...(captured.lanes as binaryen.ExpressionRef[]),
+    ...(typeof box.markerValue === "number"
+      ? [ctx.mod.i32.const(box.markerValue)]
+      : []),
+  ]);
   if (captured.setup.length === 0) {
     return boxed;
   }
@@ -181,20 +168,18 @@ export const unboxOutcomeValue = ({
   payload,
   valueType,
   typeId,
-  serializer,
   ctx,
 }: {
   payload: binaryen.ExpressionRef;
   valueType: binaryen.Type;
   typeId?: TypeId;
-  serializer?: SerializerMetadata;
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
   if (valueType === binaryen.none) {
     return ctx.mod.block(null, [ctx.mod.drop(payload)], binaryen.none);
   }
 
-  const box = ensureOutcomeValueBox({ valueType, typeId, serializer, ctx });
+  const box = ensureOutcomeValueBox({ valueType, typeId, ctx });
   if (box.abiTypes.length === 1) {
     return structGetFieldValue({
       mod: ctx.mod,
@@ -220,14 +205,12 @@ export const wrapValueInOutcome = ({
   valueExpr,
   valueType,
   typeId,
-  serializer,
   ctx,
   fnCtx,
 }: {
   valueExpr: binaryen.ExpressionRef;
   valueType: binaryen.Type;
   typeId?: TypeId;
-  serializer?: SerializerMetadata;
   ctx: CodegenContext;
   fnCtx?: Pick<FunctionContext, "locals" | "nextLocalIndex">;
 }): binaryen.ExpressionRef => {
@@ -238,7 +221,7 @@ export const wrapValueInOutcome = ({
         valueExpr,
         ctx.effectsRuntime.makeOutcomeValue(ctx.mod.ref.null(binaryen.eqref)),
       ],
-      ctx.effectsRuntime.outcomeType
+      ctx.effectsRuntime.outcomeType,
     );
   }
 
@@ -246,7 +229,6 @@ export const wrapValueInOutcome = ({
     value: valueExpr,
     valueType,
     typeId,
-    serializer,
     ctx,
     fnCtx,
   });

@@ -593,8 +593,8 @@ export const typeCallExpr = (
         applyCurrentSubstitution(calleeType, ctx, state),
       );
       if (
-        (intrinsicName === "__boundary_shape_of" ||
-          intrinsicName === "__boundary_try_shape_of") &&
+        (intrinsicName === "__dto_shape_of" ||
+          intrinsicName === "__dto_try_shape_of") &&
         signature &&
         instantiation &&
         (signature.typeParams?.length ?? 0) > 0
@@ -7192,6 +7192,17 @@ const scoreOverloadMatchesByLambdaCompatibility = <
 
   return new Map(
     matches.map((candidate) => {
+      const candidateArgs = argsForCandidate
+        ? argsForCandidate(candidate)
+        : args;
+      const argumentConversionPenalty = overloadArgumentConversionPenalty({
+        candidate,
+        args: candidateArgs,
+        typeArguments,
+        targetTypeArguments,
+        ctx,
+        state,
+      });
       const compatibilityScore =
         !compatibilityNarrowed || compatibleSet.has(candidate) ? 1 : 0;
       const returnScore =
@@ -7203,12 +7214,102 @@ const scoreOverloadMatchesByLambdaCompatibility = <
       return [
         candidate,
         {
+          argumentConversionPenalty,
           lambdaCompatibility:
             compatibilityScore + returnScore + arityScore + expectedTypeScore,
         },
       ];
     }),
   );
+};
+
+const overloadArgumentConversionPenalty = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  candidate,
+  args,
+  typeArguments,
+  targetTypeArguments,
+  ctx,
+  state,
+}: {
+  candidate: T;
+  args: readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): number => {
+  const substitution =
+    candidate.signature.typeParams && candidate.signature.typeParams.length > 0
+      ? inferOverloadCandidateSubstitution({
+          signature: candidate.signature,
+          args,
+          typeArguments,
+          targetTypeArguments,
+          calleeSymbol: candidate.symbol,
+          ctx,
+          state,
+        })
+      : undefined;
+  const parameters = publicCallParametersFor({ signature: candidate.signature }).map(
+    (parameter) => ({
+      ...parameter,
+      type: substitution
+        ? applyCurrentSubstitution(
+            ctx.arena.substitute(parameter.type, substitution),
+            ctx,
+            state,
+          )
+        : parameter.type,
+    }),
+  );
+
+  if (
+    (candidate.signature.typeParams?.length ?? 0) > 0 &&
+    !substitution
+  ) {
+    return 0;
+  }
+
+  const conversionPenalty = (actual: TypeId, expected: TypeId): number => {
+    return actual === expected ? 0 : 1;
+  };
+
+  if (
+    args.length === 1 &&
+    args[0]!.label === undefined &&
+    parameters.length > 1 &&
+    parameters.every(({ label }) => typeof label === "string")
+  ) {
+    const fields = getStructuralFields(args[0]!.type, ctx, state);
+    if (!fields) {
+      return 0;
+    }
+    return parameters.reduce((penalty, parameter) => {
+      const field = fields.find(({ name }) => name === parameter.label);
+      return field
+        ? penalty + conversionPenalty(field.type, parameter.type)
+        : penalty;
+    }, 0);
+  }
+
+  if (args.length !== parameters.length) {
+    return 0;
+  }
+
+  return args.reduce((penalty, arg, index) => {
+    const parameter =
+      arg.label === undefined
+        ? parameters[index]
+        : parameters.find(({ label, name }) =>
+            label === arg.label || name === arg.label,
+          );
+    if (!parameter || arg.type === parameter.type) {
+      return penalty;
+    }
+    return penalty + conversionPenalty(arg.type, parameter.type);
+  }, 0);
 };
 
 type LambdaReturnInferenceResult =
@@ -8423,7 +8524,7 @@ const typeIntrinsicCall = (
         expectedReturnType,
       });
     case "__retain_callback":
-    case "__boundary_retain_callback":
+    case "__host_retain_callback":
     case "__render_retain_callback":
       return typeBoundaryRetainCallbackIntrinsic({
         name,
@@ -8451,50 +8552,60 @@ const typeIntrinsicCall = (
       });
       assertNoIntrinsicTypeArgs("__stable_callsite_id", typeArguments);
       return getPrimitiveType(ctx, "i32");
-    case "__boundary_value_to_msgpack":
-      return typeBoundaryValueToMsgPackIntrinsic({
-        args,
-        ctx,
-        typeArguments,
-        expectedReturnType,
-      });
-    case "__boundary_msgpack_to_value":
-      return typeBoundaryMsgPackToValueIntrinsic({
-        args,
-        typeArguments,
-      });
-    case "__boundary_msgpack_to_value_or_identity":
+    case "__dto_value_to_data":
       assertIntrinsicArgCount({
-        name: "__boundary_msgpack_to_value_or_identity",
+        name: "__dto_value_to_data",
+        args,
+        expected: 1,
+        detail: "DTO value",
+      });
+      assertNoIntrinsicTypeArgs("__dto_value_to_data", typeArguments);
+      return expectedReturnType ?? ctx.primitives.unknown;
+    case "__dto_write":
+      assertIntrinsicArgCount({
+        name: "__dto_write",
         args,
         expected: 2,
+        detail: "writer and DTO value",
       });
-      if ((typeArguments?.length ?? 0) !== 2) {
-        throw new Error(
-          "intrinsic __boundary_msgpack_to_value_or_identity requires exactly 2 type arguments",
-        );
-      }
-      return typeArguments![0]!;
-    case "__boundary_shape_of":
+      return expectedReturnType ?? ctx.primitives.unknown;
+    case "__dto_fingerprint":
       assertIntrinsicArgCount({
-        name: "__boundary_shape_of",
+        name: "__dto_fingerprint",
+        args,
+        expected: 1,
+        detail: "DTO value",
+      });
+      assertNoIntrinsicTypeArgs("__dto_fingerprint", typeArguments);
+      return expectedReturnType ?? ctx.primitives.unknown;
+    case "__dto_read":
+      assertIntrinsicArgCount({
+        name: "__dto_read",
+        args,
+        expected: 2,
+        detail: "reader and unknown-field policy",
+      });
+      return expectedReturnType ?? ctx.primitives.unknown;
+    case "__dto_shape_of":
+      assertIntrinsicArgCount({
+        name: "__dto_shape_of",
         args,
         expected: 0,
       });
       requireSingleTypeArgument({
-        name: "__boundary_shape_of",
+        name: "__dto_shape_of",
         typeArguments,
         detail: "reified type",
       });
       return expectedReturnType ?? ctx.primitives.unknown;
-    case "__boundary_try_shape_of":
+    case "__dto_try_shape_of":
       assertIntrinsicArgCount({
-        name: "__boundary_try_shape_of",
+        name: "__dto_try_shape_of",
         args,
         expected: 0,
       });
       requireSingleTypeArgument({
-        name: "__boundary_try_shape_of",
+        name: "__dto_try_shape_of",
         typeArguments,
         detail: "optionally reified type",
       });
@@ -9308,47 +9419,6 @@ const typeBoundaryRetainCallbackIntrinsic = ({
     throw new Error(`${name} expects a function argument`);
   }
   return getPrimitiveType(ctx, "i32");
-};
-
-const typeBoundaryValueToMsgPackIntrinsic = ({
-  args,
-  ctx,
-  typeArguments,
-  expectedReturnType,
-}: {
-  args: readonly Arg[];
-  ctx: TypingContext;
-  typeArguments?: readonly TypeId[];
-  expectedReturnType?: TypeId;
-}): TypeId => {
-  assertIntrinsicArgCount({
-    name: "__boundary_value_to_msgpack",
-    args,
-    expected: 1,
-    detail: "boundary value",
-  });
-  assertNoIntrinsicTypeArgs("__boundary_value_to_msgpack", typeArguments);
-  return expectedReturnType ?? ctx.primitives.unknown;
-};
-
-const typeBoundaryMsgPackToValueIntrinsic = ({
-  args,
-  typeArguments,
-}: {
-  args: readonly Arg[];
-  typeArguments?: readonly TypeId[];
-}): TypeId => {
-  assertIntrinsicArgCount({
-    name: "__boundary_msgpack_to_value",
-    args,
-    expected: 1,
-    detail: "MessagePack value",
-  });
-  return requireSingleTypeArgument({
-    name: "__boundary_msgpack_to_value",
-    typeArguments,
-    detail: "target type",
-  });
 };
 
 const typeTaskTakeValueIntrinsic = ({

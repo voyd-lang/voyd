@@ -1,9 +1,11 @@
 use std::array::Array
+use std::bytes::Bytes
 use std::error::HostError
 use std::json::JsonValue
 use std::meta::{
   ArrayShape,
   BoolShape,
+  BytesShape,
   F32Shape,
   F64Shape,
   I64Shape,
@@ -161,6 +163,9 @@ test "shape_of reifies every boundary primitive":
     else: Test::fail()
   shape_of<void>().root.match(node)
     UnitShape: void
+    else: Test::fail()
+  shape_of<Bytes>().root.match(node)
+    BytesShape: void
     else: Test::fail()
 
 test "shape_of assigns unique graph keys to same-named recursive instances":

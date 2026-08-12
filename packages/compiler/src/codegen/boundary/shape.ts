@@ -168,6 +168,13 @@ const emitShapeNode = ({
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   switch (schema.kind) {
+    case "custom":
+      return emitShapeNode({
+        schema: schema.representation,
+        state,
+        ctx,
+        fnCtx,
+      });
     case "bool":
       return emitShapeVariant({ name: "BoolShape", state, ctx, fnCtx });
     case "i32":
@@ -180,6 +187,8 @@ const emitShapeNode = ({
       return emitShapeVariant({ name: "F64Shape", state, ctx, fnCtx });
     case "string":
       return emitShapeVariant({ name: "StringShape", state, ctx, fnCtx });
+    case "bytes":
+      return emitShapeVariant({ name: "BytesShape", state, ctx, fnCtx });
     case "void":
       return emitShapeVariant({ name: "UnitShape", state, ctx, fnCtx });
     case "ref": {

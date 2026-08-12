@@ -886,7 +886,7 @@ fn save(model: Model): (http_client::HttpClient, tasks::TaskRuntime) -> Program<
     return next(model)
   program<Model, Msg>(
     model: start_saving(model),
-    commands: Cmd<Msg>::task(
+    commands: Cmd<Msg>::perform(
       work: () -> bool => save_article(slug: model.slug, body: model.body),
       handler: (succeeded: bool) -> Msg => Msg::SaveFinished { succeeded: succeeded }
     )
@@ -907,7 +907,6 @@ fn save_article({ slug: String, body: String }): http_client::HttpClient -> bool
 const viewVoyd = `use super::model::{ Model, can_save, is_dirty }
 use super::update::Msg
 use std::array::Array
-use std::msgpack::MsgPack
 use std::number::cast::to_string
 use std::string::type::String
 use std::vx::all
@@ -994,7 +993,7 @@ fn Preview({ model: Model }) -> Html<Msg>
       <pre class="mt-4 whitespace-pre-wrap rounded-md bg-zinc-50 p-4 text-sm leading-7">{model.body}</pre>
     </aside>
   else:
-    fragment(Array<MsgPack>::init())
+    fragment(Array<Html<void>>::init())
 
 fn status_label(model: Model) -> String
   if model.saving:

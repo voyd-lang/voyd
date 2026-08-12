@@ -1,29 +1,41 @@
-use std::fs::{ Fs, exists as path_exists }
-use std::msgpack::MsgPack
+use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
+use std::fs::{ Fs, FsResult, exists as path_exists }
 use std::path::Path
+use std::result::types::Unit
+use std::string::type::String
 
 pub fn handle_imported_std_fs_ops(): () -> i32
   try
     if path_exists(Path::new("/asset.txt".as_slice())) then: 28 else: 0
-  Fs::exists(tail, _path: MsgPack):
+  Fs::exists(tail, _path: String):
     tail(true)
-  Fs::read_bytes(tail, _path: MsgPack):
-    tail(_path)
-  Fs::read_string(tail, _path: MsgPack):
-    tail(_path)
-  Fs::write_bytes(tail, _payload: MsgPack):
-    tail(_payload)
-  Fs::write_string(tail, _payload: MsgPack):
-    tail(_payload)
-  Fs::remove(tail, _path: MsgPack):
-    tail(_path)
-  Fs::list_dir(tail, _path: MsgPack):
-    tail(_path)
-  Fs::create_dir_all(tail, _path: MsgPack):
-    tail(_path)
-  Fs::rename(tail, _payload: MsgPack):
-    tail(_payload)
-  Fs::write_atomic(tail, _payload: MsgPack):
-    tail(_payload)
-  Fs::create_exclusive(tail, _payload: MsgPack):
-    tail(_payload)
+  Fs::read_bytes(tail, _path):
+    tail(fs_ok<Bytes>(ByteBuffer::init().as_bytes()))
+  Fs::read_string(tail, _path):
+    tail(fs_ok<String>(""))
+  Fs::write_bytes(tail, _request):
+    tail(fs_ok<Unit>(Unit {}))
+  Fs::write_string(tail, _request):
+    tail(fs_ok<Unit>(Unit {}))
+  Fs::remove(tail, _path):
+    tail(fs_ok<Unit>(Unit {}))
+  Fs::list_dir(tail, _path):
+    tail(fs_ok<Array<String>>(Array<String>::init()))
+  Fs::create_dir_all(tail, _path):
+    tail(fs_ok<Unit>(Unit {}))
+  Fs::rename(tail, _request):
+    tail(fs_ok<Unit>(Unit {}))
+  Fs::write_atomic(tail, _request):
+    tail(fs_ok<Unit>(Unit {}))
+  Fs::create_exclusive(tail, _request):
+    tail(fs_ok<Unit>(Unit {}))
+
+fn fs_ok<T>(value: T) -> FsResult<T>
+  FsResult<T> {
+    ok: true,
+    value: value,
+    error_kind: "other",
+    error_code: 0,
+    error_message: ""
+  }

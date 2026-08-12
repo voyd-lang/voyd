@@ -2,10 +2,7 @@ import { flushNodeStream, writeToNodeStream } from "../io.js";
 import { outputErrorCode, outputErrorMessage } from "../errors.js";
 import {
   globalRecord,
-  hostError,
-  hostOk,
   isNodeCompatibleRuntime,
-  normalizeByte,
   readField,
   toStringOrUndefined,
 } from "../helpers.js";
@@ -60,9 +57,20 @@ const decodeOutputWriteValue = (payload: unknown): string =>
 
 const decodeOutputWriteBytes = (payload: unknown): Uint8Array => {
   const rawBytes = readField(payload, "bytes");
-  const source = Array.isArray(rawBytes) ? rawBytes : [];
-  return Uint8Array.from(source.map(normalizeByte));
+  return rawBytes instanceof Uint8Array ? rawBytes : new Uint8Array();
 };
+
+const outputSuccess = (): Record<string, unknown> => ({
+  ok: true,
+  code: 0,
+  message: "",
+});
+
+const outputFailure = (error: unknown): Record<string, unknown> => ({
+  ok: false,
+  code: outputErrorCode(error),
+  message: outputErrorMessage(error),
+});
 
 const createOutputSource = ({
   runtime,
@@ -200,9 +208,9 @@ export const outputCapabilityDefinition: CapabilityDefinition = {
                   target: decodeOutputTarget(payload),
                   value: decodeOutputWriteValue(payload),
                 });
-                return tail(hostOk());
+                return tail(outputSuccess());
               } catch (error) {
-                return tail(hostError(outputErrorMessage(error), outputErrorCode(error)));
+                return tail(outputFailure(error));
               }
             },
           }),
@@ -222,9 +230,9 @@ export const outputCapabilityDefinition: CapabilityDefinition = {
                   target: decodeOutputTarget(payload),
                   bytes: decodeOutputWriteBytes(payload),
                 });
-                return tail(hostOk());
+                return tail(outputSuccess());
               } catch (error) {
-                return tail(hostError(outputErrorMessage(error), outputErrorCode(error)));
+                return tail(outputFailure(error));
               }
             },
           }),
@@ -243,9 +251,9 @@ export const outputCapabilityDefinition: CapabilityDefinition = {
                 await outputSource.flush!({
                   target: decodeOutputTarget(payload),
                 });
-                return tail(hostOk());
+                return tail(outputSuccess());
               } catch (error) {
-                return tail(hostError(outputErrorMessage(error), outputErrorCode(error)));
+                return tail(outputFailure(error));
               }
             },
           }),

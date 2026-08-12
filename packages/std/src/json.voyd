@@ -4,9 +4,14 @@
 //! numbers must be finite.
 
 use std::array::Array
+use std::bytes::Bytes
 use std::data::{
+  ArrayKind,
+  BoolKind,
+  DataKind,
   DataArray,
   DataBool,
+  DataBytes,
   DataF32,
   DataF64,
   DataField,
@@ -17,17 +22,33 @@ use std::data::{
   DataString,
   DataValue,
   DataVariant,
+  DataReader,
+  DataWriter,
+  DecodeLimits,
+  EncodeLimits,
   DecodeError,
   DecodeOptions,
   IgnoreUnknownFields,
+  F64Kind,
+  I32Kind,
+  I64Kind,
+  NullKind,
+  RecordKind,
   RejectUnknownFields,
+  StringKind,
+  VariantKind,
   UnknownFieldPolicy,
-  decode as decode_data
+  default_decode_limits,
+  default_encode_limits,
+  decode as decode_data,
+  read as read_dto,
+  write as write_dto
 }
 use std::dict::Dict
 use std::meta::{
   ArrayShape,
   BoolShape,
+  BytesShape,
   F32Shape,
   F64Shape,
   I32Shape,
@@ -58,6 +79,391 @@ pub obj JsonError {
   api message: String
 }
 
+fn invalid_encode_limits(limits: EncodeLimits) -> bool
+  limits.max_depth < 0
+    or limits.max_bytes < 0
+    or limits.max_collection_length < 0
+
+fn invalid_decode_limits(limits: DecodeLimits) -> bool
+  limits.max_depth < 0
+    or limits.max_bytes < 0
+    or limits.max_collection_length < 0
+
+/// Direct compact-JSON sink used by compiler-generated DTO traversal.
+pub obj JsonWriter {
+  out: Array<i32>,
+  container_kinds: Array<i32>,
+  expected_values: Array<i32>,
+  written_values: Array<i32>,
+  pending_fields: Array<i32>,
+  root_count: i32,
+  failed: bool,
+  limits: EncodeLimits
+}
+
+impl JsonWriter
+  /// Creates an empty compact JSON writer.
+  pub fn init() -> JsonWriter
+    JsonWriter::init(limits: default_encode_limits())
+
+  /// Creates a compact JSON writer with explicit resource limits.
+  pub fn init({ limits: EncodeLimits }) -> JsonWriter
+    JsonWriter {
+      out: Array<i32>::with_capacity(64),
+      container_kinds: Array<i32>::init(),
+      expected_values: Array<i32>::init(),
+      written_values: Array<i32>::init(),
+      pending_fields: Array<i32>::init(),
+      root_count: 0,
+      failed: invalid_encode_limits(limits),
+      limits: limits
+    }
+
+  /// Finishes exactly one balanced JSON value.
+  api fn finish(self) -> Result<String, JsonError>
+    if self.failed:
+      return json_writer_failure<String>("json writer session has failed")
+    if self.container_kinds.is_empty() == false:
+      return json_writer_failure<String>("json writer has unclosed containers")
+    if self.root_count != 1:
+      return json_writer_failure<String>("json writer expected one root value")
+    if self.out.len() > self.limits.max_bytes:
+      return json_writer_failure<String>("json writer output exceeds configured byte limit")
+    Ok<String> { value: new_string(self.out.to_fixed_array()) }
+
+  fn fail(~self, message: String) -> Result<Unit, JsonError>
+    self.failed = true
+    json_writer_failure<Unit>(message)
+
+  fn before_value(~self) -> Result<Unit, JsonError>
+    if self.failed:
+      return json_writer_failure<Unit>("json writer session has failed")
+    if self.container_kinds.is_empty():
+      if self.root_count != 0:
+        return self.fail("json writer received more than one root value")
+      self.root_count = 1
+      return json_writer_success()
+    let index = self.container_kinds.len() - 1
+    let written = self.written_values.at(index)
+    if written >= self.expected_values.at(index):
+      return self.fail("json writer container received too many values")
+    if self.container_kinds.at(index) == 0:
+      if written > 0:
+        self.out.push(44)
+    else:
+      if self.pending_fields.at(index) == 0:
+        return self.fail("json writer field is missing its descriptor")
+      self.pending_fields.replace(index, with: 0)
+    self.written_values.replace(index, with: written + 1)
+    json_writer_success()
+
+  fn begin_container(
+    ~self,
+    { kind: i32, length: i32 }
+  ) -> Result<Unit, JsonError>
+    if length < 0:
+      return self.fail("json writer container length cannot be negative")
+    if length > self.limits.max_collection_length:
+      return self.fail("json writer collection exceeds configured limit")
+    if self.container_kinds.len() >= self.limits.max_depth:
+      return self.fail("json writer nesting exceeds configured limit")
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        self.out.push(if kind == 0 then: 91 else: 123)
+        self.container_kinds.push(kind)
+        self.expected_values.push(length)
+        self.written_values.push(0)
+        self.pending_fields.push(0)
+        json_writer_success()
+
+  fn end_container(~self, { kind: i32 }) -> Result<Unit, JsonError>
+    if self.container_kinds.is_empty():
+      return self.fail("json writer has no container to close")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) != kind:
+      return self.fail("json writer closed a different container")
+    if self.written_values.at(index) != self.expected_values.at(index) or self.pending_fields.at(index) != 0:
+      return self.fail("json writer container is incomplete")
+    self.container_kinds.pop()
+    self.expected_values.pop()
+    self.written_values.pop()
+    self.pending_fields.pop()
+    self.out.push(if kind == 0 then: 93 else: 125)
+    json_writer_success()
+
+  fn write_dynamic_field(~self, name: String) -> Result<Unit, JsonError>
+    if self.container_kinds.is_empty():
+      return self.fail("json writer field is outside a record or variant")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) == 0 or self.pending_fields.at(index) != 0:
+      return self.fail("json writer field is not ready")
+    if self.written_values.at(index) > 0:
+      self.out.push(44)
+    append_json_string(self.out, name.as_slice())
+    self.out.push(58)
+    self.pending_fields.replace(index, with: 1)
+    json_writer_success()
+
+impl DataWriter<JsonError> for JsonWriter
+  fn reject(~self, message: String) -> Result<Unit, JsonError>
+    self.fail(message)
+
+  fn write_null(~self) -> Result<Unit, JsonError>
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_ascii(self.out, "null".as_slice())
+        json_writer_success()
+
+  fn write_bool(~self, value: bool) -> Result<Unit, JsonError>
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_ascii(self.out, if value then: "true".as_slice() else: "false".as_slice())
+        json_writer_success()
+
+  fn write_i32(~self, value: i32) -> Result<Unit, JsonError>
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_string(self.out, number_cast::to_string(value).as_slice())
+        json_writer_success()
+
+  fn write_i64(~self, value: i64) -> Result<Unit, JsonError>
+    let exact_max = exact_json_i64_max()
+    if value < -exact_max or value > exact_max:
+      return self.fail("json writer i64 exceeds the exact integer range")
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_string(self.out, number_cast::to_string(value).as_slice())
+        json_writer_success()
+
+  fn write_f32(~self, value: f32) -> Result<Unit, JsonError>
+    if is_finite(value) == false:
+      return self.fail("json writer number must be finite")
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_string(self.out, number_cast::to_string(value).as_slice())
+        json_writer_success()
+
+  fn write_f64(~self, value: f64) -> Result<Unit, JsonError>
+    if is_finite(value) == false:
+      return self.fail("json writer number must be finite")
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_string(self.out, number_cast::to_string(value).as_slice())
+        json_writer_success()
+
+  fn write_string(~self, value: String) -> Result<Unit, JsonError>
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_json_string(self.out, value.as_slice())
+        json_writer_success()
+
+  fn write_bytes(~self, value: Bytes) -> Result<Unit, JsonError>
+    self.fail("json writer bytes require an explicit representation")
+
+  fn begin_array(~self, { length: i32 }) -> Result<Unit, JsonError>
+    self.begin_container(kind: 0, length: length)
+
+  fn end_array(~self) -> Result<Unit, JsonError>
+    self.end_container(kind: 0)
+
+  fn begin_record(
+    ~self,
+    { name: String, field_count: i32 }
+  ) -> Result<Unit, JsonError>
+    self.begin_container(kind: 1, length: field_count)
+
+  fn write_field(~self, name: String) -> Result<Unit, JsonError>
+    self.write_dynamic_field(name)
+
+  fn end_record(~self) -> Result<Unit, JsonError>
+    self.end_container(kind: 1)
+
+  fn begin_variant(
+    ~self,
+    { union: String, variant: String, field_count: i32 }
+  ) -> Result<Unit, JsonError>
+    match(self.begin_container(kind: 2, length: field_count + 1))
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        match(self.write_dynamic_field("$variant"))
+          Err<JsonError> { error }:
+            Err<JsonError> { error }
+          Ok<Unit>:
+            self.write_string(variant)
+
+  fn end_variant(~self) -> Result<Unit, JsonError>
+    self.end_container(kind: 2)
+
+/// Path-aware JSON source used by compiler-generated typed decoding.
+obj JsonDtoReader {
+  reader: JsonReader,
+  path: String,
+  parents: Array<String>,
+  limits: DecodeLimits
+}
+
+impl JsonDtoReader
+  fn init(source: StringSlice) -> JsonDtoReader
+    JsonDtoReader::init(source, limits: default_decode_limits())
+
+  fn init(source: StringSlice, { limits: DecodeLimits }) -> JsonDtoReader
+    JsonDtoReader {
+      reader: JsonReader::init(source, limits: limits),
+      path: "$".to_string(),
+      parents: Array<String>::init(),
+      limits: limits
+    }
+
+  fn is_complete(self) -> bool
+    self.reader.is_complete()
+
+  fn mapped<T>(
+    self,
+    result: Result<T, JsonError>,
+    kind: JsonDecodeErrorKind
+  ) -> Result<T, JsonDecodeError>
+    match(result)
+      Ok<T> { value }:
+        Ok<T> { value }
+      Err<JsonError> { error }:
+        decode_failure<T>(kind, self.path, error.message)
+
+impl DataReader<JsonDecodeError> for JsonDtoReader
+  fn reject(~self, message: String) -> Result<Unit, JsonDecodeError>
+    decode_failure<Unit>(JsonSchemaFailure {}, self.path, message)
+
+  fn reject_custom(
+    ~self,
+    code: String,
+    message: String
+  ) -> Result<Unit, JsonDecodeError>
+    decode_failure<Unit>(
+      JsonCustomDtoFailure { code },
+      self.path,
+      message
+    )
+
+  fn current_path(self) -> String
+    self.path
+
+  fn matches_name(self, actual: String, expected: String) -> bool
+    actual == expected
+
+  fn enter_field(~self, name: String) -> void
+    self.parents.push(self.path)
+    self.path = json_field_path(self.path, name)
+
+  fn enter_index(~self, index: i32) -> void
+    self.parents.push(self.path)
+    self.path = json_index_path(self.path, index)
+
+  fn leave(~self) -> void
+    if self.parents.is_empty() == false:
+      let index = self.parents.len() - 1
+      self.path = self.parents.at(index)
+      self.parents.pop()
+
+  fn kind(self) -> Result<DataKind, JsonDecodeError>
+    self.mapped(self.reader.kind(), JsonParseFailure {})
+
+  fn read_null(~self) -> Result<Unit, JsonDecodeError>
+    self.mapped(self.reader.read_null(), JsonSchemaFailure {})
+
+  fn read_bool(~self) -> Result<bool, JsonDecodeError>
+    self.mapped(self.reader.read_bool(), JsonSchemaFailure {})
+
+  fn read_i32(~self) -> Result<i32, JsonDecodeError>
+    self.mapped(self.reader.read_i32(), JsonSchemaFailure {})
+
+  fn read_i64(~self) -> Result<i64, JsonDecodeError>
+    self.mapped(self.reader.read_i64(), JsonSchemaFailure {})
+
+  fn read_f32(~self) -> Result<f32, JsonDecodeError>
+    self.mapped(self.reader.read_f32(), JsonSchemaFailure {})
+
+  fn read_f64(~self) -> Result<f64, JsonDecodeError>
+    self.mapped(self.reader.read_f64(), JsonSchemaFailure {})
+
+  fn read_string(~self) -> Result<String, JsonDecodeError>
+    self.mapped(self.reader.read_string(), JsonSchemaFailure {})
+
+  fn read_bytes(~self) -> Result<Bytes, JsonDecodeError>
+    self.mapped(self.reader.read_bytes(), JsonSchemaFailure {})
+
+  fn begin_array(~self) -> Result<i32, JsonDecodeError>
+    match(self.mapped(self.reader.begin_array(), JsonSchemaFailure {}))
+      Err<JsonDecodeError> { error }:
+        Err<JsonDecodeError> { error }
+      Ok<i32> { value: length }:
+        if length > self.limits.max_collection_length:
+          return decode_failure<i32>(JsonSchemaFailure {}, self.path, "json array exceeds configured collection limit")
+        if self.reader.container_kinds.len() > self.limits.max_depth:
+          return decode_failure<i32>(JsonSchemaFailure {}, self.path, "json nesting exceeds configured depth limit")
+        Ok<i32> { value: length }
+
+  fn has_next_element(self) -> Result<bool, JsonDecodeError>
+    self.mapped(self.reader.has_next_element(), JsonParseFailure {})
+
+  fn end_array(~self) -> Result<Unit, JsonDecodeError>
+    self.mapped(self.reader.end_array(), JsonParseFailure {})
+
+  fn begin_record(~self) -> Result<Unit, JsonDecodeError>
+    match(self.mapped(self.reader.begin_record(), JsonSchemaFailure {}))
+      Err<JsonDecodeError> { error }:
+        Err<JsonDecodeError> { error }
+      Ok<Unit>:
+        if self.reader.container_kinds.len() > self.limits.max_depth:
+          return decode_failure<Unit>(JsonSchemaFailure {}, self.path, "json nesting exceeds configured depth limit")
+        Ok<Unit> { value: Unit {} }
+
+  fn next_field(~self) -> Result<Option<String>, JsonDecodeError>
+    if self.reader.container_kinds.is_empty() == false:
+      let index = self.reader.container_kinds.len() - 1
+      if self.reader.consumed_values.at(index) >= self.limits.max_collection_length:
+        return decode_failure<Option<String>>(JsonSchemaFailure {}, self.path, "json object exceeds configured collection limit")
+    self.mapped(self.reader.next_field(), JsonParseFailure {})
+
+  fn skip_value(~self) -> Result<Unit, JsonDecodeError>
+    self.mapped(self.reader.skip_value(), JsonParseFailure {})
+
+  fn end_record(~self) -> Result<Unit, JsonDecodeError>
+    self.mapped(self.reader.end_record(), JsonParseFailure {})
+
+  fn begin_variant(~self) -> Result<String, JsonDecodeError>
+    match(self.mapped(self.reader.begin_variant(), JsonSchemaFailure {}))
+      Err<JsonDecodeError> { error }:
+        Err<JsonDecodeError> { error }
+      Ok<String> { value }:
+        if self.reader.container_kinds.len() > self.limits.max_depth:
+          return decode_failure<String>(JsonSchemaFailure {}, self.path, "json nesting exceeds configured depth limit")
+        Ok<String> { value }
+
+  fn end_variant(~self) -> Result<Unit, JsonDecodeError>
+    self.mapped(self.reader.end_variant(), JsonParseFailure {})
+
+fn json_writer_success() -> Result<Unit, JsonError>
+  Ok<Unit> { value: Unit {} }
+
+fn json_writer_failure<T>(message: String) -> Result<T, JsonError>
+  Err<JsonError> { error: json_stringify_error(message) }
+
 /// The JSON text itself was malformed.
 pub obj JsonParseFailure {}
 
@@ -70,11 +476,15 @@ pub obj JsonVersionFailure {}
 /// A decoded number violated an explicit application constraint.
 pub obj JsonConstraintFailure {}
 
+/// A custom DTO rejected a valid JSON representation.
+pub obj JsonCustomDtoFailure { api code: String }
+
 /// Stable categories for typed JSON decoding failures.
 pub type JsonDecodeErrorKind = JsonParseFailure
   | JsonSchemaFailure
   | JsonVersionFailure
   | JsonConstraintFailure
+  | JsonCustomDtoFailure
 
 /// Typed JSON failure with a rooted JSON path and retained cause text.
 pub obj JsonDecodeError {
@@ -85,7 +495,8 @@ pub obj JsonDecodeError {
 
 /// Unknown-field behavior used by typed JSON decoding.
 pub obj JsonDecodeOptions {
-  api unknown_fields: UnknownFieldPolicy
+  api unknown_fields: UnknownFieldPolicy,
+  api limits: DecodeLimits
 }
 
 /// Migration callback for a parsed versioned document.
@@ -139,6 +550,418 @@ obj JsonEscapeState {
   out: Array<i32>,
   parser: JsonParser
 }
+
+/// Pull reader over one JSON source without constructing a `JsonValue` tree.
+pub obj JsonReader {
+  parser: JsonParser,
+  container_kinds: Array<i32>,
+  consumed_values: Array<i32>,
+  pending_fields: Array<i32>,
+  root_consumed: bool,
+  failed: bool,
+  limits: DecodeLimits
+}
+
+impl JsonReader
+  /// Creates a reader over borrowed JSON source text.
+  pub fn init(source: StringSlice) -> JsonReader
+    JsonReader::init(source, limits: default_decode_limits())
+
+  fn init(source: StringSlice, { limits: DecodeLimits }) -> JsonReader
+    JsonReader {
+      parser: JsonParser { source, index: 0 },
+      container_kinds: Array<i32>::init(),
+      consumed_values: Array<i32>::init(),
+      pending_fields: Array<i32>::init(),
+      root_consumed: false,
+      failed: invalid_decode_limits(limits),
+      limits: limits
+    }
+
+  /// Creates a reader over owned JSON source text.
+  pub fn init(source: String) -> JsonReader
+    JsonReader::init(source.as_slice())
+
+  /// Returns true after one balanced root and all source text are consumed.
+  api fn is_complete(self) -> bool
+    if self.failed or self.root_consumed == false or self.container_kinds.is_empty() == false:
+      return false
+    let ~probe = JsonParser {
+      source: self.parser.source,
+      index: self.parser.index
+    }
+    skip_whitespace(probe)
+    probe.index == probe.source.byte_len()
+
+  fn fail<T>(~self, message: String) -> Result<T, JsonError>
+    self.failed = true
+    json_reader_failure<T>(message)
+
+  fn prepare_value(~self) -> Result<Unit, JsonError>
+    if self.failed:
+      return json_reader_failure<Unit>("json reader session has failed")
+    skip_whitespace(self.parser)
+    if self.container_kinds.is_empty():
+      if self.root_consumed:
+        return self.fail<Unit>("json reader received more than one root value")
+      self.root_consumed = true
+      return json_reader_success()
+    let index = self.container_kinds.len() - 1
+    let kind = self.container_kinds.at(index)
+    let consumed = self.consumed_values.at(index)
+    if kind == 0:
+      if consumed > 0:
+        if consume_byte(self.parser, 44) == false:
+          return self.fail<Unit>("json reader expected ',' between array values")
+        skip_whitespace(self.parser)
+      self.consumed_values.replace(index, with: consumed + 1)
+      return json_reader_success()
+    if self.pending_fields.at(index) == 0:
+      return self.fail<Unit>("json reader field is missing its descriptor")
+    self.pending_fields.replace(index, with: 0)
+    self.consumed_values.replace(index, with: consumed + 1)
+    json_reader_success()
+
+  fn begin_container(~self, { kind: i32 }) -> Result<Unit, JsonError>
+    if self.container_kinds.len() >= self.limits.max_depth:
+      return self.fail<Unit>("json nesting exceeds configured depth limit")
+    match(self.prepare_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        let opening = if kind == 0 then: 91 else: 123
+        if consume_byte(self.parser, opening) == false:
+          return self.fail<Unit>("json reader expected a container")
+        self.container_kinds.push(kind)
+        self.consumed_values.push(0)
+        self.pending_fields.push(0)
+        json_reader_success()
+
+  fn end_container(~self, { kind: i32 }) -> Result<Unit, JsonError>
+    if self.container_kinds.is_empty():
+      return self.fail<Unit>("json reader has no container to close")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) != kind:
+      return self.fail<Unit>("json reader closed a different container")
+    if self.pending_fields.at(index) != 0:
+      return self.fail<Unit>("json reader field has no value")
+    skip_whitespace(self.parser)
+    let closing = if kind == 0 then: 93 else: 125
+    if consume_byte(self.parser, closing) == false:
+      return self.fail<Unit>("json reader container has unread values")
+    self.container_kinds.pop()
+    self.consumed_values.pop()
+    self.pending_fields.pop()
+    json_reader_success()
+
+  fn read_number_value(~self) -> Result<f64, JsonError>
+    match(self.prepare_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        match(parse_number(self.parser))
+          Err<JsonError> { error }:
+            self.failed = true
+            Err<JsonError> { error }
+          Ok<JsonValue> { value }:
+            value.match(number)
+              JsonNumber:
+                Ok<f64> { value: number.value }
+              else:
+                self.fail<f64>("json reader expected number")
+
+impl DataReader<JsonError> for JsonReader
+  fn reject(~self, message: String) -> Result<Unit, JsonError>
+    self.fail<Unit>(message)
+
+  fn reject_custom(
+    ~self,
+    code: String,
+    message: String
+  ) -> Result<Unit, JsonError>
+    self.fail<Unit>(code.concat(": ").concat(message))
+
+  fn current_path(self) -> String
+    "$".to_string()
+
+  fn matches_name(self, actual: String, expected: String) -> bool
+    actual == expected
+
+  fn enter_field(~self, name: String) -> void
+    void
+
+  fn enter_index(~self, index: i32) -> void
+    void
+
+  fn leave(~self) -> void
+    void
+
+  fn kind(self) -> Result<DataKind, JsonError>
+    let ~probe = JsonParser {
+      source: self.parser.source,
+      index: self.parser.index
+    }
+    skip_whitespace(probe)
+    if self.container_kinds.is_empty() == false:
+      let index = self.container_kinds.len() - 1
+      if self.container_kinds.at(index) == 0 and self.consumed_values.at(index) > 0:
+        if consume_byte(probe, 44) == false:
+          return json_reader_failure<DataKind>("json reader expected ',' between array values")
+        skip_whitespace(probe)
+    match(peek(probe))
+      None:
+        json_reader_failure<DataKind>("json reader has no current value")
+      Some<i32> { value: byte }:
+        if byte == 110:
+          return Ok<DataKind> { value: NullKind {} }
+        if byte == 116 or byte == 102:
+          return Ok<DataKind> { value: BoolKind {} }
+        if byte == 34:
+          return Ok<DataKind> { value: StringKind {} }
+        if byte == 91:
+          return Ok<DataKind> { value: ArrayKind {} }
+        if byte == 123:
+          if json_object_starts_variant(probe):
+            return Ok<DataKind> { value: VariantKind {} }
+          return Ok<DataKind> { value: RecordKind {} }
+        match(parse_number(probe))
+          Err<JsonError> { error }:
+            Err<JsonError> { error }
+          Ok<JsonValue> { value }:
+            value.match(number)
+              JsonNumber:
+                if is_integral(number.value):
+                  match(to_i32_checked(number.value))
+                    Ok<i32>:
+                      return Ok<DataKind> { value: I32Kind {} }
+                    Err:
+                      match(to_i64_checked(number.value))
+                        Ok<i64>:
+                          return Ok<DataKind> { value: I64Kind {} }
+                        Err:
+                          void
+                Ok<DataKind> { value: F64Kind {} }
+              else:
+                json_reader_failure<DataKind>("json reader expected a value")
+
+  fn read_null(~self) -> Result<Unit, JsonError>
+    match(self.prepare_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        if consume_literal(self.parser, "null".as_slice()):
+          return json_reader_success()
+        self.fail<Unit>("json reader expected null")
+
+  fn read_bool(~self) -> Result<bool, JsonError>
+    match(self.prepare_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        if consume_literal(self.parser, "true".as_slice()):
+          return Ok<bool> { value: true }
+        if consume_literal(self.parser, "false".as_slice()):
+          return Ok<bool> { value: false }
+        self.fail<bool>("json reader expected bool")
+
+  fn read_i32(~self) -> Result<i32, JsonError>
+    match(self.read_number_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<f64> { value }:
+        if is_integral(value):
+          match(to_i32_checked(value))
+            Ok<i32> { value }:
+              return Ok<i32> { value }
+            Err:
+              void
+        self.fail<i32>("json reader expected a 32-bit integer")
+
+  fn read_i64(~self) -> Result<i64, JsonError>
+    match(self.read_number_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<f64> { value }:
+        if is_integral(value):
+          match(to_i64_checked(value))
+            Ok<i64> { value }:
+              return Ok<i64> { value }
+            Err:
+              void
+        self.fail<i64>("json reader expected a 64-bit integer")
+
+  fn read_f32(~self) -> Result<f32, JsonError>
+    match(self.read_number_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<f64> { value }:
+        let narrowed = to_f32(value)
+        if is_finite(narrowed):
+          return Ok<f32> { value: narrowed }
+        self.fail<f32>("json reader expected a finite 32-bit number")
+
+  fn read_f64(~self) -> Result<f64, JsonError>
+    self.read_number_value()
+
+  fn read_string(~self) -> Result<String, JsonError>
+    match(self.prepare_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        match(parse_string(self.parser))
+          Err<JsonError> { error }:
+            self.failed = true
+            Err<JsonError> { error }
+          Ok<String> { value }:
+            Ok<String> { value }
+
+  fn read_bytes(~self) -> Result<Bytes, JsonError>
+    self.fail<Bytes>("json reader bytes require an explicit representation")
+
+  fn begin_array(~self) -> Result<i32, JsonError>
+    match(self.begin_container(kind: 0))
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        let ~probe = JsonParser {
+          source: self.parser.source,
+          index: self.parser.index
+        }
+        match(count_json_array_values(
+          probe,
+          depth: self.container_kinds.len(),
+          limits: self.limits
+        ))
+          Err<JsonError> { error }:
+            self.failed = true
+            Err<JsonError> { error }
+          Ok<i32> { value }:
+            Ok<i32> { value }
+
+  fn has_next_element(self) -> Result<bool, JsonError>
+    if self.container_kinds.is_empty():
+      return json_reader_failure<bool>("json reader is outside an array")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) != 0:
+      return json_reader_failure<bool>("json reader is outside an array")
+    let ~probe = JsonParser {
+      source: self.parser.source,
+      index: self.parser.index
+    }
+    skip_whitespace(probe)
+    if self.consumed_values.at(index) > 0:
+      if consume_byte(probe, 44) == false:
+        return Ok<bool> { value: false }
+      skip_whitespace(probe)
+    Ok<bool> { value: peek_byte_or(probe, -1) != 93 }
+
+  fn end_array(~self) -> Result<Unit, JsonError>
+    self.end_container(kind: 0)
+
+  fn begin_record(~self) -> Result<Unit, JsonError>
+    self.begin_container(kind: 1)
+
+  fn next_field(~self) -> Result<Option<String>, JsonError>
+    if self.container_kinds.is_empty():
+      return self.fail<Option<String>>("json reader is outside a record")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) == 0:
+      return self.fail<Option<String>>("json reader is outside a record")
+    if self.container_kinds.at(index) == 3:
+      return Ok<Option<String>> { value: None {} }
+    if self.pending_fields.at(index) != 0:
+      return self.fail<Option<String>>("json reader field has no value")
+    skip_whitespace(self.parser)
+    if self.consumed_values.at(index) > 0:
+      if peek_byte_or(self.parser, -1) == 125:
+        return Ok<Option<String>> { value: None {} }
+      if consume_byte(self.parser, 44) == false:
+        return self.fail<Option<String>>("json reader expected ',' between fields")
+      skip_whitespace(self.parser)
+    else:
+      if peek_byte_or(self.parser, -1) == 125:
+        return Ok<Option<String>> { value: None {} }
+    match(parse_string(self.parser))
+      Err<JsonError> { error }:
+        self.failed = true
+        Err<JsonError> { error }
+      Ok<String> { value: name }:
+        skip_whitespace(self.parser)
+        if consume_byte(self.parser, 58) == false:
+          return self.fail<Option<String>>("json reader expected ':' after a field")
+        self.pending_fields.replace(index, with: 1)
+        Ok<Option<String>> { value: Some<String> { value: name } }
+
+  fn skip_value(~self) -> Result<Unit, JsonError>
+    match(self.prepare_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        match(skip_json_value(
+          self.parser,
+          depth: self.container_kinds.len(),
+          limits: self.limits
+        ))
+          Err<JsonError> { error }:
+            self.failed = true
+            Err<JsonError> { error }
+          Ok<Unit>:
+            json_reader_success()
+
+  fn end_record(~self) -> Result<Unit, JsonError>
+    self.end_container(kind: 1)
+
+  fn begin_variant(~self) -> Result<String, JsonError>
+    let ~probe = JsonParser {
+      source: self.parser.source,
+      index: self.parser.index
+    }
+    skip_whitespace(probe)
+    if peek_byte_or(probe, -1) == 34:
+      match(self.prepare_value())
+        Err<JsonError> { error }:
+          return Err<JsonError> { error }
+        Ok<Unit>:
+          match(parse_string(self.parser))
+            Err<JsonError> { error }:
+              self.failed = true
+              return Err<JsonError> { error }
+            Ok<String> { value }:
+              self.container_kinds.push(3)
+              self.consumed_values.push(0)
+              self.pending_fields.push(0)
+              return Ok<String> { value }
+    match(self.begin_container(kind: 2))
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        match(self.next_field())
+          Err<JsonError> { error }:
+            Err<JsonError> { error }
+          Ok<Option<String>> { value }:
+            value.match(field)
+              None:
+                self.fail<String>("json reader variant discriminator is missing")
+              Some<String>:
+                if field.value != "$variant":
+                  return self.fail<String>("json reader expected the variant tag first")
+                self.read_string()
+
+  fn end_variant(~self) -> Result<Unit, JsonError>
+    if self.container_kinds.is_empty() == false:
+      let index = self.container_kinds.len() - 1
+      if self.container_kinds.at(index) == 3:
+        self.container_kinds.pop()
+        self.consumed_values.pop()
+        self.pending_fields.pop()
+        return json_reader_success()
+    self.end_container(kind: 2)
+
+fn json_reader_success() -> Result<Unit, JsonError>
+  Ok<Unit> { value: Unit {} }
+
+fn json_reader_failure<T>(message: String) -> Result<T, JsonError>
+  Err<JsonError> { error: json_parse_error(message) }
 
 /// Parses UTF-8 JSON text into a `JsonValue`.
 ///
@@ -209,11 +1032,39 @@ pub fn stringify_pretty(value: JsonValue) -> Result<String, JsonError>
 
 /// Returns strict typed-decoder options that reject unknown record fields.
 pub fn strict_decode_options() -> JsonDecodeOptions
-  JsonDecodeOptions { unknown_fields: RejectUnknownFields {} }
+  JsonDecodeOptions {
+    unknown_fields: RejectUnknownFields {},
+    limits: default_decode_limits()
+  }
 
 /// Returns forward-compatible typed-decoder options that ignore unknown fields.
 pub fn permissive_decode_options() -> JsonDecodeOptions
-  JsonDecodeOptions { unknown_fields: IgnoreUnknownFields {} }
+  JsonDecodeOptions {
+    unknown_fields: IgnoreUnknownFields {},
+    limits: default_decode_limits()
+  }
+
+/// Encodes a DTO-compatible value as compact JSON text.
+///
+/// Signed 64-bit integers outside JavaScript's exact integer range are
+/// rejected. `Bytes` requires an explicit application representation.
+pub fn encode<T>(value: T): () -> Result<String, JsonError>
+  encode_with_limits(value, limits: default_encode_limits())
+
+/// Encodes compact JSON with explicit depth, byte, and collection limits.
+pub fn encode_with_limits<T>(value: T, { limits: EncodeLimits }): () -> Result<String, JsonError>
+  let ~writer = JsonWriter::init(limits: limits)
+  match(write_dto<T, JsonError, JsonWriter>(writer, value))
+    Err<JsonError> { error }:
+      Err<JsonError> { error }
+    Ok<Unit>:
+      writer.finish()
+
+/// Encodes a DTO-compatible value as an explicit JSON value tree.
+///
+/// Use this when an API needs to inspect or compose JSON before stringifying it.
+pub fn encode_value<T>(value: T): () -> Result<JsonValue, JsonError>
+  data_value_to_json(dto_value_to_data(value), "$")
 
 /// Parses and strictly decodes JSON into a closed boundary-compatible type.
 pub fn decode<T>(source: String): () -> Result<T, JsonDecodeError>
@@ -235,15 +1086,27 @@ pub fn decode<T>(
   source: StringSlice,
   { options: JsonDecodeOptions }
 ): () -> Result<T, JsonDecodeError>
-  match(parse(source))
-    Ok<JsonValue> { value }:
-      decode<T>(value, options: options)
-    Err<JsonError> { error }:
-      decode_failure<T>(
-        JsonParseFailure {},
-        "$",
-        error.message
-      )
+  if invalid_decode_limits(options.limits) or source.byte_len() > options.limits.max_bytes:
+    return decode_failure<T>(
+      JsonParseFailure {},
+      "$",
+      "json source exceeds configured limits"
+    )
+  let ~reader = JsonDtoReader::init(source, limits: options.limits)
+  match(read_dto<T, JsonDecodeError, JsonDtoReader>(
+    reader,
+    rejects_unknown_fields(options.unknown_fields)
+  ))
+    Err<JsonDecodeError> { error }:
+      Err<JsonDecodeError> { error }
+    Ok<T> { value }:
+      if reader.is_complete() == false:
+        return decode_failure<T>(
+          JsonParseFailure {},
+          "$",
+          "json parse error: trailing characters"
+        )
+      Ok<T> { value }
 
 /// Strictly decodes an already-parsed JSON value.
 pub fn decode<T>(value: JsonValue): () -> Result<T, JsonDecodeError>
@@ -259,18 +1122,7 @@ pub fn decode<T>(
     Err<JsonDecodeError> { error }:
       Err<JsonDecodeError> { error }
     Ok<DataValue> { value: data_value }:
-      match(decode_data<T>(
-        data_value,
-        options: DecodeOptions { unknown_fields: options.unknown_fields }
-      ))
-        Ok<T> { value }:
-          Ok<T> { value }
-        Err<DecodeError> { error }:
-          decode_failure<T>(
-            JsonSchemaFailure {},
-            error.path,
-            "expected ".concat(error.expected).concat(", received ").concat(error.actual)
-          )
+      decode_data_result<T>(data_value, options)
 
 /// Decodes a versioned document and requires migrations to produce `current`.
 pub fn decode_versioned<T>(
@@ -359,6 +1211,30 @@ pub fn number_in_range(
 ): () -> Result<f64, JsonDecodeError>
   number_in_range(value, at: path.to_string(), min: min, max: max)
 
+fn decode_data_result<T>(
+  data_value: DataValue,
+  options: JsonDecodeOptions
+) -> Result<T, JsonDecodeError>
+  match(decode_data<T>(
+    data_value,
+    options: DecodeOptions { unknown_fields: options.unknown_fields }
+  ))
+    Ok<T> { value }:
+      Ok<T> { value }
+    Err<DecodeError> { error }:
+      decode_failure<T>(
+        JsonSchemaFailure {},
+        error.path,
+        "expected ".concat(error.expected).concat(", received ").concat(error.actual)
+      )
+
+fn rejects_unknown_fields(policy: UnknownFieldPolicy) -> bool
+  policy.match(active)
+    RejectUnknownFields:
+      true
+    IgnoreUnknownFields:
+      false
+
 fn json_value_to_data(
   value: JsonValue,
   shape: ShapeNode,
@@ -420,6 +1296,8 @@ fn json_value_to_data(
           Ok<DataValue> { value: DataString { value: decoded.value } }
         else:
           schema_mismatch(path, "string")
+    BytesShape:
+      schema_mismatch(path, "bytes require an explicit JSON representation")
     UnitShape:
       value.match(decoded)
         JsonNull:
@@ -450,6 +1328,209 @@ fn json_value_to_data(
             path,
             "type shape contains an unresolved reference"
           )
+
+fn data_value_to_json(
+  value: DataValue,
+  path: String
+): () -> Result<JsonValue, JsonError>
+  value.match(decoded)
+    DataNull:
+      Ok<JsonValue> { value: JsonNull {} }
+    DataBool:
+      Ok<JsonValue> { value: JsonBool { value: decoded.value } }
+    DataI32:
+      Ok<JsonValue> {
+        value: JsonNumber { value: number_cast::to_f64(decoded.value) }
+      }
+    DataI64:
+      let exact_max = exact_json_i64_max()
+      if decoded.value < -exact_max or decoded.value > exact_max:
+        Err<JsonError> {
+          error: json_stringify_error(
+            "json encode failed at ".concat(path).concat(
+              ": i64 is outside the exact JSON integer range"
+            )
+          )
+        }
+      else:
+        Ok<JsonValue> {
+          value: JsonNumber { value: number_cast::to_f64(decoded.value) }
+        }
+    DataF32:
+      Ok<JsonValue> {
+        value: JsonNumber { value: number_cast::to_f64(decoded.value) }
+      }
+    DataF64:
+      Ok<JsonValue> { value: JsonNumber { value: decoded.value } }
+    DataString:
+      Ok<JsonValue> { value: JsonString { value: decoded.value } }
+    DataBytes:
+      Err<JsonError> {
+        error: json_stringify_error(
+          "json encode failed at ".concat(path).concat(
+            ": bytes require an explicit JSON representation"
+          )
+        )
+      }
+    DataArray:
+      data_array_to_json(decoded, path)
+    DataObject:
+      data_fields_to_json(decoded.fields, path)
+    DataVariant:
+      data_variant_to_json(decoded, path)
+
+fn write_data_value_json(
+  ~writer: JsonWriter,
+  value: DataValue
+) -> Result<Unit, JsonError>
+  value.match(data)
+    DataNull:
+      writer.write_null()
+    DataBool:
+      writer.write_bool(data.value)
+    DataI32:
+      writer.write_i32(data.value)
+    DataI64:
+      writer.write_i64(data.value)
+    DataF32:
+      writer.write_f32(data.value)
+    DataF64:
+      writer.write_f64(data.value)
+    DataString:
+      writer.write_string(data.value)
+    DataBytes:
+      writer.write_bytes(data.value)
+    DataArray:
+      match(writer.begin_array(length: data.values.len()))
+        Err<JsonError> { error }:
+          Err<JsonError> { error }
+        Ok<Unit>:
+          var index = 0
+          while index < data.values.len():
+            match(write_data_value_json(writer, data.values.at(index)))
+              Err<JsonError> { error }:
+                return Err<JsonError> { error }
+              Ok<Unit>:
+                void
+            index = index + 1
+          writer.end_array()
+    DataObject:
+      write_data_fields_json(writer, data.fields, variant_name: None {})
+    DataVariant:
+      write_data_fields_json(
+        writer,
+        data.fields,
+        variant_name: Some<String> { value: data.name }
+      )
+
+fn write_data_fields_json(
+  ~writer: JsonWriter,
+  fields: Array<DataField>,
+  { variant_name: Option<String> }
+) -> Result<Unit, JsonError>
+  let extra = variant_name.match(value)
+    Some<String>: 1
+    None: 0
+  let kind = if extra == 1 then: 2 else: 1
+  match(writer.begin_container(kind: kind, length: fields.len() + extra))
+    Err<JsonError> { error }:
+      Err<JsonError> { error }
+    Ok<Unit>:
+      match(variant_name)
+        Some<String> { value: name }:
+          match(writer.write_dynamic_field("$variant"))
+            Err<JsonError> { error }:
+              return Err<JsonError> { error }
+            Ok<Unit>:
+              match(writer.write_string(name))
+                Err<JsonError> { error }:
+                  return Err<JsonError> { error }
+                Ok<Unit>:
+                  void
+        None:
+          void
+      var index = 0
+      while index < fields.len():
+        let field = fields.at(index)
+        match(writer.write_dynamic_field(field.name))
+          Err<JsonError> { error }:
+            return Err<JsonError> { error }
+          Ok<Unit>:
+            match(write_data_value_json(writer, field.value))
+              Err<JsonError> { error }:
+                return Err<JsonError> { error }
+              Ok<Unit>:
+                void
+        index = index + 1
+      writer.end_container(kind: kind)
+
+fn data_array_to_json(
+  value: DataArray,
+  path: String
+): () -> Result<JsonValue, JsonError>
+  let ~out = Array<JsonValue>::with_capacity(value.values.len())
+  var index = 0
+  while index < value.values.len():
+    match(data_value_to_json(value.values.at(index), index_path(path, index)))
+      Err<JsonError> { error }:
+        return Err<JsonError> { error }
+      Ok<JsonValue> { value }:
+        out.push(value)
+    index = index + 1
+  Ok<JsonValue> { value: JsonArray { value: out } }
+
+fn data_fields_to_json(
+  fields: Array<DataField>,
+  path: String
+): () -> Result<JsonValue, JsonError>
+  let ~out = Dict<String, JsonValue>::init()
+  var index = 0
+  while index < fields.len():
+    let field = fields.at(index)
+    match(data_value_to_json(field.value, field_path(path, field.name)))
+      Err<JsonError> { error }:
+        return Err<JsonError> { error }
+      Ok<JsonValue> { value }:
+        out.set(field.name, value)
+    index = index + 1
+  Ok<JsonValue> { value: JsonObject { value: out } }
+
+fn data_variant_to_json(
+  value: DataVariant,
+  path: String
+): () -> Result<JsonValue, JsonError>
+  match(data_fields_to_json(value.fields, path))
+    Err<JsonError> { error }:
+      Err<JsonError> { error }
+    Ok<JsonValue> { value: object }:
+      object.match(decoded)
+        JsonObject:
+          Ok<JsonValue> {
+            value: JsonObject {
+              value: decoded.value.setting(
+                "$variant",
+                JsonString { value: value.name }
+              )
+            }
+          }
+        else:
+          Err<JsonError> {
+            error: json_stringify_error("json encode failed: invalid variant")
+          }
+
+fn field_path(path: String, field: String) -> String
+  path.concat(".").concat(field)
+
+fn index_path(path: String, index: i32) -> String
+  path.concat("[").concat(number_cast::to_string(index)).concat("]")
+
+fn exact_json_i64_max() -> i64
+  number_cast::to_i64(2147483647) * number_cast::to_i64(4194304)
+    + number_cast::to_i64(4194303)
+
+@intrinsic(name: "__dto_value_to_data")
+fn dto_value_to_data<T>(value: T): () -> DataValue
+  __dto_value_to_data(value)
 
 fn json_array_to_data(
   value: JsonArray,
@@ -698,6 +1779,125 @@ fn decode_failure<T>(
   Err<JsonDecodeError> {
     error: JsonDecodeError { kind, path, message }
   }
+
+fn json_object_starts_variant(~parser: JsonParser) -> bool
+  if consume_byte(parser, 123) == false:
+    return false
+  skip_whitespace(parser)
+  match(parse_string(parser))
+    Err<JsonError>:
+      false
+    Ok<String> { value }:
+      value == "$variant"
+
+fn count_json_array_values(
+  ~parser: JsonParser,
+  { depth: i32, limits: DecodeLimits }
+) -> Result<i32, JsonError>
+  skip_whitespace(parser)
+  if consume_byte(parser, 93):
+    return Ok<i32> { value: 0 }
+  var count = 0
+  while true:
+    if count >= limits.max_collection_length:
+      return json_reader_failure<i32>("json array exceeds configured collection limit")
+    match(skip_json_value(parser, depth: depth, limits: limits))
+      Err<JsonError> { error }:
+        return Err<JsonError> { error }
+      Ok<Unit>:
+        count = count + 1
+    skip_whitespace(parser)
+    if consume_byte(parser, 93):
+      return Ok<i32> { value: count }
+    if consume_byte(parser, 44) == false:
+      return json_reader_failure<i32>("json reader expected ',' or ']' in array")
+    skip_whitespace(parser)
+  json_reader_failure<i32>("json reader expected ']' in array")
+
+fn skip_json_value(
+  ~parser: JsonParser,
+  { depth: i32, limits: DecodeLimits }
+) -> Result<Unit, JsonError>
+  skip_whitespace(parser)
+  match(peek(parser))
+    None:
+      json_reader_failure<Unit>("json reader found an incomplete value")
+    Some<i32> { value: byte }:
+      if byte == 110:
+        if consume_literal(parser, "null".as_slice()):
+          return json_reader_success()
+        return json_reader_failure<Unit>("json reader found an invalid literal")
+      if byte == 116:
+        if consume_literal(parser, "true".as_slice()):
+          return json_reader_success()
+        return json_reader_failure<Unit>("json reader found an invalid literal")
+      if byte == 102:
+        if consume_literal(parser, "false".as_slice()):
+          return json_reader_success()
+        return json_reader_failure<Unit>("json reader found an invalid literal")
+      if byte == 34:
+        match(parse_string(parser))
+          Err<JsonError> { error }:
+            return Err<JsonError> { error }
+          Ok<String>:
+            return json_reader_success()
+      if byte == 91:
+        if depth >= limits.max_depth:
+          return json_reader_failure<Unit>("json nesting exceeds configured depth limit")
+        parser.index = parser.index + 1
+        skip_whitespace(parser)
+        if consume_byte(parser, 93):
+          return json_reader_success()
+        var count = 0
+        while true:
+          if count >= limits.max_collection_length:
+            return json_reader_failure<Unit>("json array exceeds configured collection limit")
+          match(skip_json_value(parser, depth: depth + 1, limits: limits))
+            Err<JsonError> { error }:
+              return Err<JsonError> { error }
+            Ok<Unit>:
+              count = count + 1
+          skip_whitespace(parser)
+          if consume_byte(parser, 93):
+            return json_reader_success()
+          if consume_byte(parser, 44) == false:
+            return json_reader_failure<Unit>("json reader expected ',' or ']' in array")
+          skip_whitespace(parser)
+      if byte == 123:
+        if depth >= limits.max_depth:
+          return json_reader_failure<Unit>("json nesting exceeds configured depth limit")
+        parser.index = parser.index + 1
+        skip_whitespace(parser)
+        if consume_byte(parser, 125):
+          return json_reader_success()
+        var count = 0
+        while true:
+          if count >= limits.max_collection_length:
+            return json_reader_failure<Unit>("json object exceeds configured collection limit")
+          match(parse_string(parser))
+            Err<JsonError> { error }:
+              return Err<JsonError> { error }
+            Ok<String>:
+              void
+          skip_whitespace(parser)
+          if consume_byte(parser, 58) == false:
+            return json_reader_failure<Unit>("json reader expected ':' after a field")
+          match(skip_json_value(parser, depth: depth + 1, limits: limits))
+            Err<JsonError> { error }:
+              return Err<JsonError> { error }
+            Ok<Unit>:
+              count = count + 1
+          skip_whitespace(parser)
+          if consume_byte(parser, 125):
+            return json_reader_success()
+          if consume_byte(parser, 44) == false:
+            return json_reader_failure<Unit>("json reader expected ',' or '}' in object")
+          skip_whitespace(parser)
+      match(parse_number(parser))
+        Err<JsonError> { error }:
+          Err<JsonError> { error }
+        Ok<JsonValue>:
+          json_reader_success()
 
 fn parse_value(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   skip_whitespace(parser)
@@ -1097,6 +2297,13 @@ fn skip_whitespace(~parser: JsonParser) -> void
 
 fn peek(parser: JsonParser): () -> Option<i32>
   parser.source.get_byte(parser.index)
+
+fn peek_byte_or(parser: JsonParser, fallback: i32) -> i32
+  match(peek(parser))
+    Some<i32> { value }:
+      value
+    None:
+      fallback
 
 fn next_byte(~parser: JsonParser): () -> Option<i32>
   match(parser.source.get_byte(parser.index))

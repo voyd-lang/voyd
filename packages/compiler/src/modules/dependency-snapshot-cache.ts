@@ -247,6 +247,7 @@ export const commitDependencySnapshot = ({
 }): void => {
   if (
     !prepared?.cache ||
+    prepared.hit ||
     !prepared.key ||
     !prepared.moduleFingerprints ||
     !dependencySnapshot

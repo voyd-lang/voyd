@@ -256,7 +256,7 @@ pub fn main() -> MsgPack
   t.expect(
     containsNode(ast.toJSON(), [
     "::",
-    ["Array", ["generics", "HtmlNode"]],
+    ["Array", ["generics", ["Html", ["generics", "void"]]]],
     ["init"],
     ]),
   ).toBe(true);
@@ -276,7 +276,7 @@ pub fn main() -> MsgPack
   t.expect(
     identifiers.find(
       (identifier) =>
-        identifier.value === "HtmlNode" &&
+        identifier.value === "Html" &&
         identifier.lexicalContext?.kind === "symbol-reference" &&
         identifier.lexicalContext.targetModuleId === "std::vx",
     )?.lexicalContext,

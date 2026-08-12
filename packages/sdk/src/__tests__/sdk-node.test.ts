@@ -666,6 +666,26 @@ pub fn main() -> i32
     await expect(warm.run<number>({ entryName: "main" })).resolves.toBe(
       428_553,
     );
+
+    const secondWarm = expectCompileSuccess(
+      await sdk.compile({
+        entryPath,
+        source: `${source}\nfn second_dependency_snapshot_app_edit_marker() -> i32\n  2\n`,
+      }),
+    );
+    await expect(secondWarm.run<number>({ entryName: "main" })).resolves.toBe(
+      428_553,
+    );
+
+    const thirdWarm = expectCompileSuccess(
+      await sdk.compile({
+        entryPath,
+        source: `${source}\nfn third_dependency_snapshot_app_edit_marker() -> i32\n  3\n`,
+      }),
+    );
+    await expect(thirdWarm.run<number>({ entryName: "main" })).resolves.toBe(
+      428_553,
+    );
   });
 
   it("emits the same optimized wasm for fresh and dependency snapshot app edits", async () => {
@@ -725,12 +745,18 @@ pub fn main() -> i32
       host.run("echo_i64", [Number.MAX_SAFE_INTEGER + 1]),
     ).rejects.toThrow("typed export echo_i64 arg0 expected i64, got number");
     expect(exports).not.toContain("__voyd_serialized_export_primitive");
-    expect(abi.exports).toContainEqual({
-      name: "primitive",
-      abi: "direct",
-      params: [],
-      result: expect.objectContaining({ kind: "i32" }),
-    });
+    expect(abi.exports).toContainEqual(
+      expect.objectContaining({
+        id: expect.any(Number),
+        name: "primitive",
+        abi: "direct",
+        params: [],
+        result: expect.objectContaining({
+          kind: "i32",
+          fingerprint: expect.any(String),
+        }),
+      }),
+    );
     await expect(
       host.run("translate", [{ x: 1, y: 2 }, 10, 20]),
     ).resolves.toEqual({ x: 11, y: 22 });
@@ -792,19 +818,16 @@ pub fn main() -> i32
     ).resolves.toBe(6);
     await expect(
       host.run("tree_sum", [{ val: 1, l: null, r: { val: 3 } }]),
+    ).rejects.toThrow("typed export tree_sum arg0.l expected object, got null");
+    await expect(
+      host.run("tree_sum", [{ val: 1, r: { val: 3 } }]),
     ).resolves.toBe(4);
     await expect(host.run("cyclic_tree")).rejects.toThrow(
-      /typed export cyclic_tree result.*cannot encode cyclic object graph/,
+      /serialized export cyclic_tree failed \(dto\.write\).*cannot encode cyclic object graph/,
     );
-    const deepTree = await host.run<{ val: number; l?: any }>("deep_tree");
-    let node = deepTree;
-    let depth = 0;
-    while (node.l) {
-      depth += 1;
-      node = node.l;
-    }
-    expect(depth).toBe(600);
-    expect(node).toEqual({ val: 0 });
+    await expect(host.run("deep_tree")).rejects.toThrow(
+      "msgpack writer nesting exceeds configured limit",
+    );
     const cyclicTree: { val: number; l?: unknown } = { val: 1 };
     cyclicTree.l = cyclicTree;
     await expect(host.run("tree_sum", [cyclicTree])).rejects.toThrow(
@@ -849,12 +872,23 @@ pub fn main() -> i32
 
     expect(result.wasm.byteLength).toBeLessThan(2_000);
     expect(exports).not.toContain("__voyd_serialized_export_increment");
-    expect(abi.exports).toContainEqual({
-      name: "increment",
-      abi: "direct",
-      params: [expect.objectContaining({ kind: "i32" })],
-      result: expect.objectContaining({ kind: "i32" }),
-    });
+    expect(abi.exports).toContainEqual(
+      expect.objectContaining({
+        id: expect.any(Number),
+        name: "increment",
+        abi: "direct",
+        params: [
+          expect.objectContaining({
+            kind: "i32",
+            fingerprint: expect.any(String),
+          }),
+        ],
+        result: expect.objectContaining({
+          kind: "i32",
+          fingerprint: expect.any(String),
+        }),
+      }),
+    );
     await expect(host.run("increment", [41])).resolves.toBe(42);
     await expect(host.run("increment", ["41"])).rejects.toThrow(
       "typed export increment arg0 expected i32, got string",
@@ -901,7 +935,55 @@ pub fn shift(point: AliasPoint) -> AliasPoint
 
     expect(exports).toContain("translate");
     expect(exports).not.toContain("__voyd_serialized_export_translate");
-    expect(abi.exports).toContainEqual({ name: "translate", abi: "direct" });
+    expect(abi.exports).toContainEqual(
+      expect.objectContaining({
+        id: expect.any(Number),
+        name: "translate",
+        abi: "direct",
+      }),
+    );
+  });
+
+  it("does not load the host transport when every host boundary is off", async () => {
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-voyd-sdk-no-host-transport-"),
+    );
+    const srcDir = path.join(projectRoot, "src");
+    const stdDir = path.join(projectRoot, "std");
+    const entryPath = path.join(srcDir, "main.voyd");
+
+    try {
+      await fs.mkdir(srcDir, { recursive: true });
+      await fs.mkdir(stdDir, { recursive: true });
+      await fs.writeFile(
+        entryPath,
+        `#!no_prelude
+pub fn main() -> i32
+  42
+`,
+      );
+      await fs.writeFile(
+        path.join(stdDir, "msgpack.voyd"),
+        "this selected provider must not be parsed",
+      );
+
+      for (const boundaryExports of [false, { mode: "off" }] as const) {
+        const result = expectCompileSuccess(
+          await createSdk().compile({
+            entryPath,
+            roots: { src: srcDir, std: stdDir },
+            boundaryExports,
+            effectsHostBoundary: "off",
+          }),
+        );
+
+        await expect(result.run<number>({ entryName: "main" })).resolves.toBe(
+          42,
+        );
+      }
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it("compiles when entryPath is relative with subdirectories", async () => {
@@ -1238,31 +1320,21 @@ pub fn main(): Operations -> i32
     const envKey = "VOYD_SDK_DEFAULT_ADAPTER_TEST";
     const original = process.env[envKey];
     const sdk = createSdk();
-    const source = `use std::host_dto::HostDto
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
-use std::string::type::{ String, new_string }
+    const source = `use std::env
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
 
-@effect(id: "voyd.std.env")
-eff Env
-  get(tail, key: MsgPack) -> MsgPack
-  set(tail, payload: MsgPack) -> MsgPack
-
-pub fn main(): Env -> i32
-  let set_payload = HostDto::init()
-    .set("key", msgpack::make_string("${envKey}"))
-    .set("value", msgpack::make_string("41"))
-    .pack()
-  let _ = Env::set(set_payload)
-  let payload = Env::get(msgpack::make_string("${envKey}"))
-  payload.match(active)
-    String:
-      if active.equals("41") then:
-        41
-      else:
-        -2
-    else:
+pub fn main(): env::Env -> i32
+  match(env::set("${envKey}", "41"))
+    Err:
       -3
+    Ok<Unit>:
+      match(env::get("${envKey}"))
+        Some<String> { value }:
+          if value.equals("41") then: 41 else: -2
+        None:
+          -3
 `;
 
     try {

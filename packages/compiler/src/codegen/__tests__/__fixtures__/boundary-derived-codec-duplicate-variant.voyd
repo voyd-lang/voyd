@@ -1,4 +1,4 @@
-use std::msgpack::pack_boundary_value
+use std::data::encode
 use std::string::type::String
 
 obj RepeatedBoundaryVariant<T> {
@@ -9,5 +9,5 @@ type AmbiguousBoundaryUnion = RepeatedBoundaryVariant<i32> | RepeatedBoundaryVar
 
 pub fn main() -> void
   let value: AmbiguousBoundaryUnion = RepeatedBoundaryVariant { value: 7 }
-  pack_boundary_value(value)
+  encode(value)
   void

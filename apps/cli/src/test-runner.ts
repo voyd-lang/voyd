@@ -12,7 +12,7 @@ import {
 } from "@voyd-lang/sdk";
 import {
   createFsModuleHost,
-  EFFECTS_HOST_BOUNDARY_STD_DEPS,
+  SELECTED_HOST_TRANSPORT_PROVIDER_MODULES,
   modulePathFromFile,
   type ModuleRoots,
 } from "@voyd-lang/sdk/compiler";
@@ -313,7 +313,7 @@ const buildTestEntrySource = ({
   modulePaths: string[];
 }): string => {
   const prelude: string[] = [];
-  EFFECTS_HOST_BOUNDARY_STD_DEPS.forEach((moduleId) => {
+  SELECTED_HOST_TRANSPORT_PROVIDER_MODULES.forEach((moduleId) => {
     if (!modulePaths.includes(moduleId)) {
       const alias = moduleId.replace(/[^A-Za-z0-9_]/g, "_");
       prelude.push(`use ${moduleId}::self as ${alias}`);

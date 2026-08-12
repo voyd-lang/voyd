@@ -1,5 +1,6 @@
 import type { HostProtocolTable } from "./types.js";
 import { RESUME_KIND } from "../runtime/constants.js";
+import type { BoundarySchema } from "./export-abi.js";
 
 const TABLE_HEADER_SIZE = 8;
 const OP_ENTRY_SIZE_V2 = 28;
@@ -8,6 +9,7 @@ const TABLE_VERSION_V2 = 2;
 const TABLE_VERSION = 3;
 
 export const EFFECT_TABLE_EXPORT = "__voyd_effect_table";
+export const EFFECT_ABI_SECTION = "voyd.effect_abi";
 
 type EffectIdHash = {
   low: number;
@@ -27,6 +29,10 @@ export type ParsedEffectOp = {
   signatureHash: number;
   label: string;
   operationId?: string;
+  boundary?: {
+    params: readonly BoundarySchema[];
+    result: BoundarySchema;
+  };
 };
 
 export type ParsedEffectTable = {
@@ -256,6 +262,7 @@ export const parseEffectTable = (
   wasm: Uint8Array | ArrayBuffer | WebAssembly.Module | BinaryenModuleLike,
   tableExport = EFFECT_TABLE_EXPORT,
 ): ParsedEffectTable => {
+  const wasmBytes = wasm instanceof WebAssembly.Module ? undefined : toUint8Array(wasm);
   const payload =
     wasm instanceof WebAssembly.Module
       ? (() => {
@@ -264,9 +271,51 @@ export const parseEffectTable = (
           return new Uint8Array(sections[0]!);
         })()
       : getCustomSectionPayloadFromBytes({
-          wasmBytes: toUint8Array(wasm),
+          wasmBytes: wasmBytes!,
           tableExport,
         });
+  const effectAbiPayload =
+    wasm instanceof WebAssembly.Module
+      ? (() => {
+          const sections = WebAssembly.Module.customSections(
+            wasm,
+            EFFECT_ABI_SECTION,
+          );
+          return sections.length > 0 ? new Uint8Array(sections[0]!) : undefined;
+        })()
+      : getCustomSectionPayloadFromBytes({
+          wasmBytes: wasmBytes!,
+          tableExport: EFFECT_ABI_SECTION,
+        });
+  const boundaryByOpIndex = new Map<
+    number,
+    { params: readonly BoundarySchema[]; result: BoundarySchema }
+  >();
+  if (effectAbiPayload) {
+    const parsed = JSON.parse(new TextDecoder().decode(effectAbiPayload)) as {
+      version?: number;
+      ops?: Array<{
+        opIndex?: number;
+        params?: readonly BoundarySchema[];
+        result?: BoundarySchema;
+      }>;
+    };
+    if (parsed.version !== 1 || !Array.isArray(parsed.ops)) {
+      throw new Error("Unsupported effect ABI metadata");
+    }
+    parsed.ops.forEach((entry) => {
+      if (
+        typeof entry.opIndex === "number" &&
+        Array.isArray(entry.params) &&
+        entry.result
+      ) {
+        boundaryByOpIndex.set(entry.opIndex, {
+          params: entry.params,
+          result: entry.result,
+        });
+      }
+    });
+  }
 
   if (!payload) {
     throw new Error(`Missing effect table export ${tableExport}`);
@@ -327,6 +376,9 @@ export const parseEffectTable = (
       signatureHash: entry.signatureHash,
       label: decodeName(names, entry.labelOffset),
       ...(operationId ? { operationId } : {}),
+      ...(boundaryByOpIndex.get(entry.opIndex)
+        ? { boundary: boundaryByOpIndex.get(entry.opIndex)! }
+        : {}),
     };
   });
 

@@ -240,6 +240,7 @@ export const runEffectfulExport = async <T = unknown>({
   imports,
   bufferSize,
   adapters,
+  args = [],
 }: {
   wasm: WasmSource;
   entryName: string;
@@ -248,6 +249,7 @@ export const runEffectfulExport = async <T = unknown>({
   imports?: WebAssembly.Imports;
   bufferSize?: number;
   adapters?: HostInitOptions["adapters"];
+  args?: unknown[];
 }): Promise<{
   value: T;
   table: ParsedEffectTable;
@@ -323,7 +325,7 @@ export const runEffectfulExport = async <T = unknown>({
     registerHandler({ op, handler: resolvedHandler });
   });
 
-  const value = await host.runEffectful<T>(entryName);
+  const value = await host.runEffectful<T>(entryName, args);
   return { value, table, instance: host.instance };
 };
 

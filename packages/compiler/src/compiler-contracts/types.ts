@@ -3,6 +3,7 @@ import type { TypeId } from "../semantics/ids.js";
 
 export const STD_INTRINSIC_TYPE = {
   array: "voyd.std.array",
+  bytes: "voyd.std.bytes",
   range: "voyd.std.range",
   string: "voyd.std.string",
   stringSlice: "voyd.std.string-slice",
@@ -27,6 +28,11 @@ const NOMINAL_PROVIDER_KINDS = [
 const stdIntrinsicTypeContractSpecs = [
   {
     id: STD_INTRINSIC_TYPE.array,
+    providerKinds: NOMINAL_PROVIDER_KINDS,
+    outsideStd: "reject",
+  },
+  {
+    id: STD_INTRINSIC_TYPE.bytes,
     providerKinds: NOMINAL_PROVIDER_KINDS,
     outsideStd: "reject",
   },
@@ -114,10 +120,11 @@ export const isStdIntrinsicNominalType = ({
   if (desc.kind !== "nominal-object" && desc.kind !== "value-object") {
     return false;
   }
+  const ownerRef = program.symbols.refOf(desc.owner);
+  const owner = program.symbols.canonicalIdOf(ownerRef.moduleId, ownerRef.symbol);
   return (
-    program.symbols.getPackageId(desc.owner) === "std" &&
-    program.symbols.getStdIntrinsicTypeContract(desc.owner)?.id ===
-      intrinsicType
+    program.symbols.getPackageId(owner) === "std" &&
+    program.symbols.getStdIntrinsicTypeContract(owner)?.id === intrinsicType
   );
 };
 

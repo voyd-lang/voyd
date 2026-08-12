@@ -1,6 +1,5 @@
 import {
   globalRecord,
-  hostOk,
   sleepInChunks,
   toNonNegativeI64,
 } from "../helpers.js";
@@ -96,9 +95,17 @@ export const timeCapabilityDefinition: CapabilityDefinition = {
       effectId: TIME_EFFECT_ID,
       opName: "sleep_millis",
       handler: async ({ tail }, ms) => {
-        const sleepMillis = toNonNegativeI64(ms);
-        await waitForMillis(sleepMillis);
-        return tail(hostOk());
+        try {
+          const sleepMillis = toNonNegativeI64(ms);
+          await waitForMillis(sleepMillis);
+          return tail({ ok: true, code: 0, message: "" });
+        } catch (error) {
+          return tail({
+            ok: false,
+            code: 1,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
       },
     });
     implementedOps.add("sleep_millis");

@@ -5,6 +5,10 @@ use std::string::String
 pub obj MsgPackError {
   /// Machine-readable error code.
   api code: i32,
+  /// Stable custom DTO code, or an empty string for provider failures.
+  api custom_code: String,
+  /// Rooted DTO path for typed decode failures.
+  api path: String,
   /// Human-readable error message.
   api message: String
 }
@@ -28,4 +32,21 @@ pub fn error_code_missing_field() -> i32
   6
 
 pub fn make_error(code: i32, message: String): () -> MsgPackError
-  MsgPackError { code: code, message: message }
+  MsgPackError {
+    code: code,
+    custom_code: "".to_string(),
+    path: "$".to_string(),
+    message: message
+  }
+
+pub fn make_custom_error(
+  code: String,
+  path: String,
+  message: String
+): () -> MsgPackError
+  MsgPackError {
+    code: error_code_decode_failed(),
+    custom_code: code,
+    path: path,
+    message: message
+  }

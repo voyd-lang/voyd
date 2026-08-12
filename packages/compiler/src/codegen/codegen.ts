@@ -73,7 +73,7 @@ const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   validate: false,
   runtimeDiagnostics: false,
   emitEffectHelpers: false,
-  effectsHostBoundary: "msgpack",
+  effectsHostBoundary: "selected",
   linearMemoryExport: "always",
   effectsMemoryExport: "auto",
   boundaryExports: false,

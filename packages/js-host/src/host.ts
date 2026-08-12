@@ -6,7 +6,6 @@ import type {
   SignatureHash,
   VoydRunHandle,
 } from "./protocol/types.js";
-import { decode, encode } from "@msgpack/msgpack";
 import {
   buildEffectOpKey,
   buildParsedEffectOpMap,
@@ -32,13 +31,24 @@ import {
   encodeBoundaryArgs,
   encodeDirectBoundaryArgs,
 } from "./boundary-values.js";
-import type { ExportAbiEntry } from "./protocol/export-abi.js";
+import type { BoundarySchema, ExportAbiEntry } from "./protocol/export-abi.js";
+import {
+  resolveHostTransport,
+  type HostTransportAdapter,
+} from "./protocol/host-transport.js";
 import {
   createRuntimeScheduler,
   type RuntimeSchedulerOptions,
   type RuntimeStepResult,
 } from "./runtime/scheduler.js";
-import { continueEffectLoopStep } from "./runtime/dispatch.js";
+import {
+  continueEffectLoopStep,
+  decodeHostCompletion,
+  decodeEffectBoundaryArgs,
+  encodeEffectBoundaryResult,
+  type EffectBoundarySchemas,
+  type HostCompletionIdentity,
+} from "./runtime/dispatch.js";
 import {
   registerDefaultHostAdapters,
   type DefaultAdapterOptions,
@@ -50,11 +60,13 @@ import {
 } from "./runtime/environment.js";
 import {
   createVoydTrapDiagnostics,
+  isVoydRuntimeError,
   type VoydTrapAnnotation,
   type VoydRuntimePanicContext,
 } from "./runtime/trap-diagnostics.js";
 import {
   createRetainedCallbackScopeManager,
+  createOpaqueCapabilityAllocator,
   createRetainedEventHandlerRegistry,
   type RetainedCallbackScopeManager,
   type RetainedCallbackScopeOwner,
@@ -67,6 +79,11 @@ import {
   parseExternalRequirements,
   registerExternalAdapterHandlers,
 } from "./protocol/external.js";
+import {
+  HostFrameFailureError,
+  type HostFrame,
+  type TypedHostPayload,
+} from "./protocol/host-frame.js";
 
 export type HostInitOptions = {
   wasm: Uint8Array | WebAssembly.Module;
@@ -76,6 +93,7 @@ export type HostInitOptions = {
   defaultAdapters?: boolean | DefaultAdapterOptions;
   retainedCallbacks?: RetainedEventHandlerRegistry;
   adapters?: readonly VoydPackageAdapter[];
+  transportAdapters?: readonly HostTransportAdapter[];
 };
 
 export type VoydHost = {
@@ -109,15 +127,15 @@ export type VoydHost = {
     args?: unknown[],
   ) => Promise<T>;
   run: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
+  decodePayload: (bytes: Uint8Array, fingerprint: string) => unknown;
+  transportFrame: (frame: HostFrame) => HostFrame;
   retainedCallbacks: RetainedEventHandlerRegistry;
 };
 
-const MSGPACK_OPTS = { useBigInt64: true } as const;
 const TASK_RUNTIME_IMPORT_MODULE = "voyd.task";
 const CALLBACK_IMPORT_MODULE = "voyd.callback";
 const BOUNDARY_CALLBACK_IMPORT_MODULE = "voyd.boundary.callback";
 const RENDER_CALLBACK_IMPORT_MODULE = "voyd.render.callback";
-const LEGACY_VX_CALLBACK_IMPORT_MODULE = "voyd.vx.callback";
 const CALLBACK_SCOPE_IMPORT_MODULE = "voyd.callback.scope";
 const TASK_RUNTIME_EFFECT_ID = "voyd.std.task.runtime";
 const TASK_RUNTIME_WAIT_OP_ID = 0;
@@ -310,9 +328,12 @@ const buildRetainedCallbackImportModules = ({
   bufferSize,
   annotateTrap,
   runEffectfulRetainedCallback,
+  getTransport,
   decorateResult,
   scopeManager,
   getActiveScopeOwner,
+  nextInvocationId,
+  callbackAbiByName,
 }: {
   importDescriptors: WebAssembly.ModuleImportDescriptor[];
   getInstance: () => WebAssembly.Instance;
@@ -320,9 +341,15 @@ const buildRetainedCallbackImportModules = ({
   bufferSize: number;
   annotateTrap: (error: unknown, opts?: VoydTrapAnnotation) => Error;
   runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner;
+  getTransport: () => HostTransportAdapter;
   decorateResult?: (value: unknown) => unknown;
   scopeManager: RetainedCallbackScopeManager;
   getActiveScopeOwner: () => RetainedCallbackScopeOwner | undefined;
+  nextInvocationId: () => number;
+  callbackAbiByName: ReadonlyMap<
+    string,
+    { params: readonly BoundarySchema[]; result?: BoundarySchema }
+  >;
 }): WebAssembly.Imports => {
   const callbackImportsByModule = new Map<
     string,
@@ -334,14 +361,19 @@ const buildRetainedCallbackImportModules = ({
       (descriptor) =>
         (descriptor.module === CALLBACK_IMPORT_MODULE ||
           descriptor.module === BOUNDARY_CALLBACK_IMPORT_MODULE ||
-          descriptor.module === RENDER_CALLBACK_IMPORT_MODULE ||
-          descriptor.module === LEGACY_VX_CALLBACK_IMPORT_MODULE) &&
+          descriptor.module === RENDER_CALLBACK_IMPORT_MODULE) &&
         descriptor.kind === "function",
     )
     .forEach((descriptor) => {
       const callbackExportName = retainedCallbackExportNameFrom(descriptor);
       if (!callbackExportName) {
         return;
+      }
+      const callbackAbi = callbackAbiByName.get(callbackExportName);
+      if (!callbackAbi) {
+        throw new Error(
+          `Voyd module is missing DTO metadata for retained callback ${callbackExportName}`,
+        );
       }
       const callbackImports =
         callbackImportsByModule.get(descriptor.module) ?? {};
@@ -381,23 +413,33 @@ const buildRetainedCallbackImportModules = ({
             instance,
             name: callbackExportName,
           });
-          const msgpackMemory = requireExportedMemory({
+          const transportMemory = requireExportedMemory({
             instance,
             name: LINEAR_MEMORY_EXPORT,
           });
-          const encodedPayload = encode(payload, MSGPACK_OPTS) as Uint8Array;
+          const invocationId = nextInvocationId();
+          const encodedPayload = getTransport().encodeFrame({
+            kind: "callback-invocation",
+            invocationId,
+            callbackId: 0,
+            args: encodeRetainedCallbackArgs({
+              callbackExportName,
+              schemas: callbackAbi.params,
+              payload,
+            }),
+          });
           if (encodedPayload.length > bufferSize) {
             throw new Error("retained callback payload exceeds buffer size");
           }
           ensureMemoryCapacity({
-            memory: msgpackMemory,
+            memory: transportMemory,
             requiredBytes: bufferSize * 2,
             label: LINEAR_MEMORY_EXPORT,
           });
           const inPtr = 0;
           const outPtr = bufferSize;
           new Uint8Array(
-            msgpackMemory.buffer,
+            transportMemory.buffer,
             inPtr,
             encodedPayload.length,
           ).set(encodedPayload);
@@ -437,8 +479,33 @@ const buildRetainedCallbackImportModules = ({
           if (written > bufferSize) {
             throw new Error("retained callback payload exceeds buffer size");
           }
-          const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
-          const result = decode(bytes, MSGPACK_OPTS);
+          const bytes = new Uint8Array(transportMemory.buffer, outPtr, written);
+          const completion = getTransport().decodeFrame(bytes);
+          if (
+            completion.kind !== "callback-completion" ||
+            completion.invocationId !== invocationId
+          ) {
+            throw new Error("retained callback returned an incompatible frame");
+          }
+          if (completion.outcome.kind === "failure") {
+            throw new HostFrameFailureError(completion.outcome.failure);
+          }
+          if (
+            callbackAbi.result &&
+            completion.outcome.value.fingerprint !==
+              callbackAbi.result.fingerprint
+          ) {
+            throw new Error(
+              `retained callback ${callbackExportName} returned an incompatible DTO fingerprint`,
+            );
+          }
+          const result = callbackAbi.result
+            ? decodeBoundaryResult({
+                exportName: callbackExportName,
+                schema: callbackAbi.result,
+                value: completion.outcome.value.value,
+              })
+            : completion.outcome.value.value;
           return decorateResult?.(result) ?? result;
         });
       }) as CallableFunction;
@@ -523,6 +590,37 @@ const retainedCallbackExportNameFrom = (
     return importName.slice("retain_event__".length);
   }
   return undefined;
+};
+
+const encodeRetainedCallbackArgs = ({
+  callbackExportName,
+  schemas,
+  payload,
+}: {
+  callbackExportName: string;
+  schemas: readonly BoundarySchema[];
+  payload: unknown;
+}): TypedHostPayload[] => {
+  if (schemas.length === 0) return [];
+  const args =
+    schemas.length === 1
+      ? [payload]
+      : Array.isArray(payload)
+        ? payload
+        : [payload];
+  return encodeBoundaryArgs({
+    exportName: callbackExportName,
+    schemas,
+    args,
+  }).map((value, index) => {
+    const fingerprint = schemas[index]?.fingerprint;
+    if (!fingerprint) {
+      throw new Error(
+        `retained callback ${callbackExportName} argument ${index} is missing a DTO fingerprint`,
+      );
+    }
+    return { fingerprint, value };
+  });
 };
 
 const isImportModuleRecord = (
@@ -819,6 +917,7 @@ export const createVoydHost = async ({
   defaultAdapters = true,
   retainedCallbacks,
   adapters = [],
+  transportAdapters = [],
 }: HostInitOptions): Promise<VoydHost> => {
   const module = toModule(wasm);
   const trapDiagnostics = createVoydTrapDiagnostics({ module });
@@ -833,18 +932,69 @@ export const createVoydHost = async ({
     | undefined;
   const annotateTrap = (error: unknown, opts?: VoydTrapAnnotation): Error => {
     const panic = consumePanicContext({ instance: instanceRef });
-    return trapDiagnostics.annotateTrap(error, {
+    const annotated = trapDiagnostics.annotateTrap(error, {
       ...opts,
       ...(panic ? { panic } : {}),
     });
+    if (isVoydRuntimeError(annotated) || (!opts?.effect && !opts?.transition)) {
+      return annotated;
+    }
+    return trapDiagnostics.annotateBoundaryError(annotated, opts);
   };
   const parsedTable = parseEffectTable(module, EFFECT_TABLE_EXPORT);
   const table = toHostProtocolTable(parsedTable);
   const exportAbi = parseExportAbi(module);
+  let transport: HostTransportAdapter | undefined;
+  const requireTransport = (): HostTransportAdapter => {
+    transport ??= resolveHostTransport({
+      metadata: exportAbi.host,
+      adapters: transportAdapters,
+    });
+    return transport;
+  };
+  const transportFrame = (frame: HostFrame): HostFrame => {
+    const selectedTransport = requireTransport();
+    const encoded = selectedTransport.encodeFrame(frame);
+    if (encoded.length > bufferSize) {
+      throw new Error(
+        `host frame ${frame.kind} exceeds buffer size (${encoded.length} > ${bufferSize})`,
+      );
+    }
+    return selectedTransport.decodeFrame(encoded);
+  };
+  let nextCancellationOperationId = 1;
   const externalRequirements = parseExternalRequirements(module);
+  const effectSchemasByOpIndex: Array<EffectBoundarySchemas | undefined> =
+    parsedTable.ops.map((op) => op.boundary);
+  externalRequirements.functions.forEach((requirement) => {
+    if (!requirement.effect) return;
+    const signatureHash =
+      Number.parseInt(
+        requirement.effect.signatureHash.replace(/^0x/u, ""),
+        16,
+      ) >>> 0;
+    const op = parsedTable.ops.find(
+      (candidate) =>
+        candidate.effectId === requirement.interfaceId &&
+        candidate.opId === requirement.effect?.opId &&
+        candidate.signatureHash === signatureHash,
+    );
+    if (!op) return;
+    effectSchemasByOpIndex[op.opIndex] = {
+      params: requirement.params,
+      result: requirement.result,
+    };
+  });
   const exportAbiByName = new Map(
     exportAbi.exports.map((entry) => [entry.name, entry] as const),
   );
+  const taskCompletionByName = new Map(
+    exportAbi.taskCompletions.map((entry) => [entry.name, entry] as const),
+  );
+  const callbackAbiByName = new Map(
+    exportAbi.callbacks.map((entry) => [entry.name, entry] as const),
+  );
+  const payloadFingerprints = new Set(exportAbi.payloadFingerprints);
   const taskRuntimeImports = buildTaskRuntimeImportModule({
     importDescriptors: WebAssembly.Module.imports(module),
     getContext: () => activeTaskImportContext,
@@ -864,15 +1014,19 @@ export const createVoydHost = async ({
     cleanupTimer?: ReturnType<typeof setTimeout>;
   };
   const standaloneTaskRuns = new Map<number, StandaloneTaskEntry>();
+  const standaloneTaskCapabilities = createOpaqueCapabilityAllocator();
   let nextStandaloneTaskId = 1_000_000;
+  let nextRetainedCallbackInvocationId = 1;
   const observeStandaloneTask = async (
-    taskId: number,
+    capability: number,
   ): Promise<RunOutcome<unknown>> => {
-    const entry = standaloneTaskRuns.get(taskId);
+    const entry = standaloneTaskRuns.get(capability);
     if (!entry) {
       return {
         kind: "failed",
-        error: new Error(`unknown task ${taskId}`),
+        error: new Error(
+          "task capability is stale or has already completed or belongs to a different runtime session",
+        ),
       };
     }
     if (entry.cleanupTimer) {
@@ -880,7 +1034,7 @@ export const createVoydHost = async ({
       entry.cleanupTimer = undefined;
     }
     return entry.outcome.finally(() => {
-      standaloneTaskRuns.delete(taskId);
+      standaloneTaskRuns.delete(capability);
     });
   };
   let runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner = () => {
@@ -903,9 +1057,12 @@ export const createVoydHost = async ({
     annotateTrap,
     runEffectfulRetainedCallback: (params) =>
       runEffectfulRetainedCallback(params),
+    getTransport: requireTransport,
     decorateResult: (value) => attachTaskObserver(value, observeStandaloneTask),
     scopeManager: callbackScopeManager,
     getActiveScopeOwner: () => activeCallbackScopeOwner,
+    nextInvocationId: () => nextRetainedCallbackInvocationId++,
+    callbackAbiByName,
   });
   const retainedCallbackScopeImports = buildRetainedCallbackScopeImportModule({
     importDescriptors: WebAssembly.Module.imports(module),
@@ -924,6 +1081,7 @@ export const createVoydHost = async ({
       }
       return instanceRef;
     },
+    getTransport: requireTransport,
   });
   instanceRef = new WebAssembly.Instance(
     module,
@@ -1023,16 +1181,16 @@ export const createVoydHost = async ({
   const runSerialized = <T = unknown>(
     entryName: string,
     args: unknown[] = [],
-    abi?: Extract<ExportAbiEntry, { abi: "serialized" }>,
+    abi: Extract<ExportAbiEntry, { abi: "serialized" }>,
   ): T => {
     const wrapperName = abi?.wrapperName ?? entryName;
     const entry = requireExportedFunction({ instance, name: wrapperName });
-    const msgpackMemory = requireExportedMemory({
+    const transportMemory = requireExportedMemory({
       instance,
       name: LINEAR_MEMORY_EXPORT,
     });
     ensureMemoryCapacity({
-      memory: msgpackMemory,
+      memory: transportMemory,
       requiredBytes: bufferSize * 2,
       label: LINEAR_MEMORY_EXPORT,
     });
@@ -1044,7 +1202,15 @@ export const createVoydHost = async ({
           args,
         })
       : args;
-    const encodedArgs = encode(boundaryArgs, MSGPACK_OPTS) as Uint8Array;
+    const encodedArgs = requireTransport().encodeFrame({
+      kind: "export-invocation",
+      exportId: abi.id,
+      args: boundaryArgs.map((value, index) => ({
+        fingerprint:
+          abi.params?.[index]?.fingerprint ?? `export:${abi.id}:arg${index}`,
+        value,
+      })),
+    });
     if (encodedArgs.length > bufferSize) {
       throw new Error(
         `serialized export ${entryName} args exceed buffer size (${encodedArgs.length} > ${bufferSize}); increase createVoydHost({ bufferSize }) or pass a smaller payload`,
@@ -1052,7 +1218,7 @@ export const createVoydHost = async ({
     }
     const inPtr = 0;
     const outPtr = bufferSize;
-    new Uint8Array(msgpackMemory.buffer, inPtr, encodedArgs.length).set(
+    new Uint8Array(transportMemory.buffer, inPtr, encodedArgs.length).set(
       encodedArgs,
     );
     let written: number;
@@ -1082,10 +1248,37 @@ export const createVoydHost = async ({
         `serialized export ${entryName} result exceeds buffer size (${written} > ${bufferSize}); increase createVoydHost({ bufferSize }) or return a smaller payload`,
       );
     }
-    const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
-    const decoded = decode(bytes, MSGPACK_OPTS);
+    const bytes = new Uint8Array(transportMemory.buffer, outPtr, written);
+    const completion = requireTransport().decodeFrame(bytes);
+    if (
+      completion.kind !== "export-completion" ||
+      completion.exportId !== abi.id
+    ) {
+      throw new Error(
+        `serialized export ${entryName} returned an incompatible host frame`,
+      );
+    }
+    if (completion.outcome.kind === "failure") {
+      const failure = completion.outcome.failure;
+      const { code, message, path } = failure;
+      const at = path && path.length > 0 ? ` at ${path.join(".")}` : "";
+      throw new HostFrameFailureError(
+        failure,
+        `serialized export ${entryName} failed (${code})${at}: ${message}`,
+      );
+    }
+    const expectedFingerprint = abi.result?.fingerprint;
+    if (
+      expectedFingerprint &&
+      completion.outcome.value.fingerprint !== expectedFingerprint
+    ) {
+      throw new Error(
+        `serialized export ${entryName} result fingerprint mismatch`,
+      );
+    }
+    const decoded = completion.outcome.value.value;
     return (
-      abi?.result
+      abi.result
         ? decodeBoundaryResult({
             exportName: entryName,
             schema: abi.result,
@@ -1106,9 +1299,6 @@ export const createVoydHost = async ({
     try {
       const abi = exportAbiByName.get(entryName);
       if (abi?.abi === "serialized") {
-        if (abi.formatId !== "msgpack") {
-          throw new Error(`unsupported serializer format ${abi.formatId}`);
-        }
         return runSerialized<T>(entryName, args, abi);
       }
       const entry = requireExportedFunction({ instance, name: entryName });
@@ -1162,27 +1352,82 @@ export const createVoydHost = async ({
     entryName: string,
     args: unknown[] = [],
     startRaw?: RawEffectfulStarter,
+    completionOverride?: HostCompletionIdentity,
   ): VoydRunHandle<T> => {
     const callbackScopeRunId = detachedRunCounter++;
+    const taskCapabilities = createOpaqueCapabilityAllocator();
     const callbackScopeOwnerForTask = (taskId: number): string =>
       `${callbackScopeRunId}:${taskId}`;
-    if (args.length > 0 && !startRaw) {
-      throw new Error("effectful exports do not accept arguments yet");
-    }
     if (!initialized) {
       initEffects();
     }
+    const abiName = entryName.endsWith("_effectful")
+      ? entryName.slice(0, -"_effectful".length)
+      : entryName;
+    const exportAbi = startRaw ? undefined : exportAbiByName.get(abiName);
+    if (!startRaw && !exportAbi) {
+      throw new Error(`effectful export ${entryName} is missing ABI metadata`);
+    }
+    const rootCompletion =
+      completionOverride ??
+      (() => {
+        if (!exportAbi) {
+          throw new Error(
+            `effectful export ${entryName} is missing ABI metadata`,
+          );
+        }
+        return {
+          kind: "export",
+          id: exportAbi.id,
+          name: abiName,
+          schema: exportAbi.result,
+        } as const;
+      })();
 
-    const msgpackMemory = requireExportedMemory({
+    const encodedInvocation = exportAbi
+      ? (() => {
+          const schemas = exportAbi.params ?? [];
+          const boundaryArgs = encodeBoundaryArgs({
+            exportName: abiName,
+            schemas,
+            args,
+          });
+          return requireTransport().encodeFrame({
+            kind: "export-invocation",
+            exportId: exportAbi.id,
+            args: boundaryArgs.map((value, index) => {
+              const fingerprint = schemas[index]?.fingerprint;
+              if (!fingerprint) {
+                throw new Error(
+                  `effectful export ${abiName} argument ${index} is missing a DTO fingerprint`,
+                );
+              }
+              return { fingerprint, value };
+            }),
+          });
+        })()
+      : undefined;
+
+    const transportMemory = requireExportedMemory({
       instance,
       name: LINEAR_MEMORY_EXPORT,
     });
     const bufferPtr = acquireEffectRunBufferPtr();
     ensureMemoryCapacity({
-      memory: msgpackMemory,
+      memory: transportMemory,
       requiredBytes: bufferPtr + bufferSize,
       label: LINEAR_MEMORY_EXPORT,
     });
+    if (encodedInvocation) {
+      if (encodedInvocation.length > bufferSize) {
+        throw new Error("effectful export invocation exceeds buffer size");
+      }
+      new Uint8Array(
+        transportMemory.buffer,
+        bufferPtr,
+        encodedInvocation.length,
+      ).set(encodedInvocation);
+    }
     const runResourceCleanups = new Set<EffectResourceCleanup>();
     let runResourceCleanupPromise: Promise<void> | undefined;
     let runResourceScopeClosed = false;
@@ -1276,7 +1521,12 @@ export const createVoydHost = async ({
           try {
             result = startRaw
               ? startRaw({ bufferPtr, bufferSize })
-              : entry!(bufferPtr, bufferSize);
+              : entry!(
+                  bufferPtr,
+                  encodedInvocation?.length ?? 0,
+                  bufferPtr,
+                  bufferSize,
+                );
           } catch (error) {
             throw annotateTrap(error, {
               transition: {
@@ -1299,14 +1549,17 @@ export const createVoydHost = async ({
               resumeEffectful,
               table: parsedTable,
               handlersByOpIndex,
-              msgpackMemory,
+              transportMemory,
               bufferPtr,
               bufferSize,
+              transport: requireTransport(),
               registerResourceCleanup: registerRunResourceCleanup,
               annotateTrap,
               fallbackFunctionName: startRaw
                 ? entryName
                 : effectfulExportNameFor(entryName),
+              completion: rootCompletion,
+              effectSchemasByOpIndex,
             });
             if (stepResult.kind === "value") {
               return { kind: "value", value: stepResult.value };
@@ -1394,9 +1647,12 @@ export const createVoydHost = async ({
 
     type TaskRecord = {
       id: number;
+      capability: number;
+      capabilityClaimed: boolean;
       ownerId: number | null;
       detached: boolean;
       sourceFunctionName: string;
+      completion: HostCompletionIdentity;
       state: "ready" | "waiting" | "completing" | "terminal";
       starter?: () => unknown;
       pendingRawOutcome?: unknown;
@@ -1411,6 +1667,8 @@ export const createVoydHost = async ({
       nextTaskId: number;
       rootTaskId: number;
       tasks: Map<number, TaskRecord>;
+      taskIdsByCapability: Map<number, number>;
+      cancelTaskById: (id: number) => boolean;
       readyQueue: number[];
       wakeResolver?: (result: RuntimeStepResult<RunState>) => void;
       finalOutcome?: RunOutcome<T>;
@@ -1418,22 +1676,59 @@ export const createVoydHost = async ({
       onTaskTerminal?: (taskId: number) => void;
     };
 
-    const encodeToBuffer = (value: unknown): number => {
-      const encoded = encode(value, MSGPACK_OPTS) as Uint8Array;
+    const effectFramesByRequest = new Map<
+      unknown,
+      {
+        taskId: number;
+        requestId: number;
+        resultFingerprint: string;
+        label: string;
+        schemas?: EffectBoundarySchemas;
+      }
+    >();
+
+    const encodeToBuffer = (
+      request: unknown,
+      value: unknown,
+      completion?: HostCompletionIdentity,
+    ): number => {
+      const frame = effectFramesByRequest.get(request);
+      if (!frame) {
+        throw new Error("effect request is missing frame metadata");
+      }
+      effectFramesByRequest.delete(request);
+      const completionFingerprint = completion?.schema?.fingerprint;
+      const encodedValue = completion?.schema
+        ? encodeBoundaryArgs({
+            exportName:
+              completion.name ?? `${completion.kind} ${String(completion.id)}`,
+            schemas: [completion.schema],
+            args: [value],
+          })[0]
+        : encodeEffectBoundaryResult({
+            label: frame.label,
+            value,
+            schemas: frame.schemas,
+          });
+      const encoded = requireTransport().encodeFrame({
+        kind: "effect-outcome",
+        requestId: frame.requestId,
+        outcome: {
+          kind: "success",
+          value: {
+            fingerprint: completionFingerprint ?? frame.resultFingerprint,
+            value: encodedValue,
+          },
+        },
+      });
       if (encoded.length > bufferSize) {
         throw new Error("resume payload exceeds buffer size");
       }
-      new Uint8Array(msgpackMemory.buffer, bufferPtr, encoded.length).set(
+      new Uint8Array(transportMemory.buffer, bufferPtr, encoded.length).set(
         encoded,
       );
       return encoded.length;
     };
-
-    const decodeFromBuffer = (length: number): unknown =>
-      decode(
-        new Uint8Array(msgpackMemory.buffer, bufferPtr, length),
-        MSGPACK_OPTS,
-      );
 
     let resolvePublicOutcome: ((outcome: RunOutcome<T>) => void) | undefined;
     const publicOutcome = new Promise<RunOutcome<T>>((resolve) => {
@@ -1451,9 +1746,29 @@ export const createVoydHost = async ({
       }
     >();
     const completedTaskOutcomes = new Map<number, RunOutcome<unknown>>();
+    const taskIdsByCapability = new Map<number, number>();
 
-    const decodeRawOutcome = (rawOutcome: unknown): unknown => {
-      const effectResult = handleOutcome(rawOutcome, bufferPtr, bufferSize);
+    const resolveTaskCapability = (token: number): number => {
+      const taskId = taskIdsByCapability.get(token);
+      if (taskId === undefined) {
+        throw new Error(
+          "task capability is stale or has already completed or belongs to a different runtime session",
+        );
+      }
+      return taskId;
+    };
+
+    const decodeRawOutcome = (
+      rawOutcome: unknown,
+      completion: HostCompletionIdentity,
+    ): unknown => {
+      const effectResult = handleOutcome(
+        rawOutcome,
+        bufferPtr,
+        bufferSize,
+        completion.kind === "export" ? 0 : 1,
+        completion.id,
+      );
       const payloadLength = effectLen(effectResult) as number;
       if (!Number.isSafeInteger(payloadLength) || payloadLength < 0) {
         throw new Error(
@@ -1466,7 +1781,13 @@ export const createVoydHost = async ({
         );
       }
       try {
-        return decodeFromBuffer(payloadLength);
+        return decodeHostCompletion({
+          memory: transportMemory,
+          ptr: bufferPtr,
+          length: payloadLength,
+          transport: requireTransport(),
+          completion,
+        });
       } catch (error) {
         throw new Error("task outcome decoding failed", {
           cause: toError(error),
@@ -1486,12 +1807,23 @@ export const createVoydHost = async ({
     const notifyTaskTerminal = (task: TaskRecord): void => {
       if (!task.terminal) return;
       const outcome = taskRunOutcomeFor(task.terminal);
-      if (task.detached) {
-        completedTaskOutcomes.set(task.id, outcome);
+      if (task.detached && task.capability !== 0) {
+        completedTaskOutcomes.set(task.capability, outcome);
       }
-      const observer = taskObservers.get(task.id);
-      if (!observer) return;
-      taskObservers.delete(task.id);
+      const observer = taskObservers.get(task.capability);
+      if (!observer) {
+        if (
+          task.capabilityClaimed &&
+          task.terminal.kind === "cancelled"
+        ) {
+          completedTaskOutcomes.delete(task.capability);
+          taskIdsByCapability.delete(task.capability);
+        }
+        return;
+      }
+      taskObservers.delete(task.capability);
+      completedTaskOutcomes.delete(task.capability);
+      taskIdsByCapability.delete(task.capability);
       task.terminal.observed = true;
       observer.resolve(outcome);
     };
@@ -1555,7 +1887,7 @@ export const createVoydHost = async ({
           activeTaskId: taskId,
         }),
         () => {
-          const length = encodeToBuffer(value);
+          const length = encodeToBuffer(request, value);
           return resumeEffectfulRaw(request, bufferPtr, length);
         },
       );
@@ -1649,11 +1981,52 @@ export const createVoydHost = async ({
     const run = runtimeScheduler.startRun<T>({
       start: () => {
         const rootTaskId = 1;
-        const state: RunState = {
+        let state: RunState;
+        const cancelTaskById = (taskId: number): boolean => {
+          const task = state.tasks.get(taskId);
+          if (!task || task.state === "terminal") {
+            return false;
+          }
+          task.children.forEach((childId) => cancelTaskById(childId));
+          task.state = "terminal";
+          task.pendingRawOutcome = undefined;
+          task.pendingResume = undefined;
+          task.pendingCompletion = undefined;
+          task.terminal = {
+            kind: "cancelled",
+            observed: false,
+          };
+          finishRetainedCallbackScopesForTask(taskId);
+          task.waiters.forEach(({ taskId: waiterTaskId, request }) => {
+            try {
+              const resumed = resumeTask({
+                state,
+                taskId: waiterTaskId,
+                request,
+                value: 2,
+              });
+              const waiter = state.tasks.get(waiterTaskId);
+              if (waiter && waiter.state !== "terminal") {
+                waiter.pendingRawOutcome = resumed;
+                waiter.state = "ready";
+                state.readyQueue.push(waiterTaskId);
+              }
+            } catch {
+              // Ignore late waiter wakeups after cancellation.
+            }
+          });
+          task.waiters = [];
+          notifyTaskTerminal(task);
+          state.onTaskTerminal?.(taskId);
+          return true;
+        };
+        state = {
           nextTaskId: 2,
           rootTaskId,
           tasks: new Map<number, TaskRecord>(),
+          taskIdsByCapability,
           readyQueue: [rootTaskId],
+          cancelTaskById,
           spawnTask: ({
             detached,
             starterExportName,
@@ -1665,6 +2038,7 @@ export const createVoydHost = async ({
           }): number => {
             const ownerId = currentActiveTaskId();
             const taskId = state.nextTaskId++;
+            const capability = taskCapabilities.allocate();
             const sourceFunctionName =
               ownerId === null
                 ? starterExportName
@@ -1676,9 +2050,17 @@ export const createVoydHost = async ({
             });
             state.tasks.set(taskId, {
               id: taskId,
+              capability,
+              capabilityClaimed: false,
               ownerId: detached ? null : ownerId,
               detached,
               sourceFunctionName,
+              completion: {
+                kind: "callback",
+                id: taskId,
+                name: starterExportName,
+                schema: taskCompletionByName.get(starterExportName)?.result,
+              },
               state: "ready",
               starter: () =>
                 runWithActiveTask(
@@ -1707,71 +2089,50 @@ export const createVoydHost = async ({
               state.tasks.get(ownerId)?.children.add(taskId);
             }
             state.readyQueue.push(taskId);
+            taskIdsByCapability.set(capability, taskId);
             state.wakeResolver?.({ kind: "next", result: state });
             state.wakeResolver = undefined;
-            return taskId;
+            return capability;
           },
-          cancelTask: (id: number): boolean => {
-            const cancelTask = (taskId: number): boolean => {
-              const task = state.tasks.get(taskId);
-              if (!task || task.state === "terminal") {
-                return false;
-              }
-              task.children.forEach((childId) => cancelTask(childId));
-              task.state = "terminal";
-              task.pendingRawOutcome = undefined;
-              task.pendingResume = undefined;
-              task.pendingCompletion = undefined;
-              task.terminal = {
-                kind: "cancelled",
-                observed: false,
-              };
-              finishRetainedCallbackScopesForTask(taskId);
-              task.waiters.forEach(({ taskId: waiterTaskId, request }) => {
-                try {
-                  const resumed = resumeTask({
-                    state,
-                    taskId: waiterTaskId,
-                    request,
-                    value: 2,
-                  });
-                  const waiter = state.tasks.get(waiterTaskId);
-                  if (waiter && waiter.state !== "terminal") {
-                    waiter.pendingRawOutcome = resumed;
-                    waiter.state = "ready";
-                    state.readyQueue.push(waiterTaskId);
-                  }
-                } catch {
-                  // Ignore late waiter wakeups after cancellation.
-                }
-              });
-              task.waiters = [];
-              notifyTaskTerminal(task);
-              state.onTaskTerminal?.(taskId);
-              return true;
-            };
-            const changed = cancelTask(id);
+          cancelTask: (token: number): boolean => {
+            let taskId: number;
+            try {
+              taskId = resolveTaskCapability(token);
+            } catch {
+              return false;
+            }
+            const changed = cancelTaskById(taskId);
             if (changed) {
               state.wakeResolver?.({ kind: "next", result: state });
               state.wakeResolver = undefined;
             }
             return changed;
           },
-          takeTaskValue: (id: number): unknown => {
-            const task = state.tasks.get(id);
-            if (!task?.terminal || task.terminal.kind !== "value") {
-              throw new Error(`task ${id} is not complete with a value`);
+          takeTaskValue: (token: number): unknown => {
+            const taskId = resolveTaskCapability(token);
+            const task = state.tasks.get(taskId);
+            if (
+              !task?.capabilityClaimed ||
+              !task.terminal ||
+              task.terminal.kind !== "value"
+            ) {
+              throw new Error(`task capability is not complete with a value`);
             }
             task.terminal.observed = true;
+            taskIdsByCapability.delete(token);
+            completedTaskOutcomes.delete(token);
             return task.terminal.rawOutcome;
           },
         };
 
         state.tasks.set(rootTaskId, {
           id: rootTaskId,
+          capability: 0,
+          capabilityClaimed: false,
           ownerId: null,
           detached: false,
           sourceFunctionName: entryName,
+          completion: rootCompletion,
           state: "ready",
           starter: () =>
             runWithActiveTask(
@@ -1783,7 +2144,12 @@ export const createVoydHost = async ({
                 try {
                   return startRaw
                     ? startRaw({ bufferPtr, bufferSize })
-                    : rawEntry!(bufferPtr, bufferSize);
+                    : rawEntry!(
+                        bufferPtr,
+                        encodedInvocation?.length ?? 0,
+                        bufferPtr,
+                        bufferSize,
+                      );
                 } catch (error) {
                   throw annotateTrap(error, {
                     transition: {
@@ -1947,7 +2313,7 @@ export const createVoydHost = async ({
             try {
               return {
                 ...completion,
-                value: decodeRawOutcome(completion.rawOutcome),
+                value: decodeRawOutcome(completion.rawOutcome, task.completion),
                 observed: false,
               };
             } catch (error) {
@@ -2061,6 +2427,11 @@ export const createVoydHost = async ({
             taskId: number,
             completion: TaskCompletion,
           ): void => {
+            effectFramesByRequest.forEach((frame, request) => {
+              if (frame.taskId === taskId) {
+                effectFramesByRequest.delete(request);
+              }
+            });
             const current = state.tasks.get(taskId);
             if (
               !current ||
@@ -2071,7 +2442,7 @@ export const createVoydHost = async ({
             }
             if (completion.kind !== "value") {
               current.children.forEach((childId) => {
-                state.cancelTask(childId);
+                state.cancelTaskById(childId);
               });
             }
             const liveChildren = liveChildrenFor(current);
@@ -2174,10 +2545,12 @@ export const createVoydHost = async ({
                 error: new Error(message),
                 message,
               });
+              effectFramesByRequest.delete(request);
               return;
             }
             const current = state.tasks.get(taskId);
             if (!current || current.state === "terminal") {
+              effectFramesByRequest.delete(request);
               return;
             }
             try {
@@ -2187,7 +2560,13 @@ export const createVoydHost = async ({
                   activeTaskId: taskId,
                 }),
                 () => {
-                  const length = encodeToBuffer(handlerResult.value);
+                  const length = encodeToBuffer(
+                    request,
+                    handlerResult.value,
+                    handlerResult.kind === "end"
+                      ? current.completion
+                      : undefined,
+                  );
                   return handlerResult.kind === "end"
                     ? endRequestRaw(request, bufferPtr, length)
                     : resumeEffectfulRaw(request, bufferPtr, length);
@@ -2214,6 +2593,8 @@ export const createVoydHost = async ({
                 error: normalized,
                 message: taskFailureMessage(normalized),
               });
+            } finally {
+              effectFramesByRequest.delete(request);
             }
           };
 
@@ -2247,12 +2628,54 @@ export const createVoydHost = async ({
               rawOutcome,
               bufferPtr,
               bufferSize,
+              task.id === state.rootTaskId
+                ? rootCompletion.kind === "export"
+                  ? 0
+                  : 1
+                : 1,
+              task.id === state.rootTaskId ? rootCompletion.id : task.id,
             );
             const payloadLength = effectLen(effectResult) as number;
             const request = effectCont(effectResult);
-            const decodedEffect = decodeFromBuffer(
-              payloadLength,
-            ) as EffectOpRequest;
+            const frame = requireTransport().decodeFrame(
+              new Uint8Array(transportMemory.buffer, bufferPtr, payloadLength),
+            );
+            if (frame.kind !== "effect-request") {
+              throw new Error(
+                "effect boundary returned an incompatible host frame",
+              );
+            }
+            const framedOp = parsedTable.ops[frame.requestId];
+            if (
+              !framedOp ||
+              framedOp.effectId !== frame.effectId ||
+              framedOp.opId !== frame.operationId ||
+              framedOp.signatureHash !== frame.signatureHash >>> 0 ||
+              framedOp.resumeKind !== frame.resumeKind
+            ) {
+              throw new Error(
+                "effect request frame does not match the effect table",
+              );
+            }
+            effectFramesByRequest.set(request, {
+              taskId: nextTaskId,
+              requestId: frame.requestId,
+              resultFingerprint: frame.resultFingerprint,
+              label: framedOp.label,
+              schemas: effectSchemasByOpIndex[framedOp.opIndex],
+            });
+            const decodedEffect: EffectOpRequest = {
+              effectId: framedOp.effectIdHash.value,
+              opId: framedOp.opId,
+              opIndex: framedOp.opIndex,
+              resumeKind: framedOp.resumeKind,
+              handle: framedOp.opIndex,
+              args: decodeEffectBoundaryArgs({
+                label: framedOp.label,
+                payloads: frame.args,
+                schemas: effectSchemasByOpIndex[framedOp.opIndex],
+              }),
+            };
             const opEntry = resolveParsedEffectOp({
               table: parsedTable,
               request: decodedEffect,
@@ -2260,18 +2683,43 @@ export const createVoydHost = async ({
 
             if (opEntry.effectId === TASK_RUNTIME_EFFECT_ID) {
               if (opEntry.opId === TASK_RUNTIME_WAIT_OP_ID) {
-                const targetId = Number(decodedEffect.args?.[0]);
+                const token = Number(decodedEffect.args?.[0]);
+                let targetId: number;
+                try {
+                  targetId = resolveTaskCapability(token);
+                } catch (error) {
+                  const message = toError(error).message;
+                  completeTask(nextTaskId, {
+                    kind: "failed",
+                    error: new Error(message),
+                    message,
+                  });
+                  return { kind: "next", result: state };
+                }
                 const target = state.tasks.get(targetId);
                 if (!target) {
                   completeTask(nextTaskId, {
                     kind: "failed",
-                    error: new Error(`unknown task ${targetId}`),
-                    message: `unknown task ${targetId}`,
+                    error: new Error("task capability is stale"),
+                    message: "task capability is stale",
                   });
                   return { kind: "next", result: state };
                 }
+                if (target.capabilityClaimed) {
+                  completeTask(nextTaskId, {
+                    kind: "failed",
+                    error: new Error("task capability has already been observed"),
+                    message: "task capability has already been observed",
+                  });
+                  return { kind: "next", result: state };
+                }
+                target.capabilityClaimed = true;
                 if (target.terminal) {
                   target.terminal.observed = true;
+                  if (target.terminal.kind === "cancelled") {
+                    taskIdsByCapability.delete(token);
+                    completedTaskOutcomes.delete(token);
+                  }
                   applyContinuation({
                     taskId: nextTaskId,
                     request,
@@ -2299,7 +2747,19 @@ export const createVoydHost = async ({
               }
 
               if (opEntry.opId === TASK_RUNTIME_FAILURE_MESSAGE_OP_ID) {
-                const targetId = Number(decodedEffect.args?.[0]);
+                const token = Number(decodedEffect.args?.[0]);
+                let targetId: number;
+                try {
+                  targetId = resolveTaskCapability(token);
+                } catch (error) {
+                  const message = toError(error).message;
+                  completeTask(nextTaskId, {
+                    kind: "failed",
+                    error: new Error(message),
+                    message,
+                  });
+                  return { kind: "next", result: state };
+                }
                 const target = state.tasks.get(targetId);
                 if (!target?.terminal || target.terminal.kind !== "failed") {
                   completeTask(nextTaskId, {
@@ -2310,6 +2770,8 @@ export const createVoydHost = async ({
                   return { kind: "next", result: state };
                 }
                 target.terminal.observed = true;
+                taskIdsByCapability.delete(token);
+                completedTaskOutcomes.delete(token);
                 applyContinuation({
                   taskId: nextTaskId,
                   request,
@@ -2431,26 +2893,41 @@ export const createVoydHost = async ({
         return wakeRun();
       },
     });
-    const observeTask: NonNullable<VoydRunHandle["observeTask"]> = (taskId) => {
+    const observeTask: NonNullable<VoydRunHandle["observeTask"]> = (token) => {
+      let taskId: number;
+      try {
+        taskId = resolveTaskCapability(token);
+      } catch (error) {
+        return Promise.resolve({ kind: "failed", error: toError(error) });
+      }
       const state = liveState;
       const task = state?.tasks.get(taskId);
+      if (task?.capabilityClaimed) {
+        return Promise.resolve({
+          kind: "failed",
+          error: new Error("task capability has already been observed"),
+        });
+      }
+      if (task) task.capabilityClaimed = true;
       if (task?.terminal) {
         task.terminal.observed = true;
         const outcome =
-          completedTaskOutcomes.get(taskId) ?? taskRunOutcomeFor(task.terminal);
+          completedTaskOutcomes.get(token) ?? taskRunOutcomeFor(task.terminal);
+        completedTaskOutcomes.delete(token);
+        taskIdsByCapability.delete(token);
         return Promise.resolve(outcome);
       }
-      const completed = completedTaskOutcomes.get(taskId);
-      if (completed) return Promise.resolve(completed);
+      const completed = completedTaskOutcomes.get(token);
+      if (completed) {
+        completedTaskOutcomes.delete(token);
+        taskIdsByCapability.delete(token);
+        return Promise.resolve(completed);
+      }
       if (!task) {
         return Promise.resolve({
           kind: "failed",
-          error: new Error(`unknown task ${taskId}`),
+          error: new Error("task capability is stale"),
         });
-      }
-      const existing = taskObservers.get(taskId);
-      if (existing) {
-        return existing.promise;
       }
       let resolveObserver: ((outcome: RunOutcome<unknown>) => void) | undefined;
       const promise = new Promise<RunOutcome<unknown>>((resolve) => {
@@ -2459,7 +2936,7 @@ export const createVoydHost = async ({
       if (!resolveObserver) {
         throw new Error("failed to initialize task observer promise");
       }
-      taskObservers.set(taskId, { promise, resolve: resolveObserver });
+      taskObservers.set(token, { promise, resolve: resolveObserver });
       return promise;
     };
 
@@ -2468,7 +2945,19 @@ export const createVoydHost = async ({
       outcome: publicOutcome,
       observeTask,
       cancel: (reason?: unknown): boolean => {
-        const cancelled = run.cancel(reason);
+        const operationId = nextCancellationOperationId++;
+        const request = transportFrame({
+          kind: "cancellation",
+          operationId,
+          ...(reason === undefined ? {} : { reason: String(reason) }),
+        });
+        if (
+          request.kind !== "cancellation" ||
+          request.operationId !== operationId
+        ) {
+          throw new Error("managed run received an incompatible cancellation frame");
+        }
+        const cancelled = run.cancel(request.reason);
         if (cancelled) {
           const state = liveState;
           if (state) {
@@ -2478,11 +2967,24 @@ export const createVoydHost = async ({
           }
           if (state) {
             Array.from(state.tasks.keys()).forEach((taskId) => {
-              state.cancelTask(taskId);
+              state.cancelTaskById(taskId);
             });
           }
         }
-        return cancelled;
+        const acknowledgement = transportFrame({
+          kind: "cancellation-acknowledgement",
+          operationId,
+          accepted: cancelled,
+        });
+        if (
+          acknowledgement.kind !== "cancellation-acknowledgement" ||
+          acknowledgement.operationId !== operationId
+        ) {
+          throw new Error(
+            "managed run received an incompatible cancellation acknowledgement",
+          );
+        }
+        return acknowledgement.accepted;
       },
     };
     const internalOutcomeWithCleanup = run.outcome.finally(async () => {
@@ -2500,20 +3002,29 @@ export const createVoydHost = async ({
       name: starterExportName,
     });
     const taskId = nextStandaloneTaskId++;
-    const run = runEffectfulManaged<unknown>(starterExportName, [], () =>
-      starter(...workArgs),
+    const capability = standaloneTaskCapabilities.allocate();
+    const run = runEffectfulManaged<unknown>(
+      starterExportName,
+      [],
+      () => starter(...workArgs),
+      {
+        kind: "callback",
+        id: taskId,
+        name: starterExportName,
+        schema: taskCompletionByName.get(starterExportName)?.result,
+      },
     );
     const entry: StandaloneTaskEntry = { outcome: run.outcome };
-    standaloneTaskRuns.set(taskId, entry);
+    standaloneTaskRuns.set(capability, entry);
     void run.outcome.finally(() => {
-      if (standaloneTaskRuns.get(taskId) !== entry) return;
+      if (standaloneTaskRuns.get(capability) !== entry) return;
       const cleanupTimer = setTimeout(() => {
-        standaloneTaskRuns.delete(taskId);
+        standaloneTaskRuns.delete(capability);
       }, 60_000);
       (cleanupTimer as { unref?: () => void }).unref?.();
       entry.cleanupTimer = cleanupTimer;
     });
-    return taskId;
+    return capability;
   };
 
   runEffectfulRetainedCallback = async ({
@@ -2526,11 +3037,27 @@ export const createVoydHost = async ({
       instance,
       name: rawCallbackExportName,
     });
-    const msgpackMemory = requireExportedMemory({
+    const transportMemory = requireExportedMemory({
       instance,
       name: LINEAR_MEMORY_EXPORT,
     });
-    const encodedPayload = encode(payload, MSGPACK_OPTS) as Uint8Array;
+    const invocationId = nextRetainedCallbackInvocationId++;
+    const callbackAbi = callbackAbiByName.get(callbackExportName);
+    if (!callbackAbi) {
+      throw new Error(
+        `Voyd module is missing DTO metadata for retained callback ${callbackExportName}`,
+      );
+    }
+    const encodedPayload = requireTransport().encodeFrame({
+      kind: "callback-invocation",
+      invocationId,
+      callbackId: 0,
+      args: encodeRetainedCallbackArgs({
+        callbackExportName,
+        schemas: callbackAbi.params,
+        payload,
+      }),
+    });
     if (encodedPayload.length > bufferSize) {
       throw new Error("retained callback payload exceeds buffer size");
     }
@@ -2539,12 +3066,12 @@ export const createVoydHost = async ({
       [],
       ({ bufferPtr, bufferSize }) => {
         ensureMemoryCapacity({
-          memory: msgpackMemory,
+          memory: transportMemory,
           requiredBytes: bufferPtr + bufferSize,
           label: LINEAR_MEMORY_EXPORT,
         });
         new Uint8Array(
-          msgpackMemory.buffer,
+          transportMemory.buffer,
           bufferPtr,
           encodedPayload.length,
         ).set(encodedPayload);
@@ -2565,6 +3092,11 @@ export const createVoydHost = async ({
             fallbackFunctionName: rawCallbackExportName,
           });
         }
+      },
+      {
+        kind: "callback",
+        id: invocationId,
+        schema: callbackAbi.result,
       },
     );
     return attachTaskObserver(
@@ -2630,7 +3162,22 @@ export const createVoydHost = async ({
       }),
     registerDefaultAdapters: (options = {}) =>
       registerDefaultHostAdapters({
-        host: { table, registerHandler },
+        host: {
+          table,
+          registerHandler,
+          encodedPayloadSize: (value) =>
+            requireTransport().encodeFrame({
+              kind: "effect-outcome",
+              requestId: 0x7fffffff,
+              outcome: {
+                kind: "success",
+                value: {
+                  fingerprint: "f".repeat(64),
+                  value,
+                },
+              },
+            }).length,
+        },
         options: {
           ...options,
           effectBufferSize: options.effectBufferSize ?? bufferSize,
@@ -2644,6 +3191,15 @@ export const createVoydHost = async ({
     runManaged,
     runEffectful,
     run,
+    decodePayload: (bytes, fingerprint) => {
+      if (!payloadFingerprints.has(fingerprint)) {
+        throw new Error(
+          `Voyd module does not declare encoded payload fingerprint ${fingerprint}`,
+        );
+      }
+      return requireTransport().decodePayload(bytes);
+    },
+    transportFrame,
     retainedCallbacks: callbackRegistry,
   };
 

@@ -347,7 +347,7 @@ pub fn main(): () -> i32
           },
         },
       });
-      expect(runtime.value).toBeNull();
+      expect(runtime.value).toBeUndefined();
       expect(writes).toEqual([7]);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });

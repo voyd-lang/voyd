@@ -210,51 +210,6 @@ describe("integration: task runtime", () => {
     });
   });
 
-  it("resolves task observers when detached typed outcome mapping fails", async () => {
-    const { host, runtime } = await createTaskHost({
-      compiled,
-      onUnhandledTaskFailed: () => undefined,
-    });
-    const run = host.runManaged<number>("unsupported_detached_outcome_probe");
-    const observed = run.outcome.then((rootOutcome) => {
-      if (rootOutcome.kind !== "value" || !run.observeTask) {
-        throw new Error("expected a detached task id and observer");
-      }
-      return run.observeTask(rootOutcome.value);
-    });
-    let observerSettled = false;
-    void observed.then(
-      () => {
-        observerSettled = true;
-      },
-      () => {
-        observerSettled = true;
-      },
-    );
-
-    await drainRuntime(runtime);
-
-    expect(observerSettled).toBe(true);
-    await expect(observed).resolves.toMatchObject({
-      kind: "failed",
-      error: {
-        voyd: {
-          trap: {
-            functionName: "unsupported_detached_outcome_probe",
-            span: {
-              file: expect.stringContaining("task-runtime.voyd"),
-              startLine: 347,
-            },
-          },
-          transition: {
-            point: "task_outcome",
-            direction: "vm->host",
-          },
-        },
-      },
-    });
-  });
-
   it("settles continuation payload encoding failures", async () => {
     const { host, runtime } = await createTaskHost({ compiled });
     const op = compiled.effects.findUniqueOpByLabelSuffix(
@@ -300,6 +255,21 @@ describe("integration: task runtime", () => {
         },
       },
     });
+  });
+
+  it("encodes child end values with the child completion schema", async () => {
+    const { host, runtime } = await createTaskHost({ compiled });
+    const op = compiled.effects.findUniqueOpByLabelSuffix(
+      "TaskEndBoundary::stop",
+    );
+    host.registerHandler(op.effectId, op.opId, op.signatureHash, ({ end }) =>
+      end({ value: 23 }),
+    );
+
+    const outcome = host.run<number>("child_end_boundary_probe");
+    await drainRuntime(runtime);
+
+    await expect(outcome).resolves.toBe(23);
   });
 
   it("cancels sleeping tasks and ignores their late completions", async () => {

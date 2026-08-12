@@ -130,7 +130,6 @@ export const translateFunctionSignature = ({
 
   const parameters = signature.parameters.map((param) => ({
     type: translation(param.type),
-    declaredSerializer: param.declaredSerializer,
     label: param.label,
     bindingKind: param.bindingKind,
     span: param.span,
@@ -152,7 +151,6 @@ export const translateFunctionSignature = ({
       typeId,
       parameters,
       returnType,
-      declaredReturnSerializer: signature.declaredReturnSerializer,
       hasExplicitReturn: signature.hasExplicitReturn,
       annotatedReturn: signature.annotatedReturn ?? false,
       effectRow: translateEffectRow({

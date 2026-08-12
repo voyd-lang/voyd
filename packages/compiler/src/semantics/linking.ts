@@ -35,9 +35,11 @@ import {
 export const monomorphizeProgram = ({
   modules,
   semantics,
+  rootInstances = [],
 }: {
   modules: readonly SemanticsPipelineResult[];
   semantics: Map<string, SemanticsPipelineResult>;
+  rootInstances?: readonly MonomorphizedInstanceRequest[];
 }): {
   instances: readonly MonomorphizedInstanceRequest[];
   moduleTyping: ReadonlyMap<
@@ -617,6 +619,15 @@ export const monomorphizeProgram = ({
       requestTraitImplMethodInstantiations({ callerModuleId, callerCtx });
     }
   };
+
+  rootInstances.forEach((request) =>
+    requestInstantiation({
+      callerModuleId: request.callee.moduleId,
+      calleeRef: request.callee,
+      typeArgs: request.typeArgs,
+      allowSameModule: true,
+    }),
+  );
 
   processModuleQueue();
 

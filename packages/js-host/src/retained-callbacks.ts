@@ -24,27 +24,84 @@ export type RetainedCallbackScopeManager<Payload = unknown> = {
 
 export type RetainedCallbackScopeOwner = number | string | symbol;
 
+type OpaqueCapabilityAllocator = {
+  allocate(): number;
+};
+
+const CAPABILITY_MASK = 0x7fff_ffff;
+let nextCapabilityInput = 1;
+let capabilityMixingKeys: readonly [number, number, number] | undefined;
+
+const getCapabilityMixingKeys = (): readonly [number, number, number] => {
+  if (capabilityMixingKeys) return capabilityMixingKeys;
+  const random = new Uint32Array(3);
+  globalThis.crypto.getRandomValues(random);
+  capabilityMixingKeys = [
+    random[0]! & CAPABILITY_MASK,
+    (random[1]! | 1) & CAPABILITY_MASK,
+    (random[2]! | 1) & CAPABILITY_MASK,
+  ];
+  return capabilityMixingKeys;
+};
+
+const mixCapability = (input: number): number => {
+  const [xorKey, firstMultiplier, secondMultiplier] =
+    getCapabilityMixingKeys();
+  let mixed = (input ^ xorKey) & CAPABILITY_MASK;
+  mixed ^= mixed >>> 16;
+  mixed = Math.imul(mixed, firstMultiplier) & CAPABILITY_MASK;
+  mixed ^= mixed >>> 13;
+  mixed = Math.imul(mixed, secondMultiplier) & CAPABILITY_MASK;
+  mixed ^= mixed >>> 16;
+  return mixed & CAPABILITY_MASK;
+};
+
+const allocateOpaqueCapability = (): number => {
+  while (nextCapabilityInput <= CAPABILITY_MASK) {
+    const token = mixCapability(nextCapabilityInput++);
+    if (token !== 0) return token;
+  }
+  throw new Error("opaque capability token space exhausted");
+};
+
+export const createOpaqueCapabilityAllocator = (): OpaqueCapabilityAllocator => {
+  return {
+    allocate: allocateOpaqueCapability,
+  };
+};
+
 export function createRetainedEventHandlerRegistry<Payload = unknown>(): RetainedEventHandlerRegistry<Payload> {
+  const capabilities = createOpaqueCapabilityAllocator();
   const handlers = new Map<number, WasmEventHandlerRef<Payload>>();
-  let nextId = 1;
+
+  const resolve = (token: number): WasmEventHandlerRef<Payload> => {
+    const handler = handlers.get(token);
+    if (!handler) {
+      throw new Error(
+        "retained callback is stale or has already completed or belongs to a different runtime session",
+      );
+    }
+    return handler;
+  };
 
   return {
     retain(handlerRef) {
-      const id = nextId;
-      nextId += 1;
-      handlers.set(id, handlerRef);
-      return id;
+      const token = capabilities.allocate();
+      handlers.set(token, handlerRef);
+      return token;
     },
-    async dispatch(id, payload) {
-      const handler = handlers.get(id);
-      if (!handler) return undefined;
-      return await handler(payload);
+    async dispatch(token, payload) {
+      return await resolve(token)(payload);
     },
-    release(id) {
-      handlers.delete(id);
+    release(token) {
+      resolve(token);
+      handlers.delete(token);
     },
-    releaseMany(ids) {
-      Array.from(ids).forEach((id) => handlers.delete(id));
+    releaseMany(tokens) {
+      Array.from(tokens).forEach((token) => {
+        resolve(token);
+        handlers.delete(token);
+      });
     },
     clear() {
       handlers.clear();

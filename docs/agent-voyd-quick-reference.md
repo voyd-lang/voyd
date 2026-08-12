@@ -110,7 +110,7 @@ pub fn write(value: String): Output -> Result<Unit, IoError>
 ```voyd
 @effect(id: "voyd.std.output")
 pub eff Output
-  write_op(tail, payload: MsgPack) -> MsgPack
+  write_op(tail, request: OutputWriteRequest) -> OutputResult
 
 pub fn print(value: StringSlice): Output -> void
   match(write_line(value))

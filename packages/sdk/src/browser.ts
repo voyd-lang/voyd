@@ -150,6 +150,7 @@ const compileSdk = async (
       optimize: options.optimize,
       loadModuleGraph,
       boundaryExports: options.boundaryExports,
+      effectsHostBoundary: options.effectsHostBoundary,
       externalDeclarations: options.externalDeclarations,
       cache: compilerCache,
       setupPhasesMs,

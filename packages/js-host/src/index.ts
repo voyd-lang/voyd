@@ -1,4 +1,21 @@
-export { createVoydHost } from "./host.js";
+import {
+  createVoydHost as createVoydHostCore,
+  type HostInitOptions,
+  type VoydHost,
+} from "./host.js";
+import { msgPackHostTransport } from "./transports/msgpack.js";
+
+export const createVoydHost = (
+  options: HostInitOptions,
+): Promise<VoydHost> =>
+  createVoydHostCore({
+    ...options,
+    transportAdapters: [
+      msgPackHostTransport,
+      ...(options.transportAdapters ?? []),
+    ],
+  });
+
 export { CancelledRunError } from "./host.js";
 export type { HostInitOptions, VoydHost } from "./host.js";
 export { registerDefaultHostAdapters } from "./adapters/default.js";
@@ -16,6 +33,15 @@ export type {
   DefaultAdapterRegistration,
   DefaultAdapterRuntimeHooks,
 } from "./adapters/default.js";
+export {
+  HOST_FRAME_VERSION,
+  HostFrameFailureError,
+  type DtoFingerprint,
+  type HostFailure,
+  type HostFrame,
+  type HostOutcome,
+  type TypedHostPayload,
+} from "./protocol/host-frame.js";
 export {
   buildHandlersByLabelSuffix,
   registerHandlersByLabelSuffix,
@@ -49,6 +75,11 @@ export {
 } from "./effect-op.js";
 export { EXPORT_ABI_SECTION, parseExportAbi } from "./protocol/export-abi.js";
 export {
+  DTO_SCHEMA_ABI_VERSION,
+  HOST_ABI_VERSION,
+  resolveHostTransport,
+} from "./protocol/host-transport.js";
+export {
   EXTERNAL_IMPORT_MODULE,
   EXTERNAL_REQUIREMENTS_SECTION,
   parseExternalRequirements,
@@ -64,6 +95,11 @@ export type {
   ResumeKindCode,
 } from "./protocol/table.js";
 export type { ExportAbiEntry, ParsedExportAbi } from "./protocol/export-abi.js";
+export type {
+  HostTransportAdapter,
+  HostTransportIdentity,
+  HostTransportMetadata,
+} from "./protocol/host-transport.js";
 export type {
   ExternalFunctionRequirement,
   ParsedExternalRequirements,
@@ -98,6 +134,8 @@ export {
   isVoydRuntimeError,
 } from "./runtime/trap-diagnostics.js";
 export type {
+  VoydHostBoundaryDiagnostics,
+  VoydHostBoundaryError,
   VoydRuntimeDiagnostics,
   VoydRuntimeEffectContext,
   VoydRuntimeError,
@@ -107,5 +145,8 @@ export type {
   VoydTrapAnnotation,
   VoydTrapDiagnostics,
 } from "./runtime/trap-diagnostics.js";
-export { detectHostRuntime, scheduleTaskForRuntime } from "./runtime/environment.js";
+export {
+  detectHostRuntime,
+  scheduleTaskForRuntime,
+} from "./runtime/environment.js";
 export type { HostRuntimeKind } from "./runtime/environment.js";

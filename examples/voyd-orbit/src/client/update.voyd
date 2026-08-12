@@ -60,8 +60,7 @@ use std::number::cast::to_string
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::String
-use std::task::self as tasks
-use std::vx::{ Cmd, Program, next }
+use std::vx::{ Program, next }
 use std::vx::canvas::TextMetrics
 
 pub enum Msg
@@ -100,16 +99,11 @@ pub enum Msg
   OpenLibrary
   CloseLibrary
   SaveCurrent
-  SaveFinished { result: SimulationResult }
-  LibraryFinished { result: SummaryResult }
   LoadSaved { id: String }
-  LoadFinished { result: SimulationResult }
   DuplicateSaved { id: String }
-  DuplicateFinished { result: SimulationResult }
   DeleteSaved { id: String }
-  DeleteSavedFinished { result: DeleteResult }
 
-pub fn step(model: Model, message: Msg): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+pub fn step(model: Model, message: Msg): http_client::HttpClient -> Program<Model, Msg>
   match(message)
     Msg::AnimationTick { timestamp_millis }:
       let updated = advance_frame(model, timestamp_millis)
@@ -199,22 +193,12 @@ pub fn step(model: Model, message: Msg): (http_client::HttpClient, tasks::TaskRu
       next(with_ui(model, ui_with_library(model.ui, false)))
     Msg::SaveCurrent:
       save_current(model)
-    Msg::SaveFinished { result }:
-      save_finished(model, result)
-    Msg::LibraryFinished { result }:
-      library_finished(model, result)
     Msg::LoadSaved { id }:
       load_saved(model, id)
-    Msg::LoadFinished { result }:
-      load_finished(model, result)
     Msg::DuplicateSaved { id }:
       duplicate_saved(model, id)
-    Msg::DuplicateFinished { result }:
-      duplicate_finished(model, result)
     Msg::DeleteSaved { id }:
       delete_saved(model, id)
-    Msg::DeleteSavedFinished { result }:
-      delete_saved_finished(model, result)
 
 fn advance_frame(model: Model, timestamp_millis: f64) -> Model
   let previous_millis = model.playback.last_frame_millis
@@ -522,22 +506,16 @@ fn map_body_by_id(model: Model, id: String, transform: fn(Body) -> Body) -> Mode
       let bodies = replace_body(model.session.simulation.bodies, transform(value))
       with_session(model, session_with_simulation(model.session, state_with_bodies(model.session.simulation, bodies)))
 
-fn open_library(model: Model): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+fn open_library(model: Model): http_client::HttpClient -> Program<Model, Msg>
   if model.ui.busy:
     return next(model)
   let ui = ui_with_notice(
     ui_with_busy(ui_with_library(model.ui, true), true),
     Notice::Visible { kind: NoticeKind::Busy {}, message: "Loading saved simulations…" }
   )
-  next(
-    model: with_ui(model, ui),
-    cmd: Cmd<Msg>::task(
-      work: () -> SummaryResult => fetch_simulations(),
-      handler: (result: SummaryResult) -> Msg => Msg::LibraryFinished { result }
-    )
-  )
+  library_finished(with_ui(model, ui), fetch_simulations())
 
-fn save_current(model: Model): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+fn save_current(model: Model): http_client::HttpClient -> Program<Model, Msg>
   if model.ui.busy:
     return next(model)
   let ui = ui_with_notice(
@@ -545,13 +523,7 @@ fn save_current(model: Model): (http_client::HttpClient, tasks::TaskRuntime) -> 
     Notice::Visible { kind: NoticeKind::Busy {}, message: "Saving simulation…" }
   )
   let value = persisted_from_model(model)
-  next(
-    model: with_ui(model, ui),
-    cmd: Cmd<Msg>::task(
-      work: () -> SimulationResult => save_simulation(value),
-      handler: (result: SimulationResult) -> Msg => Msg::SaveFinished { result }
-    )
-  )
+  save_finished(with_ui(model, ui), save_simulation(value))
 
 fn save_finished(model: Model, result: SimulationResult) -> Program<Model, Msg>
   match(result)
@@ -589,20 +561,14 @@ fn library_finished(model: Model, result: SummaryResult) -> Program<Model, Msg>
       )
       next(with_ui(model, ui))
 
-fn load_saved(model: Model, id: String): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+fn load_saved(model: Model, id: String): http_client::HttpClient -> Program<Model, Msg>
   if model.ui.busy:
     return next(model)
   let ui = ui_with_notice(
     ui_with_busy(model.ui, true),
     Notice::Visible { kind: NoticeKind::Busy {}, message: "Opening simulation…" }
   )
-  next(
-    model: with_ui(model, ui),
-    cmd: Cmd<Msg>::task(
-      work: () -> SimulationResult => fetch_simulation(id),
-      handler: (result: SimulationResult) -> Msg => Msg::LoadFinished { result }
-    )
-  )
+  load_finished(with_ui(model, ui), fetch_simulation(id))
 
 fn load_finished(model: Model, result: SimulationResult) -> Program<Model, Msg>
   match(result)
@@ -623,22 +589,16 @@ fn load_finished(model: Model, result: SimulationResult) -> Program<Model, Msg>
         )
       )
 
-fn duplicate_saved(model: Model, id: String): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+fn duplicate_saved(model: Model, id: String): http_client::HttpClient -> Program<Model, Msg>
   if model.ui.busy:
     return next(model)
   let ui = ui_with_notice(
     ui_with_busy(model.ui, true),
     Notice::Visible { kind: NoticeKind::Busy {}, message: "Duplicating simulation…" }
   )
-  next(
-    model: with_ui(model, ui),
-    cmd: Cmd<Msg>::task(
-      work: () -> SimulationResult => duplicate_simulation(id),
-      handler: (result: SimulationResult) -> Msg => Msg::DuplicateFinished { result }
-    )
-  )
+  duplicate_finished(with_ui(model, ui), duplicate_simulation(id))
 
-fn duplicate_finished(model: Model, result: SimulationResult): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+fn duplicate_finished(model: Model, result: SimulationResult): http_client::HttpClient -> Program<Model, Msg>
   match(result)
     SimulationResult::SimulationFailed { message }:
       next(with_ui(model, ui_with_notice(
@@ -650,28 +610,16 @@ fn duplicate_finished(model: Model, result: SimulationResult): (http_client::Htt
         ui_with_busy(model.ui, true),
         Notice::Visible { kind: NoticeKind::Success {}, message: "Simulation duplicated" }
       )
-      next(
-        model: with_ui(model, ui),
-        cmd: Cmd<Msg>::task(
-          work: () -> SummaryResult => fetch_simulations(),
-          handler: (result: SummaryResult) -> Msg => Msg::LibraryFinished { result }
-        )
-      )
+      library_finished(with_ui(model, ui), fetch_simulations())
 
-fn delete_saved(model: Model, id: String): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+fn delete_saved(model: Model, id: String): http_client::HttpClient -> Program<Model, Msg>
   if model.ui.busy:
     return next(model)
   let ui = ui_with_notice(
     ui_with_busy(model.ui, true),
     Notice::Visible { kind: NoticeKind::Busy {}, message: "Deleting simulation…" }
   )
-  next(
-    model: with_ui(model, ui),
-    cmd: Cmd<Msg>::task(
-      work: () -> DeleteResult => delete_simulation(id),
-      handler: (result: DeleteResult) -> Msg => Msg::DeleteSavedFinished { result }
-    )
-  )
+  delete_saved_finished(with_ui(model, ui), delete_simulation(id))
 
 fn delete_saved_finished(model: Model, result: DeleteResult) -> Program<Model, Msg>
   match(result)

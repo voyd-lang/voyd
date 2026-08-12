@@ -5,12 +5,14 @@ use std::dict::Dict
 use std::error::panic
 use std::http::Response
 use std::json::{ JsonError, stringify as stringify_json }
-use std::msgpack::{ MsgPack, MsgPackError }
-use std::msgpack::self as msgpack
 use std::number::cast::to_string
 use std::optional::types::all
+use std::result::types::all
 use std::string::type::{ String, StringIndex, StringSlice }
 use std::vx
+use std::vx::{
+  AttrValueWire, AttrWireList, AttrWireNode, HtmlWire, HtmlWireList, HtmlWireNode
+}
 use super::response::encode_json_value
 use super::response::IntoResponse
 use super::openapi::contract::OpenApiResponseContract
@@ -31,7 +33,7 @@ impl IntoResponse<HtmlResponse> for HtmlResponse
 
 /// Renders a VX value as a typed HTML response.
 pub fn html<Msg>(value: vx::Html<Msg>) -> HtmlResponse
-  HtmlResponse { value: render(value) }
+  HtmlResponse { value: render<Msg>(value) }
 
 /// Wraps already-rendered HTML as a typed response.
 pub fn html(value: String) -> HtmlResponse
@@ -50,96 +52,59 @@ pub obj Hydration<Model> {
 
 @compiler_contract(id: "voyd.web.render-generic")
 pub fn render<Msg>(value: vx::Html<Msg>) -> String
-  render_impl(value)
-
-@compiler_contract(id: "voyd.web.render")
-pub fn render(value: MsgPack) -> String
-  render_impl(value)
+  render_impl<Msg>(value)
 
 @compiler_contract(id: "voyd.web.document-generic")
 pub fn document<Msg>(value: vx::Html<Msg>) -> String
-  document_impl(value)
-
-@compiler_contract(id: "voyd.web.document")
-pub fn document(value: MsgPack) -> String
-  document_impl(value)
+  document_impl<Msg>(value)
 
 @compiler_contract(id: "voyd.web.document-hydrated-generic")
-pub fn document<Msg, Model>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
-  hydrated_document_impl<Model>(view: view, hydrate: hydrate)
-
-@compiler_contract(id: "voyd.web.document-hydrated")
-pub fn document<Model>({ view: MsgPack, hydrate: Hydration<Model> }) -> String
-  hydrated_document_impl<Model>(view: view, hydrate: hydrate)
+pub fn document<Model, Msg>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
+  hydrated_document_impl<Model, Msg>(view: view, hydrate: hydrate)
 
 @compiler_contract(id: "voyd.web.hydrated-document-generic")
-pub fn hydrated_document<Msg, Model>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
-  hydrated_document_impl<Model>(view: view, hydrate: hydrate)
-
-@compiler_contract(id: "voyd.web.hydrated-document")
-pub fn hydrated_document<Model>({ view: MsgPack, hydrate: Hydration<Model> }) -> String
-  hydrated_document_impl<Model>(view: view, hydrate: hydrate)
+pub fn hydrated_document<Model, Msg>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
+  hydrated_document_impl<Model, Msg>(view: view, hydrate: hydrate)
 
 @compiler_contract(id: "voyd.web.html-response-generic")
 pub fn html_response<Msg>(response: Response, value: vx::Html<Msg>) -> Response
-  html_response_impl(response, value)
-
-@compiler_contract(id: "voyd.web.html-response")
-pub fn html_response(response: Response, value: MsgPack) -> Response
-  html_response_impl(response, value)
+  html_response_impl<Msg>(response, value)
 
 @compiler_contract(id: "voyd.web.html-response-hydrated-generic")
-pub fn html_response<Msg, Model>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
-  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
-
-@compiler_contract(id: "voyd.web.html-response-hydrated")
-pub fn html_response<Model>(response: Response, { view: MsgPack, hydrate: Hydration<Model> }) -> Response
-  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+pub fn html_response<Model, Msg>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model, Msg>(response, view: view, hydrate: hydrate)
 
 @compiler_contract(id: "voyd.web.hydrated-html-response-generic")
-pub fn hydrated_html_response<Msg, Model>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
-  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
-
-@compiler_contract(id: "voyd.web.hydrated-html-response")
-pub fn hydrated_html_response<Model>(response: Response, { view: MsgPack, hydrate: Hydration<Model> }) -> Response
-  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+pub fn hydrated_html_response<Model, Msg>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model, Msg>(response, view: view, hydrate: hydrate)
 
 @compiler_contract(id: "voyd.web.response-html-generic")
 pub fn html<Msg>(response: Response, value: vx::Html<Msg>) -> Response
-  html_response_impl(response, value)
+  html_response_impl<Msg>(response, value)
 
 @compiler_contract(id: "voyd.web.hydrated-response-html-generic")
-pub fn html<Msg, Model>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
-  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+pub fn html<Model, Msg>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model, Msg>(response, view: view, hydrate: hydrate)
 
-@compiler_contract(id: "voyd.web.response-html")
-pub fn html(response: Response, value: MsgPack) -> Response
-  html_response_impl(response, value)
+fn render_impl<Msg>(value: vx::Html<Msg>) -> String
+  render_node(vx::lower_server_html_node<Msg>(value))
 
-@compiler_contract(id: "voyd.web.hydrated-response-html")
-pub fn html<Model>(response: Response, { view: MsgPack, hydrate: Hydration<Model> }) -> Response
-  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+fn document_impl<Msg>(value: vx::Html<Msg>) -> String
+  "<!doctype html>".as_slice().to_string().concat(render_impl<Msg>(value))
 
-fn render_impl(value: MsgPack) -> String
-  vx::claim_server_render_callbacks(value)
-  render_node(value)
-
-fn document_impl(value: MsgPack) -> String
-  "<!doctype html>".as_slice().to_string().concat(render_impl(value))
-
-fn hydrated_document_impl<Model>({ view: MsgPack, hydrate: Hydration<Model> }) -> String
-  insert_hydration(document_impl(view), render_hydration<Model>(hydrate))
+fn hydrated_document_impl<Model, Msg>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
+  insert_hydration(document_impl<Msg>(view), render_hydration<Model>(hydrate))
 
 pub fn append_hydration<Model>(document: String, hydrate: Hydration<Model>) -> String
   insert_hydration(document, render_hydration<Model>(hydrate))
 
-fn html_response_impl(response: Response, value: MsgPack) -> Response
+fn html_response_impl<Msg>(response: Response, value: vx::Html<Msg>) -> Response
   with_html_content_type(response)
-    .text(render_impl(value))
+    .text(render_impl<Msg>(value))
 
-fn hydrated_html_response_impl<Model>(response: Response, { view: MsgPack, hydrate: Hydration<Model> }) -> Response
+fn hydrated_html_response_impl<Model, Msg>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
   with_html_content_type(response)
-    .text(hydrated_document_impl<Model>(view: view, hydrate: hydrate))
+    .text(hydrated_document_impl<Model, Msg>(view: view, hydrate: hydrate))
 
 fn with_html_content_type(response: Response): () -> Response
   response
@@ -170,171 +135,97 @@ pub fn hydrate_named<Model>({ id: StringSlice, target: StringSlice, entry: Strin
 pub fn hydrate_named<Model>({ id: String, target: String, entry: String, model: Model }) -> Hydration<Model>
   Hydration<Model> { id: id, target: target, entry: entry, model: model }
 
-fn render_node(value: MsgPack): () -> String
+fn render_node(value: HtmlWire): () -> String
   render_node_in_namespace(value, false)
 
-fn render_node_in_namespace(value: MsgPack, svg_parent: bool): () -> String
-  match(msgpack::unpack_string(value))
-    Ok<String> { value }:
-      return escape_text(value.as_slice())
-    Err<MsgPackError>:
-      void
-
-  match(msgpack::unpack_array(value))
-    Ok<Array<MsgPack>> { value }:
-      return render_children(value, svg_parent)
-    Err<MsgPackError>:
-      void
-
-  match(msgpack::unpack_map(value))
-    Ok<Dict<String, MsgPack>> { value: map }:
-      match(read_string(map, "kind".as_slice()))
-        Some<String> { value: kind }:
-          if kind.equals("element"):
-            return render_element(map, svg_parent)
-          if kind.equals("fragment"):
-            return render_node_children(map, svg_parent)
-          if kind.equals("map"):
-            return render_mapped_node(map, svg_parent)
-          if kind.equals("text"):
-            match(read_string(map, "value".as_slice()))
-              Some<String> { value }:
-                return escape_text(value.as_slice())
-              None:
-                return String::init()
-          String::init()
-        None:
-          String::init()
-    Err<MsgPackError>:
+fn render_node_in_namespace(value: HtmlWire, svg_parent: bool): () -> String
+  value.node.match(node)
+    HtmlWireNode::HtmlText:
+      escape_text(node.value.as_slice())
+    HtmlWireNode::HtmlFragment:
+      render_children(node.children, svg_parent)
+    HtmlWireNode::HtmlElement:
+      render_element(
+        tag: node.element_name,
+        attrs: node.attrs,
+        children: node.children,
+        svg_parent: svg_parent
+      )
+    HtmlWireNode::HtmlKeyed:
+      render_node_in_namespace(node.child, svg_parent)
+    HtmlWireNode::HtmlMapped:
+      panic("client-only VX message map reached the server renderer")
       String::init()
+    HtmlWireNode::HtmlFrame:
+      render_node_in_namespace(node.root, svg_parent)
 
-fn render_mapped_node(map: Dict<String, MsgPack>, svg_parent: bool) -> String
-  match(map.get("child"))
-    Some<MsgPack> { value }:
-      render_node_in_namespace(value, svg_parent)
-    None:
-      String::init()
-
-fn render_element(map: Dict<String, MsgPack>, svg_parent: bool): () -> String
-  let tag = read_string_or(map, "tag".as_slice(), "div".as_slice())
+fn render_element({
+  tag: String,
+  attrs: AttrWireList,
+  children: HtmlWireList,
+  svg_parent: bool
+}): () -> String
   let svg_element = svg_parent or tag == "svg"
   if not is_valid_tag_name(tag, svg_element):
     panic("invalid VX HTML tag: ".concat(tag))
     return String::init()
-  if not svg_element and is_void_tag(tag) and has_element_children(map):
+  if not svg_element and is_void_tag(tag) and has_element_children(children):
     panic("void VX HTML element cannot have children: ".concat(tag))
     return String::init()
-  let attrs = render_element_attrs(map, tag, svg_element)
+  let rendered_attrs = render_element_attrs(attrs, tag, svg_element)
   let opening = "<".as_slice()
     .to_string()
     .concat(tag)
-    .concat(attrs)
+    .concat(rendered_attrs)
     .concat(">".as_slice())
   if not svg_element and is_void_tag(tag):
     return opening
   let svg_children = svg_element and not is_svg_html_integration_point(tag)
-  let rendered_children = if not svg_element and is_raw_text_tag(tag.as_slice()) then: render_raw_text_children(map, tag.as_slice()) else: render_node_children(map, svg_children)
-  let children = if svg_element then: rendered_children else: preserve_leading_newline(tag, rendered_children)
+  let rendered_children = if not svg_element and is_raw_text_tag(tag.as_slice()) then: render_raw_text_children(children, tag.as_slice()) else: render_children(children, svg_children)
+  let final_children = if svg_element then: rendered_children else: preserve_leading_newline(tag, rendered_children)
   if not svg_element:
-    validate_textarea_value(map, tag: tag, children: children)
+    validate_textarea_value(attrs, tag: tag, children: final_children)
   opening
-    .concat(children)
+    .concat(final_children)
     .concat("</".as_slice())
     .concat(tag)
     .concat(">".as_slice())
 
-fn render_node_children(map: Dict<String, MsgPack>, svg_parent: bool): () -> String
-  match(map.get("children".as_slice().to_string()))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_array(value))
-        Ok<Array<MsgPack>> { value }:
-          render_children(value, svg_parent)
-        Err<MsgPackError>:
-          String::init()
-    None:
-      String::init()
-
-fn has_element_children(map: Dict<String, MsgPack>) -> bool
-  match(map.get("children".as_slice().to_string()))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_array(value))
-        Ok<Array<MsgPack>> { value }:
-          not value.is_empty()
-        Err<MsgPackError>:
-          false
-    None:
+fn has_element_children(children: HtmlWireList) -> bool
+  children.match(node)
+    HtmlWireList::HtmlWireEnd:
       false
+    HtmlWireList::HtmlWireNext:
+      true
 
-fn render_children(children: Array<MsgPack>, svg_parent: bool): () -> String
-  var out = String::init()
-  var index = 0
-  while index < children.len():
-    match(children.get(index))
-      Some<MsgPack> { value }:
-        out = out.concat(render_node_in_namespace(value, svg_parent))
-      None:
-        void
-    index = index + 1
-  out
-
-fn render_raw_text_children(map: Dict<String, MsgPack>, tag: StringSlice) -> String
-  match(map.get("children"))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_array(value))
-        Ok<Array<MsgPack>> { value }:
-          render_raw_text_array(value, tag)
-        Err<MsgPackError>:
-          String::init()
-    None:
+fn render_children(children: HtmlWireList, svg_parent: bool): () -> String
+  children.match(node)
+    HtmlWireList::HtmlWireEnd:
       String::init()
+    HtmlWireList::HtmlWireNext:
+      render_node_in_namespace(node.value, svg_parent)
+        .concat(render_children(node.rest, svg_parent))
 
-fn render_raw_text_array(children: Array<MsgPack>, tag: StringSlice) -> String
-  var out = String::init()
-  var index = 0
-  while index < children.len():
-    match(children.get(index))
-      Some<MsgPack> { value }:
-        out = out.concat(render_raw_text_node(value, tag))
-      None:
-        void
-    index = index + 1
-  out
+fn render_raw_text_children(children: HtmlWireList, tag: StringSlice) -> String
+  children.match(node)
+    HtmlWireList::HtmlWireEnd:
+      String::init()
+    HtmlWireList::HtmlWireNext:
+      render_raw_text_node(node.value, tag)
+        .concat(render_raw_text_children(node.rest, tag))
 
-fn render_raw_text_node(value: MsgPack, tag: StringSlice): () -> String
-  match(msgpack::unpack_string(value))
-    Ok<String> { value }:
-      return validate_raw_text(value, tag)
-    Err<MsgPackError>:
-      void
-
-  match(msgpack::unpack_array(value))
-    Ok<Array<MsgPack>> { value }:
-      return render_raw_text_array(value, tag)
-    Err<MsgPackError>:
-      void
-
-  match(msgpack::unpack_map(value))
-    Ok<Dict<String, MsgPack>> { value: map }:
-      match(read_string(map, "kind".as_slice()))
-        Some<String> { value: kind }:
-          if kind == "text":
-            return validate_raw_text(
-              read_string_or(map, "value".as_slice(), "".as_slice()),
-              tag
-            )
-          if kind == "fragment":
-            return render_raw_text_children(map, tag)
-          if kind == "map":
-            match(map.get("child"))
-              Some<MsgPack> { value }:
-                return render_raw_text_node(value, tag)
-              None:
-                return String::init()
-          panic("VX raw-text elements may only contain text")
-          String::init()
-        None:
-          String::init()
-    Err<MsgPackError>:
+fn render_raw_text_node(value: HtmlWire, tag: StringSlice): () -> String
+  value.node.match(node)
+    HtmlWireNode::HtmlText:
+      validate_raw_text(node.value, tag)
+    HtmlWireNode::HtmlFragment:
+      render_raw_text_children(node.children, tag)
+    HtmlWireNode::HtmlKeyed:
+      render_raw_text_node(node.child, tag)
+    HtmlWireNode::HtmlFrame:
+      render_raw_text_node(node.root, tag)
+    else:
+      panic("VX raw-text elements may only contain text")
       String::init()
 
 fn validate_raw_text(value: String, tag: StringSlice) -> String
@@ -349,165 +240,138 @@ fn validate_raw_text(value: String, tag: StringSlice) -> String
     panic("VX raw text contains its closing delimiter")
   value
 
-fn render_element_attrs(map: Dict<String, MsgPack>, tag: String, svg_element: bool): () -> String
-  let ~attrs = Dict<String, MsgPack>::init()
-  copy_named_values(map, field: "attrs", into: attrs)
-  copy_properties(map, tag: tag, into: attrs)
-  let styles = read_styles(map)
-  if not styles.is_empty():
-    attrs.set("style", styles)
-  render_named_values(attrs, svg_element)
+fn render_element_attrs(values: AttrWireList, tag: String, svg_element: bool): () -> String
+  let collected = collect_element_attrs(
+    values,
+    tag: tag,
+    collected: CollectedElementAttrs {
+      attrs: Dict<String, AttrValueWire>::init(),
+      styles: Dict<String, String>::init()
+    }
+  )
+  let rendered_styles = render_style_entries(collected.styles)
+  if not rendered_styles.is_empty():
+    return render_named_values(
+      collected.attrs.setting("style", AttrValueWire::AttrString { value: rendered_styles }),
+      svg_element
+    )
+  render_named_values(collected.attrs, svg_element)
 
-fn copy_properties(
-  map: Dict<String, MsgPack>,
-  { tag: String, into ~attrs: Dict<String, MsgPack> }
-) -> void
-  match(map.get("props"))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_map(value))
-        Ok<Dict<String, MsgPack>> { value: props }:
-          let entries = props.entries()
-          var index = 0
-          while index < entries.len():
-            match(entries.get(index))
-              Some<(String, MsgPack)> { value }:
-                if not is_supported_property(value.0):
-                  panic("unsupported VX DOM property: ".concat(value.0))
-                if not is_valid_property_value(name: value.0, value: value.1):
-                  panic("invalid VX DOM property value for: ".concat(value.0))
-                if not is_supported_property_for_tag(name: value.0, tag: tag):
-                  panic("VX DOM property has no stable SSR representation on <".concat(tag).concat(">: ").concat(value.0))
-                if not (tag == "textarea" and value.0 == "value"):
-                  attrs.set(value.0, value.1)
-              None:
-                void
-            index = index + 1
-        Err<MsgPackError>:
-          void
-    None:
-      void
+obj CollectedElementAttrs {
+  attrs: Dict<String, AttrValueWire>,
+  styles: Dict<String, String>
+}
 
-fn copy_named_values(
-  map: Dict<String, MsgPack>,
-  { field: String, into ~attrs: Dict<String, MsgPack> }
-): () -> void
-  match(map.get(field))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_map(value))
-        Ok<Dict<String, MsgPack>> { value: values }:
-          let entries = values.entries()
-          var index = 0
-          while index < entries.len():
-            match(entries.get(index))
-              Some<(String, MsgPack)> { value }:
-                attrs.set(value.0, value.1)
-              None:
-                void
-            index = index + 1
-        Err<MsgPackError>:
-          void
-    None:
-      void
+fn collect_element_attrs(
+  values: AttrWireList,
+  { tag: String, collected: CollectedElementAttrs }
+) -> CollectedElementAttrs
+  values.match(node)
+    AttrWireList::AttrWireEnd:
+      collected
+    AttrWireList::AttrWireNext:
+      collect_element_attrs(
+        node.rest,
+        tag: tag,
+        collected: collect_element_attr(node.value, tag: tag, collected: collected)
+      )
 
-fn render_named_values(attrs: Dict<String, MsgPack>, svg_element: bool): () -> String
+fn collect_element_attr(
+  value: vx::AttrWire,
+  { tag: String, collected: CollectedElementAttrs }
+) -> CollectedElementAttrs
+  value.node.match(entry)
+    AttrWireNode::NamedAttr:
+      if entry.kind == "attr":
+        return CollectedElementAttrs {
+          attrs: collected.attrs.setting(entry.name, entry.value),
+          styles: collected.styles
+        }
+      if entry.kind == "style":
+        entry.value.match(style_value)
+          AttrValueWire::AttrString:
+            return CollectedElementAttrs {
+              attrs: collected.attrs,
+              styles: collected.styles.setting(entry.name, style_value.value)
+            }
+          else:
+            return collected
+      if entry.kind == "prop":
+        validate_property(name: entry.name, value: entry.value, tag: tag)
+        if not (tag == "textarea" and entry.name == "value"):
+          return CollectedElementAttrs {
+            attrs: collected.attrs.setting(entry.name, entry.value),
+            styles: collected.styles
+          }
+      collected
+    AttrWireNode::EventAttr:
+      collected
+
+fn validate_property({ name: String, value: AttrValueWire, tag: String }) -> void
+  if not is_supported_property(name):
+    panic("unsupported VX DOM property: ".concat(name))
+  if not is_valid_property_value(name: name, value: value):
+    panic("invalid VX DOM property value for: ".concat(name))
+  if not is_supported_property_for_tag(name: name, tag: tag):
+    panic("VX DOM property has no stable SSR representation on <".concat(tag).concat(">: ").concat(name))
+
+fn render_named_values(attrs: Dict<String, AttrValueWire>, svg_element: bool): () -> String
   var out = String::init()
   let entries = attrs.entries()
   var index = 0
   while index < entries.len():
     match(entries.get(index))
-      Some<(String, MsgPack)> { value }:
+      Some<(String, AttrValueWire)> { value }:
         out = out.concat(render_attr(value.0, value.1, svg_element))
       None:
         void
     index = index + 1
   out
 
-fn render_attr(name: String, value: MsgPack, svg_element: bool): () -> String
+fn render_attr(name: String, value: AttrValueWire, svg_element: bool): () -> String
   if not is_valid_attr_name(name, svg_element):
     panic("invalid VX HTML attribute: ".concat(name))
     return String::init()
-  match(msgpack::unpack_bool(value))
-    Ok<bool> { value }:
-      if value:
+  value.match(active)
+    AttrValueWire::AttrBool:
+      if active.value:
         return " ".as_slice().to_string().concat(name)
       return String::init()
-    Err<MsgPackError>:
-      void
-
-  match(msgpack::unpack_string(value))
-    Ok<String> { value }:
+    AttrValueWire::AttrString:
       return " ".as_slice()
         .to_string()
         .concat(name)
         .concat("=\"".as_slice())
-        .concat(escape_attr(value.as_slice()))
+        .concat(escape_attr(active.value.as_slice()))
         .concat("\"".as_slice())
-    Err<MsgPackError>:
-      void
-
-  match(msgpack::unpack_i32(value))
-    Ok<i32> { value }:
-      return " ".as_slice()
+    AttrValueWire::AttrI32:
+      " ".as_slice()
         .to_string()
         .concat(name)
         .concat("=\"".as_slice())
-        .concat(to_string(value))
+        .concat(to_string(active.value))
         .concat("\"".as_slice())
-    Err<MsgPackError>:
-      String::init()
 
-fn read_styles(map: Dict<String, MsgPack>): () -> String
-  match(map.get("styles"))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_map(value))
-        Ok<Dict<String, MsgPack>> { value: styles }:
-          render_style_entries(styles)
-        Err<MsgPackError>:
-          String::init()
-    None:
-      String::init()
-
-fn render_style_entries(styles: Dict<String, MsgPack>): () -> String
+fn render_style_entries(styles: Dict<String, String>): () -> String
   var out = String::init()
   let entries = styles.entries()
   var index = 0
   while index < entries.len():
     match(entries.get(index))
-      Some<(String, MsgPack)> { value }:
+      Some<(String, String)> { value }:
         let name = value.0
         if not is_valid_style_name(name):
           panic("invalid VX CSS property: ".concat(name))
-        match(msgpack::unpack_string(value.1))
-          Ok<String> { value: style_value }:
-            if not is_valid_style_value(style_value):
-              panic("invalid VX CSS property value: ".concat(style_value))
-            if not out.is_empty():
-              out = out.concat("; ")
-            out = out.concat(name).concat(": ").concat(style_value)
-          Err<MsgPackError>:
-            void
+        let style_value = value.1
+        if not is_valid_style_value(style_value):
+          panic("invalid VX CSS property value: ".concat(style_value))
+        if not out.is_empty():
+          out = out.concat("; ")
+        out = out.concat(name).concat(": ").concat(style_value)
       None:
         void
     index = index + 1
   out
-
-fn read_string(map: Dict<String, MsgPack>, key: StringSlice): () -> Option<String>
-  match(map.get(key.to_string()))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_string(value))
-        Ok<String> { value }:
-          Some<String> { value: value }
-        Err<MsgPackError>:
-          None {}
-    None:
-      None {}
-
-fn read_string_or(map: Dict<String, MsgPack>, key: StringSlice, fallback: StringSlice): () -> String
-  match(read_string(map, key))
-    Some<String> { value }:
-      value
-    None:
-      fallback.to_string()
 
 fn render_hydration<Model>(hydrate: Hydration<Model>): () -> String
   let model_json = escape_script_json(serialize_hydration_model<Model>(hydrate.model))
@@ -589,43 +453,49 @@ fn is_supported_property_for_tag({ name: String, tag: String }) -> bool
     tag == "optgroup" or tag == "option" or tag == "select" or
     tag == "textarea"
 
-fn validate_textarea_value(map: Dict<String, MsgPack>, { tag: String, children: String }) -> void
+fn validate_textarea_value(values: AttrWireList, { tag: String, children: String }) -> void
   if tag == "textarea":
-    match(map.get("props"))
-      Some<MsgPack> { value }:
-        match(msgpack::unpack_map(value))
-          Ok<Dict<String, MsgPack>> { value: props }:
-            match(props.get("value"))
-              Some<MsgPack> { value }:
-                match(msgpack::unpack_string(value))
-                  Ok<String> { value }:
-                    let expected = preserve_leading_newline(tag, escape_text(value.as_slice()))
-                    if children != expected:
-                      panic("textarea value must match its text children for hydration")
-                  Err<MsgPackError>:
-                    panic("textarea value must be a string for server rendering")
-              None:
-                void
-          Err<MsgPackError>:
-            void
+    match(find_named_attr(values, kind: "prop", name: "value"))
+      Some<AttrValueWire> { value }:
+        value.match(active)
+          AttrValueWire::AttrString:
+            let expected = preserve_leading_newline(tag, escape_text(active.value.as_slice()))
+            if children != expected:
+              panic("textarea value must match its text children for hydration")
+          else:
+            panic("textarea value must be a string for server rendering")
       None:
         void
 
-fn is_valid_property_value({ name: String, value: MsgPack }) -> bool
+fn find_named_attr(
+  values: AttrWireList,
+  { kind: String, name: String }
+) -> Option<AttrValueWire>
+  values.match(node)
+    AttrWireList::AttrWireEnd:
+      None {}
+    AttrWireList::AttrWireNext:
+      node.value.node.match(entry)
+        AttrWireNode::NamedAttr:
+          if entry.kind == kind and entry.name == name:
+            return Some<AttrValueWire> { value: entry.value }
+        else:
+          void
+      find_named_attr(node.rest, kind: kind, name: name)
+
+fn is_valid_property_value({ name: String, value: AttrValueWire }) -> bool
   if name == "value":
-    match(msgpack::unpack_string(value))
-      Ok<String>:
+    value.match(active)
+      AttrValueWire::AttrString:
         return true
-      Err<MsgPackError>:
-        match(msgpack::unpack_i32(value))
-          Ok<i32>:
-            return true
-          Err<MsgPackError>:
-            return false
-  match(msgpack::unpack_bool(value))
-    Ok<bool>:
+      AttrValueWire::AttrI32:
+        return true
+      else:
+        return false
+  value.match(active)
+    AttrValueWire::AttrBool:
       true
-    Err<MsgPackError>:
+    else:
       false
 
 fn is_valid_tag_name(name: String, svg_element: bool) -> bool

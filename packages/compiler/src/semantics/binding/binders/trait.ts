@@ -38,14 +38,21 @@ import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 import { bindTypeExpr } from "./expressions.js";
 import { resolveStdIntrinsicTypeContractProvider } from "../intrinsic-type-contracts.js";
 import { bindingIdentityForSyntax } from "../hygiene.js";
+import {
+  getCompilerTraitContractSpec,
+  type CompilerTraitMethodRole,
+  type CompilerTraitContractSpec,
+} from "../../../compiler-contracts/index.js";
 
 export const bindTraitDecl = (
   decl: ParsedTraitDecl,
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
+  const compilerTraitContract = resolveCompilerTraitContract({ decl, ctx });
+  const intrinsicType = decl.form.attributes?.intrinsicType;
   resolveStdIntrinsicTypeContractProvider({
-    id: decl.form.attributes?.intrinsicType,
+    id: intrinsicType,
     declarationName: decl.name.value,
     declarationKind: "trait",
     ctx,
@@ -78,7 +85,11 @@ export const bindTraitDecl = (
     kind: "trait",
     declaredAt: decl.form.syntaxId,
     bindingIdentity: bindingIdentityForSyntax(decl.name),
-    metadata: { entity: "trait" },
+    metadata: {
+      entity: "trait",
+      ...(typeof intrinsicType === "string" ? { intrinsicType } : {}),
+      ...(compilerTraitContract ? { compilerTraitContract } : {}),
+    },
   });
 
   const traitScope = ctx.symbolTable.createScope({
@@ -103,6 +114,9 @@ export const bindTraitDecl = (
           tracker,
           traitScope,
           traitSymbol: symbol,
+          compilerTraitMethodRole: compilerTraitContract?.methods.find(
+            (entry) => entry.name === method.signature.name.value,
+          )?.role,
         }),
       );
     });
@@ -129,18 +143,92 @@ export const bindTraitDecl = (
   });
 };
 
+const resolveCompilerTraitContract = ({
+  decl,
+  ctx,
+}: {
+  decl: ParsedTraitDecl;
+  ctx: BindingContext;
+}): CompilerTraitContractSpec | undefined => {
+  const id = decl.compilerContract?.id;
+  if (!id) return undefined;
+
+  const spec = getCompilerTraitContractSpec(id);
+  if (!spec) {
+    throw new Error(
+      `unknown trait @compiler_contract id '${id}' on ${decl.name.value}`,
+    );
+  }
+  if (ctx.module.path.namespace !== spec.provider.namespace) {
+    throw new Error(
+      `@compiler_contract '${id}' on ${decl.name.value} is restricted to the std namespace`,
+    );
+  }
+  if (decl.typeParameters.length !== spec.expectedTypeParameters) {
+    throw new Error(
+      `@compiler_contract '${id}' on ${decl.name.value} expects ${spec.expectedTypeParameters} type parameter(s), but the trait declares ${decl.typeParameters.length}`,
+    );
+  }
+  if (decl.regions.length > 0 || decl.disjoint.length > 0) {
+    throw new Error(
+      `@compiler_contract '${id}' on ${decl.name.value} does not permit region declarations`,
+    );
+  }
+
+  const expectedMethods = new Map(
+    spec.methods.map((method) => [method.name, method]),
+  );
+  const seenMethods = new Set<string>();
+  if (decl.methods.length !== expectedMethods.size) {
+    throw new Error(
+      `@compiler_contract '${id}' on ${decl.name.value} expects exactly ${expectedMethods.size} method(s)`,
+    );
+  }
+  decl.methods.forEach((method) => {
+    const expected = expectedMethods.get(method.signature.name.value);
+    if (!expected) {
+      throw new Error(
+        `@compiler_contract '${id}' on ${decl.name.value} has unexpected method '${method.signature.name.value}'`,
+      );
+    }
+    if (seenMethods.has(expected.name)) {
+      throw new Error(
+        `@compiler_contract '${id}' on ${decl.name.value} declares duplicate method '${expected.name}'`,
+      );
+    }
+    seenMethods.add(expected.name);
+    if (method.signature.params.length !== expected.expectedArity) {
+      throw new Error(
+        `@compiler_contract '${id}' method '${expected.name}' expects ${expected.expectedArity} parameter(s), but declares ${method.signature.params.length}`,
+      );
+    }
+    if (
+      method.signature.params[0]?.name === "self" ||
+      method.signature.typeParameters.length > 0 ||
+      method.body
+    ) {
+      throw new Error(
+        `@compiler_contract '${id}' method '${expected.name}' must be a static, non-generic declaration without a default body`,
+      );
+    }
+  });
+  return spec;
+};
+
 const bindTraitMethod = ({
   decl,
   ctx,
   tracker,
   traitScope,
   traitSymbol,
+  compilerTraitMethodRole,
 }: {
   decl: ParsedTraitMethod;
   ctx: BindingContext;
   tracker: BinderScopeTracker;
   traitScope: ScopeId;
   traitSymbol: SymbolId;
+  compilerTraitMethodRole?: CompilerTraitMethodRole;
 }): TraitMethodDeclInput => {
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.body, ctx);
@@ -149,6 +237,7 @@ const bindTraitMethod = ({
   const methodMetadata: Record<string, unknown> = {
     entity: "trait-method",
     trait: traitSymbol,
+    ...(compilerTraitMethodRole ? { compilerTraitMethodRole } : {}),
   };
 
   if (intrinsicMetadata) {

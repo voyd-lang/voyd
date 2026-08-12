@@ -28,6 +28,7 @@ import {
   startCompilerPerfSession,
 } from "@voyd-lang/compiler/perf.js";
 import type { BoundaryExportsOption } from "@voyd-lang/compiler/codegen/context.js";
+import { requiresSelectedHostTransport } from "@voyd-lang/compiler/codegen/host-transport/requirements.js";
 import type { OptimizationLevel } from "@voyd-lang/compiler/optimization-policy.js";
 import type { CreateSdkOptions, TestCase } from "./types.js";
 import { diagnosticsFromUnknownError } from "./diagnostics.js";
@@ -94,6 +95,7 @@ export const compileWithLoader = async ({
   loadModuleGraph,
   testScope,
   boundaryExports,
+  effectsHostBoundary,
   externalDeclarations,
   cache,
   setupPhasesMs,
@@ -110,6 +112,7 @@ export const compileWithLoader = async ({
   loadModuleGraph: LoadModuleGraphFn;
   testScope?: TestScope;
   boundaryExports?: BoundaryExportsOption;
+  effectsHostBoundary?: "selected" | "off";
   externalDeclarations?: boolean;
   cache?: CompilerReuseCache;
   setupPhasesMs?: Readonly<Record<string, number>>;
@@ -145,6 +148,10 @@ export const compileWithLoader = async ({
         roots,
         host,
         includeTests: shouldIncludeTests,
+        includeSelectedHostTransport: requiresSelectedHostTransport({
+          effectsHostBoundary,
+          boundaryExports,
+        }),
       });
       perf.mark("loadModuleGraph", loadStartedAt);
     } catch (error) {
@@ -171,12 +178,14 @@ export const compileWithLoader = async ({
       ...optimizationCodegenOption,
       ...runtimeDiagnosticsCodegenOption,
       boundaryExports: boundaryExports ?? "auto",
+      effectsHostBoundary: effectsHostBoundary ?? "selected",
       externalDeclarations: externalDeclarations ?? false,
     } as const;
     const testCodegenOption = {
       ...optimizationCodegenOption,
       ...runtimeDiagnosticsCodegenOption,
       boundaryExports: false,
+      effectsHostBoundary: effectsHostBoundary ?? "selected",
       externalDeclarations: false,
     } as const;
 

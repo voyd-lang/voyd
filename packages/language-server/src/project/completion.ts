@@ -19,13 +19,11 @@ const MAX_COMPLETION_ITEMS = 200;
 const MAX_AUTO_IMPORT_ITEMS = 40;
 const AUTO_IMPORT_MIN_PREFIX_LENGTH = 2;
 const COMPILER_ATTRIBUTE_NAMES = [
-  "boundary",
   "compiler_contract",
   "effect",
   "external",
   "intrinsic",
   "intrinsic_type",
-  "serializer",
 ] as const;
 
 const isIdentifierCharacter = (value: string | undefined): boolean =>

@@ -1,7 +1,10 @@
 use std::array::{ Array, new_array_unchecked }
 use std::dict::Dict
+use std::optional::types::all
+use std::number::cast::to_i64
 use std::string::{ String, new_string }
 use std::test::assertions::all
+use std::data::{ CustomDto, CustomDtoError, DecodeLimits, EncodeLimits, IgnoreUnknownFields, RejectUnknownFields }
 
 obj DecodeProfile {
   age: i32,
@@ -10,7 +13,8 @@ obj DecodeProfile {
 
 obj DecodeStarted { id: i32 }
 obj DecodeStopped { reason: String }
-type DecodeEvent = DecodeStarted | DecodeStopped
+obj DecodeReady {}
+type DecodeEvent = DecodeStarted | DecodeStopped | DecodeReady
 
 obj DecodeRequest {
   version: i32,
@@ -24,6 +28,108 @@ obj VersionedName {
 }
 
 obj DecodeFloat { value: f32 }
+obj EncodeWideInteger { value: i64 }
+obj JsonPositiveId { value: i32 }
+obj JsonPositiveIdDto { value: i32 }
+obj JsonPositiveEnvelope { id: JsonPositiveId }
+
+impl CustomDto<JsonPositiveId, JsonPositiveIdDto> for JsonPositiveId
+  fn write(value: JsonPositiveId) -> JsonPositiveIdDto
+    JsonPositiveIdDto { value: value.value }
+
+  fn read(value: JsonPositiveIdDto) -> Result<JsonPositiveId, CustomDtoError>
+    if value.value > 0:
+      Ok<JsonPositiveId> { value: JsonPositiveId { value: value.value } }
+    else:
+      Err<CustomDtoError> {
+        error: CustomDtoError {
+          code: "json_positive_id.non_positive",
+          message: "positive id required"
+        }
+      }
+
+test "typed JSON encode preserves DTO field and variant structure":
+  let source = DecodeRequest {
+    version: 2,
+    profiles: [DecodeProfile { age: 11, nickname: "eleven" }],
+    event: DecodeStopped { reason: "done" }
+  }
+  match(encode(source))
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<String> { value: text }:
+      match(decode<DecodeRequest>(text))
+        Err<JsonDecodeError>:
+          assert(false, eq: true)
+        Ok<DecodeRequest> { value }:
+          assert(value.version, eq: 2)
+          match(value.profiles.at(0).nickname)
+            Some<String> { value: nickname }:
+              assert(nickname, eq: "eleven")
+            None:
+              assert(false, eq: true)
+          value.event.match(event)
+            DecodeStopped:
+              assert(event.reason, eq: "done")
+            else:
+              assert(false, eq: true)
+
+test "typed JSON encode enforces the exact i64 range":
+  let exact_max = exact_json_i64_max()
+  match(encode(EncodeWideInteger { value: exact_max }))
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<String>:
+      void
+
+  match(encode(EncodeWideInteger { value: exact_max + to_i64(1) }))
+    Ok<String>:
+      assert(false, eq: true)
+    Err<JsonError> { error }:
+      assert(error.code, eq: 2)
+
+test "typed JSON codecs enforce explicit resource limits":
+  let encode_limits = EncodeLimits {
+    max_depth: 8,
+    max_bytes: 1024,
+    max_collection_length: 1
+  }
+  match(encode_with_limits([1, 2], limits: encode_limits))
+    Ok<String>:
+      assert(false, eq: true)
+    Err<JsonError>:
+      void
+
+  let options = JsonDecodeOptions {
+    unknown_fields: RejectUnknownFields {},
+    limits: DecodeLimits {
+      max_depth: 8,
+      max_bytes: 1024,
+      max_collection_length: 1
+    }
+  }
+  match(decode<Array<i32>>("[1,2]", options: options))
+    Ok<Array<i32>>:
+      assert(false, eq: true)
+    Err<JsonDecodeError>:
+      void
+
+  let skip_options = JsonDecodeOptions {
+    unknown_fields: IgnoreUnknownFields {},
+    limits: DecodeLimits {
+      max_depth: 1,
+      max_bytes: 1024,
+      max_collection_length: 8
+    }
+  }
+  match(decode<VersionedName>(
+    "{\"version\":1,\"name\":\"orbit\",\"extra\":[[0]]}",
+    options: skip_options
+  ))
+    Ok<VersionedName>:
+      Test::fail()
+    Err<JsonDecodeError>:
+      void
 
 test "typed JSON decode composes nested arrays optional fields and enum payloads":
   let source = "{\"version\":1,\"profiles\":[{\"age\":7},{\"age\":9,\"nickname\":\"nine\"}],\"event\":{\"$variant\":\"DecodeStarted\",\"id\":42}}"
@@ -53,7 +159,7 @@ test "typed JSON decode reports precise nested paths and strict unknown fields":
         else:
           assert(false, eq: true)
 
-  let unknown = "{\"version\":1,\"name\":\"orbit\",\"extra\":true}"
+  let unknown = "{\"version\":1,\"name\":\"orbit\",\"extra\":{\"nested\":[1,true,null]}}"
   match(decode<VersionedName>(unknown))
     Ok<VersionedName>:
       assert(false, eq: true)
@@ -65,6 +171,91 @@ test "typed JSON decode reports precise nested paths and strict unknown fields":
       assert(false, eq: true)
     Ok<VersionedName> { value }:
       assert(value.name, eq: "orbit")
+
+test "typed JSON decoding preserves nested CustomDto errors":
+  match(decode<JsonPositiveEnvelope>("{\"id\":{\"value\":0}}"))
+    Ok<JsonPositiveEnvelope>:
+      Test::fail()
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.id")
+      error.kind.match(kind)
+        JsonCustomDtoFailure:
+          assert(kind.code, eq: "json_positive_id.non_positive")
+        else:
+          Test::fail()
+
+test "typed JSON decode accepts scalar variants through the direct reader":
+  let source = "{\"version\":1,\"profiles\":[],\"event\":\"DecodeReady\"}"
+  match(decode<DecodeRequest>(source))
+    Err<JsonDecodeError>:
+      assert(false, eq: true)
+    Ok<DecodeRequest> { value }:
+      value.event.match(event)
+        DecodeReady:
+          void
+        else:
+          assert(false, eq: true)
+
+test "JsonReader pulls balanced arrays and records":
+  let ~reader = JsonReader::init("[7,{\"name\":\"voyd\"}]")
+  match(reader.begin_array())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<i32> { value: length }:
+      assert(length, eq: 2)
+  match(reader.read_i32())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<i32> { value }:
+      assert(value, eq: 7)
+  match(reader.kind())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<DataKind> { value }:
+      value.match(kind)
+        RecordKind:
+          void
+        else:
+          assert(false, eq: true)
+  match(reader.begin_record())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<Unit>:
+      void
+  match(reader.next_field())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<Option<String>> { value }:
+      value.match(field)
+        None:
+          assert(false, eq: true)
+        Some<String>:
+          assert(field.value, eq: "name")
+  match(reader.read_string())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<String> { value }:
+      assert(value, eq: "voyd")
+  match(reader.next_field())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<Option<String>> { value }:
+      value.match(field)
+        None:
+          void
+        Some<String>:
+          assert(false, eq: true)
+  match(reader.end_record())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<Unit>:
+      void
+  match(reader.end_array())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<Unit>:
+      void
+  assert(reader.is_complete(), eq: true)
 
 test "version dispatch requires explicit migration to the current version":
   match(decode_versioned<VersionedName>(

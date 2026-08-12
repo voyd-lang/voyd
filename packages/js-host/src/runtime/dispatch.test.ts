@@ -1,14 +1,14 @@
-import { decode, encode } from "@msgpack/msgpack";
 import { describe, expect, it } from "vitest";
 import type { EffectOpRequest } from "../effect-op.js";
 import type { ParsedEffectOp, ParsedEffectTable } from "../protocol/table.js";
 import type { EffectHandler } from "../protocol/types.js";
 import { continueEffectLoopStep, runEffectLoop } from "./dispatch.js";
 import { EFFECT_RESULT_STATUS, RESUME_KIND } from "./constants.js";
+import { msgPackHostTransport } from "../transports/msgpack.js";
 
-const MSGPACK_OPTS = { useBigInt64: true } as const;
 const BUFFER_PTR = 0;
 const BUFFER_SIZE = 1024;
+const COMPLETION = { kind: "export", id: 1 } as const;
 
 type FakeResult = {
   status: number;
@@ -99,8 +99,33 @@ const createRuntimeDriver = ({
   const memory = new WebAssembly.Memory({ initial: 1 });
   let resumeCalls = 0;
 
-  const writePayload = (payload: unknown): number => {
-    const encoded = encode(payload, MSGPACK_OPTS) as Uint8Array;
+  const writePayload = (result: FakeResult): number => {
+    let encoded: Uint8Array;
+    if (result.status === EFFECT_RESULT_STATUS.effect) {
+      const request = result.payload as EffectOpRequest;
+      encoded = msgPackHostTransport.encodeFrame({
+        kind: "effect-request",
+        requestId: 0,
+        effectId: "com.example.async",
+        operationId: 7,
+        signatureHash: 0x1234abcd,
+        resumeKind: request.resumeKind,
+        args: (request.args ?? []).map((value, index) => ({
+          fingerprint: `test:arg${index}`,
+          value,
+        })),
+        resultFingerprint: "test:result",
+      });
+    } else {
+      encoded = msgPackHostTransport.encodeFrame({
+        kind: "export-completion",
+        exportId: COMPLETION.id,
+        outcome: {
+          kind: "success",
+          value: { fingerprint: "test:completion", value: result.payload },
+        },
+      });
+    }
     new Uint8Array(memory.buffer, BUFFER_PTR, encoded.length).set(encoded);
     return encoded.length;
   };
@@ -114,11 +139,19 @@ const createRuntimeDriver = ({
       }
       return result.cont;
     },
-    effectLen: (result: FakeResult): number => writePayload(result.payload),
-    resumeEffectful: (cont: symbol, ptr: number, length: number): FakeResult => {
+    effectLen: (result: FakeResult): number => writePayload(result),
+    resumeEffectful: (
+      cont: symbol,
+      ptr: number,
+      length: number,
+    ): FakeResult => {
       resumeCalls += 1;
       const bytes = new Uint8Array(memory.buffer, ptr, length);
-      const decoded = decode(bytes, MSGPACK_OPTS);
+      const frame = msgPackHostTransport.decodeFrame(bytes);
+      if (frame.kind !== "effect-outcome" || frame.outcome.kind !== "success") {
+        throw new Error("invalid effect outcome frame");
+      }
+      const decoded = frame.outcome.value.value;
       const resume = continuations.get(cont);
       if (!resume) {
         throw new Error("unknown continuation");
@@ -126,7 +159,7 @@ const createRuntimeDriver = ({
       continuations.delete(cont);
       return resume(decoded);
     },
-    msgpackMemory: memory,
+    transportMemory: memory,
     resumeCalls: (): number => resumeCalls,
   };
 };
@@ -141,7 +174,10 @@ describe("runEffectLoop", () => {
 
     const runtime = createRuntimeDriver({
       entryResult: effectResult({
-        request: createEffectRequest({ args: [1], resumeKind: RESUME_KIND.resume }),
+        request: createEffectRequest({
+          args: [1],
+          resumeKind: RESUME_KIND.resume,
+        }),
         cont: contA,
       }),
       continuations: new Map([
@@ -184,9 +220,11 @@ describe("runEffectLoop", () => {
       resumeEffectful: runtime.resumeEffectful,
       table,
       handlersByOpIndex: [handler],
-      msgpackMemory: runtime.msgpackMemory,
+      transportMemory: runtime.transportMemory,
       bufferPtr: BUFFER_PTR,
       bufferSize: BUFFER_SIZE,
+      transport: msgPackHostTransport,
+      completion: COMPLETION,
     });
 
     expect(output).toBe(40);
@@ -206,7 +244,10 @@ describe("runEffectLoop", () => {
     const cont = Symbol("cont");
     const runtime = createRuntimeDriver({
       entryResult: effectResult({
-        request: createEffectRequest({ args: [5], resumeKind: RESUME_KIND.resume }),
+        request: createEffectRequest({
+          args: [5],
+          resumeKind: RESUME_KIND.resume,
+        }),
         cont,
       }),
       continuations: new Map([
@@ -227,9 +268,11 @@ describe("runEffectLoop", () => {
       resumeEffectful: runtime.resumeEffectful,
       table,
       handlersByOpIndex: [({ end }) => end(99)],
-      msgpackMemory: runtime.msgpackMemory,
+      transportMemory: runtime.transportMemory,
       bufferPtr: BUFFER_PTR,
       bufferSize: BUFFER_SIZE,
+      transport: msgPackHostTransport,
+      completion: COMPLETION,
     });
 
     expect(output).toBe(99);
@@ -241,7 +284,10 @@ describe("runEffectLoop", () => {
     const table = createParsedTable({ op });
     const runtime = createRuntimeDriver({
       entryResult: effectResult({
-        request: createEffectRequest({ args: [1], resumeKind: RESUME_KIND.resume }),
+        request: createEffectRequest({
+          args: [1],
+          resumeKind: RESUME_KIND.resume,
+        }),
         cont: Symbol("cont"),
       }),
       continuations: new Map(),
@@ -256,10 +302,12 @@ describe("runEffectLoop", () => {
         resumeEffectful: runtime.resumeEffectful,
         table,
         handlersByOpIndex: [],
-        msgpackMemory: runtime.msgpackMemory,
+        transportMemory: runtime.transportMemory,
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
-      })
+        transport: msgPackHostTransport,
+        completion: COMPLETION,
+      }),
     ).rejects.toThrow(/Unhandled effect/i);
   });
 
@@ -268,7 +316,10 @@ describe("runEffectLoop", () => {
     const table = createParsedTable({ op });
     const runtime = createRuntimeDriver({
       entryResult: effectResult({
-        request: createEffectRequest({ args: [1], resumeKind: RESUME_KIND.resume }),
+        request: createEffectRequest({
+          args: [1],
+          resumeKind: RESUME_KIND.resume,
+        }),
         cont: Symbol("cont"),
       }),
       continuations: new Map(),
@@ -287,10 +338,12 @@ describe("runEffectLoop", () => {
             throw new Error("boom");
           },
         ],
-        msgpackMemory: runtime.msgpackMemory,
+        transportMemory: runtime.transportMemory,
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
-      })
+        transport: msgPackHostTransport,
+        completion: COMPLETION,
+      }),
     ).rejects.toThrow("boom");
   });
 
@@ -299,7 +352,10 @@ describe("runEffectLoop", () => {
     const table = createParsedTable({ op });
     const runtime = createRuntimeDriver({
       entryResult: effectResult({
-        request: createEffectRequest({ args: [1], resumeKind: RESUME_KIND.resume }),
+        request: createEffectRequest({
+          args: [1],
+          resumeKind: RESUME_KIND.resume,
+        }),
         cont: Symbol("cont"),
       }),
       continuations: new Map(),
@@ -314,10 +370,12 @@ describe("runEffectLoop", () => {
         resumeEffectful: runtime.resumeEffectful,
         table,
         handlersByOpIndex: [({ resume }) => resume(1)],
-        msgpackMemory: runtime.msgpackMemory,
+        transportMemory: runtime.transportMemory,
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
-      })
+        transport: msgPackHostTransport,
+        completion: COMPLETION,
+      }),
     ).rejects.toThrow(/payload encoding failed/i);
   });
 
@@ -326,7 +384,10 @@ describe("runEffectLoop", () => {
     const resumeTable = createParsedTable({ op: resumeOp });
     const resumeRuntime = createRuntimeDriver({
       entryResult: effectResult({
-        request: createEffectRequest({ args: [1], resumeKind: RESUME_KIND.resume }),
+        request: createEffectRequest({
+          args: [1],
+          resumeKind: RESUME_KIND.resume,
+        }),
         cont: Symbol("resume-cont"),
       }),
       continuations: new Map(),
@@ -341,10 +402,12 @@ describe("runEffectLoop", () => {
         resumeEffectful: resumeRuntime.resumeEffectful,
         table: resumeTable,
         handlersByOpIndex: [({ tail }) => tail(2)],
-        msgpackMemory: resumeRuntime.msgpackMemory,
+        transportMemory: resumeRuntime.transportMemory,
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
-      })
+        transport: msgPackHostTransport,
+        completion: COMPLETION,
+      }),
     ).rejects.toThrow(/cannot return tail/i);
     expect(resumeRuntime.resumeCalls()).toBe(0);
 
@@ -352,7 +415,10 @@ describe("runEffectLoop", () => {
     const tailTable = createParsedTable({ op: tailOp });
     const tailRuntime = createRuntimeDriver({
       entryResult: effectResult({
-        request: createEffectRequest({ args: [1], resumeKind: RESUME_KIND.tail }),
+        request: createEffectRequest({
+          args: [1],
+          resumeKind: RESUME_KIND.tail,
+        }),
         cont: Symbol("tail-cont"),
       }),
       continuations: new Map(),
@@ -367,10 +433,12 @@ describe("runEffectLoop", () => {
         resumeEffectful: tailRuntime.resumeEffectful,
         table: tailTable,
         handlersByOpIndex: [({ resume }) => resume(2)],
-        msgpackMemory: tailRuntime.msgpackMemory,
+        transportMemory: tailRuntime.transportMemory,
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
-      })
+        transport: msgPackHostTransport,
+        completion: COMPLETION,
+      }),
     ).rejects.toThrow(/must return tail/i);
     expect(tailRuntime.resumeCalls()).toBe(0);
   });
@@ -380,7 +448,10 @@ describe("runEffectLoop", () => {
     const table = createParsedTable({ op });
     const runtime = createRuntimeDriver({
       entryResult: effectResult({
-        request: createEffectRequest({ args: [1], resumeKind: RESUME_KIND.resume }),
+        request: createEffectRequest({
+          args: [1],
+          resumeKind: RESUME_KIND.resume,
+        }),
         cont: Symbol("cancelled-cont"),
       }),
       continuations: new Map(),
@@ -401,9 +472,11 @@ describe("runEffectLoop", () => {
             expect(arg).toBe(1);
           }),
       ],
-      msgpackMemory: runtime.msgpackMemory,
+      transportMemory: runtime.transportMemory,
       bufferPtr: BUFFER_PTR,
       bufferSize: BUFFER_SIZE,
+      transport: msgPackHostTransport,
+      completion: COMPLETION,
       shouldContinue: () => false,
     });
 

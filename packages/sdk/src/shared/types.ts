@@ -11,6 +11,7 @@ import type {
   EffectHandler,
   ExportAbiEntry,
   HostProtocolTable,
+  HostTransportAdapter,
   SignatureHash,
   VoydRuntimeDiagnostics,
   VoydRuntimeError,
@@ -26,6 +27,7 @@ export type {
   EffectHandler,
   ExportAbiEntry,
   HostProtocolTable,
+  HostTransportAdapter,
   ModuleRoots,
   OptimizationLevel,
   ParsedExternalRequirements,
@@ -59,6 +61,8 @@ export type CompileOptions = {
   /** @deprecated Use `optimizationLevel`. true maps to `release`; false maps to `none`. */
   optimize?: boolean;
   boundaryExports?: BoundaryExportsOption;
+  /** @internal Select host framing for effect operations. */
+  effectsHostBoundary?: "selected" | "off";
   /** @internal Include external declarations for adapter binding generation. */
   externalDeclarations?: boolean;
   /**
@@ -158,6 +162,7 @@ export type RunOptions = {
   bufferSize?: number;
   defaultAdapters?: boolean | DefaultAdapterOptions;
   adapters?: readonly VoydPackageAdapter[];
+  transportAdapters?: readonly HostTransportAdapter[];
 };
 
 export type TestCollection = {

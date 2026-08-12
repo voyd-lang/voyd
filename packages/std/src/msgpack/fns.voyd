@@ -2,18 +2,54 @@
 //! This module owns the in-memory codec and value constructors/unpackers.
 
 use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
 use std::fixed_array::fns::{ new_fixed_array }
 use std::dict::{ Dict, DictKey }
+use std::data::{
+  ArrayKind,
+  BoolKind,
+  BytesKind,
+  DataKind,
+  DataArray,
+  DataBool,
+  DataBytes,
+  DataF32,
+  DataF64,
+  DataField,
+  DataI32,
+  DataI64,
+  DataNull,
+  DataObject,
+  DataReader,
+  DataString,
+  DataValue,
+  DataVariant,
+  DataWriter,
+  DecodeLimits,
+  EncodeLimits,
+  F32Kind,
+  F64Kind,
+  HostTransportProvider,
+  I32Kind,
+  I64Kind,
+  NullKind,
+  RecordKind,
+  StringKind,
+  default_decode_limits,
+  default_encode_limits
+}
 use std::error::panic
+use std::meta::{ RecordShape, ShapeField, ShapeVariant, UnionShape }
 use std::memory::self as memory
-use std::msgpack::errors::{ MsgPackError, error_code_buffer_too_small, error_code_decode_failed, error_code_trailing_bytes, error_code_type_mismatch, make_error }
+use std::msgpack::errors::{ MsgPackError, error_code_buffer_too_small, error_code_decode_failed, error_code_trailing_bytes, error_code_type_mismatch, make_custom_error, make_error }
 use std::msgpack::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ new_string, String, StringSlice }
 
-@serializer("msgpack", encode_value_raw, decode_value_raw)
+obj MsgPackHostTransport {}
+
 /// Recursive MessagePack value union used by the serializer boundary.
 pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | MsgPackMap
 
@@ -22,19 +58,860 @@ pub obj MsgPackMap {
   entries: Array<(String, MsgPack)>
 }
 
-obj Encoder {
+obj MemoryEncoderSink {
   ptr: i32,
+  len: i32
+}
+
+obj BytesEncoderSink {}
+
+type EncoderSink = MemoryEncoderSink | BytesEncoderSink
+
+obj Encoder {
+  sink: EncoderSink,
+  buffer: ByteBuffer,
   pos: i32,
-  len: i32,
   ok: bool
 }
 
-obj Decoder {
+/// Direct MessagePack sink used by compiler-generated DTO traversal.
+pub obj MsgPackWriter {
+  encoder: Encoder,
+  container_kinds: Array<i32>,
+  remaining_values: Array<i32>,
+  pending_fields: Array<i32>,
+  root_count: i32,
+  failed: bool,
+  limits: EncodeLimits
+}
+
+/// Direct MessagePack source used by compiler-generated DTO traversal.
+pub obj MsgPackReader {
+  decoder: Decoder,
+  container_kinds: Array<i32>,
+  remaining_values: Array<i32>,
+  root_consumed: bool,
+  failed: bool,
+  limits: DecodeLimits,
+  path: String,
+  parents: Array<String>
+}
+
+impl MsgPackReader
+  /// Creates a reader over one immutable MessagePack byte buffer.
+  pub fn init(bytes: Bytes) -> MsgPackReader
+    MsgPackReader::init(bytes, limits: default_decode_limits())
+
+  /// Creates a reader with explicit resource limits.
+  pub fn init(bytes: Bytes, { limits: DecodeLimits }) -> MsgPackReader
+    MsgPackReader {
+      decoder: bytes_decoder(bytes),
+      container_kinds: Array<i32>::init(),
+      remaining_values: Array<i32>::init(),
+      root_consumed: false,
+      failed: invalid_decode_limits(limits, bytes.len()),
+      limits: limits,
+      path: "$".to_string(),
+      parents: Array<String>::init()
+    }
+
+  /// Returns true after one balanced root and every source byte are consumed.
+  api fn is_complete(self) -> bool
+    self.failed == false
+      and self.decoder.ok
+      and self.root_consumed
+      and self.container_kinds.is_empty()
+      and self.decoder.at_end()
+
+  fn fail<T>(~self, message: String) -> Result<T, MsgPackError>
+    self.failed = true
+    msgpack_reader_failure<T>(message)
+
+  fn consume_value(~self) -> Result<Unit, MsgPackError>
+    if self.failed or self.decoder.ok == false:
+      return self.fail<Unit>("msgpack reader session has failed")
+    if self.container_kinds.is_empty():
+      if self.root_consumed:
+        return self.fail<Unit>("msgpack reader has no remaining root value")
+      self.root_consumed = true
+      return msgpack_reader_success()
+    let index = self.remaining_values.len() - 1
+    let remaining = self.remaining_values.at(index)
+    if remaining <= 0:
+      return self.fail<Unit>("msgpack reader container has no remaining values")
+    self.remaining_values.replace(index, with: remaining - 1)
+    msgpack_reader_success()
+
+  fn begin_container(~self, { kind: i32 }) -> Result<i32, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        let length = if kind == 0
+          then: self.decoder.read_array_length()
+          else: self.decoder.read_map_length()
+        if length < 0 or self.decoder.ok == false:
+          return self.fail<i32>("msgpack reader expected a container")
+        if length > self.limits.max_collection_length:
+          return self.fail<i32>("msgpack reader collection exceeds configured limit")
+        if self.container_kinds.len() >= self.limits.max_depth:
+          return self.fail<i32>("msgpack reader nesting exceeds configured limit")
+        self.container_kinds.push(kind)
+        self.remaining_values.push(length)
+        Ok<i32> { value: length }
+
+  fn end_container(~self, { kind: i32 }) -> Result<Unit, MsgPackError>
+    if self.container_kinds.is_empty():
+      return self.fail<Unit>("msgpack reader has no container to close")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) != kind:
+      return self.fail<Unit>("msgpack reader closed a different container")
+    if self.remaining_values.at(index) != 0:
+      return self.fail<Unit>("msgpack reader container has unread values")
+    self.container_kinds.pop()
+    self.remaining_values.pop()
+    msgpack_reader_success()
+
+impl MsgPackWriter
+  /// Creates an empty immutable-byte writer.
+  pub fn init() -> MsgPackWriter
+    MsgPackWriter::init(limits: default_encode_limits())
+
+  /// Creates a writer with explicit resource limits.
+  pub fn init({ limits: EncodeLimits }) -> MsgPackWriter
+    MsgPackWriter {
+      encoder: byte_encoder(),
+      container_kinds: Array<i32>::init(),
+      remaining_values: Array<i32>::init(),
+      pending_fields: Array<i32>::init(),
+      root_count: 0,
+      failed: invalid_encode_limits(limits),
+      limits: limits
+    }
+
+  /// Finishes exactly one balanced DTO value.
+  api fn finish(self) -> Result<Bytes, MsgPackError>
+    if self.failed or self.encoder.ok == false:
+      return msgpack_writer_failure<Bytes>("msgpack writer session has failed")
+    if self.container_kinds.is_empty() == false:
+      return msgpack_writer_failure<Bytes>("msgpack writer has unclosed containers")
+    if self.root_count != 1:
+      return msgpack_writer_failure<Bytes>("msgpack writer expected one root value")
+    let bytes = self.encoder.encoded_bytes()
+    if bytes.len() > self.limits.max_bytes:
+      return msgpack_writer_failure<Bytes>("msgpack writer output exceeds configured byte limit")
+    Ok<Bytes> { value: bytes }
+
+  fn fail(~self, message: String) -> Result<Unit, MsgPackError>
+    self.failed = true
+    msgpack_writer_failure<Unit>(message)
+
+  fn consume_value(~self) -> Result<Unit, MsgPackError>
+    if self.failed:
+      return msgpack_writer_failure<Unit>("msgpack writer session has failed")
+    if self.container_kinds.is_empty():
+      if self.root_count != 0:
+        return self.fail("msgpack writer received more than one root value")
+      self.root_count = 1
+      return msgpack_writer_success()
+
+    let index = self.container_kinds.len() - 1
+    let remaining = self.remaining_values.at(index)
+    if remaining <= 0:
+      return self.fail("msgpack writer container received too many values")
+    if self.container_kinds.at(index) != 0 and self.pending_fields.at(index) == 0:
+      return self.fail("msgpack writer field is missing its descriptor")
+    self.remaining_values.replace(index, with: remaining - 1)
+    self.pending_fields.replace(index, with: 0)
+    msgpack_writer_success()
+
+  fn begin_container(
+    ~self,
+    { kind: i32, length: i32 }
+  ) -> Result<Unit, MsgPackError>
+    if length < 0:
+      return self.fail("msgpack writer container length cannot be negative")
+    if length > self.limits.max_collection_length:
+      return self.fail("msgpack writer collection exceeds configured limit")
+    if self.container_kinds.len() >= self.limits.max_depth:
+      return self.fail("msgpack writer nesting exceeds configured limit")
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        if kind == 0:
+          self.encoder.encode_array_header(length)
+        else:
+          self.encoder.encode_map_header(length)
+        self.container_kinds.push(kind)
+        self.remaining_values.push(length)
+        self.pending_fields.push(0)
+        msgpack_writer_success()
+
+  fn end_container(~self, { kind: i32 }) -> Result<Unit, MsgPackError>
+    if self.container_kinds.is_empty():
+      return self.fail("msgpack writer has no container to close")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) != kind:
+      return self.fail("msgpack writer closed a different container")
+    if self.remaining_values.at(index) != 0 or self.pending_fields.at(index) != 0:
+      return self.fail("msgpack writer container is incomplete")
+    self.container_kinds.pop()
+    self.remaining_values.pop()
+    self.pending_fields.pop()
+    msgpack_writer_success()
+
+  fn write_dynamic_field(~self, name: String) -> Result<Unit, MsgPackError>
+    if self.container_kinds.is_empty():
+      return self.fail("msgpack writer field is outside a record or variant")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) == 0 or self.pending_fields.at(index) != 0:
+      return self.fail("msgpack writer field is not ready")
+    self.encoder.encode_string(name)
+    self.pending_fields.replace(index, with: 1)
+    msgpack_writer_success()
+
+impl DataWriter<MsgPackError> for MsgPackWriter
+  fn reject(~self, message: String) -> Result<Unit, MsgPackError>
+    self.fail(message)
+
+  fn write_null(~self) -> Result<Unit, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        self.encoder.write_u8(192)
+        msgpack_writer_success()
+
+  fn write_bool(~self, value: bool) -> Result<Unit, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        self.encoder.write_u8(if value then: 195 else: 194)
+        msgpack_writer_success()
+
+  fn write_i32(~self, value: i32) -> Result<Unit, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        self.encoder.encode_i32(value)
+        msgpack_writer_success()
+
+  fn write_i64(~self, value: i64) -> Result<Unit, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        self.encoder.encode_i64(value)
+        msgpack_writer_success()
+
+  fn write_f32(~self, value: f32) -> Result<Unit, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        self.encoder.encode_f32(value)
+        msgpack_writer_success()
+
+  fn write_f64(~self, value: f64) -> Result<Unit, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        self.encoder.encode_f64(value)
+        msgpack_writer_success()
+
+  fn write_string(~self, value: String) -> Result<Unit, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        self.encoder.encode_string(value)
+        msgpack_writer_success()
+
+  fn write_bytes(~self, value: Bytes) -> Result<Unit, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        self.encoder.encode_bytes(value)
+        msgpack_writer_success()
+
+  fn begin_array(~self, { length: i32 }) -> Result<Unit, MsgPackError>
+    self.begin_container(kind: 0, length: length)
+
+  fn end_array(~self) -> Result<Unit, MsgPackError>
+    self.end_container(kind: 0)
+
+  fn begin_record(
+    ~self,
+    { name: String, field_count: i32 }
+  ) -> Result<Unit, MsgPackError>
+    self.begin_container(kind: 1, length: field_count)
+
+  fn write_field(~self, name: String) -> Result<Unit, MsgPackError>
+    if self.container_kinds.is_empty():
+      return self.fail("msgpack writer field is outside a record or variant")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) == 0:
+      return self.fail("msgpack writer field is outside a record or variant")
+    if self.pending_fields.at(index) != 0:
+      return self.fail("msgpack writer field is missing its value")
+    self.encoder.encode_string(name)
+    self.pending_fields.replace(index, with: 1)
+    msgpack_writer_success()
+
+  fn end_record(~self) -> Result<Unit, MsgPackError>
+    self.end_container(kind: 1)
+
+  fn begin_variant(
+    ~self,
+    { union: String, variant: String, field_count: i32 }
+  ) -> Result<Unit, MsgPackError>
+    match(self.begin_container(kind: 2, length: field_count + 1))
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        let index = self.container_kinds.len() - 1
+        self.encoder.encode_string("$variant")
+        self.encoder.encode_string(variant)
+        self.remaining_values.replace(
+          index,
+          with: self.remaining_values.at(index) - 1
+        )
+        msgpack_writer_success()
+
+  fn end_variant(~self) -> Result<Unit, MsgPackError>
+    self.end_container(kind: 2)
+
+fn invalid_encode_limits(limits: EncodeLimits) -> bool
+  limits.max_depth < 0
+    or limits.max_bytes < 0
+    or limits.max_collection_length < 0
+
+fn invalid_decode_limits(limits: DecodeLimits, bytes: i32) -> bool
+  bytes > limits.max_bytes
+    or limits.max_depth < 0
+    or limits.max_collection_length < 0
+
+impl DataReader<MsgPackError> for MsgPackReader
+  fn reject(~self, message: String) -> Result<Unit, MsgPackError>
+    self.fail<Unit>(message)
+
+  fn reject_custom(
+    ~self,
+    code: String,
+    message: String
+  ) -> Result<Unit, MsgPackError>
+    self.failed = true
+    Err<MsgPackError> {
+      error: make_custom_error(code, self.path, message)
+    }
+
+  fn current_path(self) -> String
+    self.path
+
+  fn matches_name(self, actual: String, expected: String) -> bool
+    actual == expected
+
+  fn enter_field(~self, name: String) -> void
+    self.parents.push(self.path)
+    self.path = self.path.concat(".").concat(name)
+
+  fn enter_index(~self, index: i32) -> void
+    self.parents.push(self.path)
+    self.path = self.path.concat("[").concat(cast::to_string(index)).concat("]")
+
+  fn leave(~self) -> void
+    if self.parents.is_empty() == false:
+      let index = self.parents.len() - 1
+      self.path = self.parents.at(index)
+      self.parents.pop()
+
+  fn kind(self) -> Result<DataKind, MsgPackError>
+    let prefix = self.decoder.peek_u8()
+    if self.decoder.ok == false or prefix < 0:
+      return msgpack_reader_failure<DataKind>("msgpack reader has no current value")
+    if prefix == 192:
+      return Ok<DataKind> { value: NullKind {} }
+    if prefix == 194 or prefix == 195:
+      return Ok<DataKind> { value: BoolKind {} }
+    if prefix == 202:
+      return Ok<DataKind> { value: F32Kind {} }
+    if prefix == 203:
+      return Ok<DataKind> { value: F64Kind {} }
+    if prefix == 207 or prefix == 211:
+      return Ok<DataKind> { value: I64Kind {} }
+    if self.decoder.is_integer_prefix(prefix):
+      return Ok<DataKind> { value: I32Kind {} }
+    if self.decoder.is_string_prefix(prefix):
+      return Ok<DataKind> { value: StringKind {} }
+    if self.decoder.is_binary_prefix(prefix):
+      return Ok<DataKind> { value: BytesKind {} }
+    if self.decoder.is_array_prefix(prefix):
+      return Ok<DataKind> { value: ArrayKind {} }
+    if self.decoder.is_map_prefix(prefix):
+      return Ok<DataKind> { value: RecordKind {} }
+    msgpack_reader_failure<DataKind>("msgpack reader found an unsupported value")
+
+  fn read_null(~self) -> Result<Unit, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        if self.decoder.read_u8() != 192:
+          return self.fail<Unit>("msgpack reader expected null")
+        msgpack_reader_success()
+
+  fn read_bool(~self) -> Result<bool, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        let prefix = self.decoder.read_u8()
+        if prefix == 194:
+          return Ok<bool> { value: false }
+        if prefix == 195:
+          return Ok<bool> { value: true }
+        self.fail<bool>("msgpack reader expected bool")
+
+  fn read_i32(~self) -> Result<i32, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        match(self.decoder.read_i32_value())
+          None:
+            self.fail<i32>("msgpack reader expected i32")
+          Some<i32> { value }:
+            Ok<i32> { value }
+
+  fn read_i64(~self) -> Result<i64, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        match(self.decoder.read_i64_value())
+          None:
+            self.fail<i64>("msgpack reader expected i64")
+          Some<i64> { value }:
+            Ok<i64> { value }
+
+  fn read_f32(~self) -> Result<f32, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        let prefix = self.decoder.peek_u8()
+        if prefix == 202:
+          self.decoder.read_u8()
+          return Ok<f32> { value: cast::reinterpret_f32(self.decoder.read_u32()) }
+        if prefix == 203:
+          self.decoder.read_u8()
+          return Ok<f32> {
+            value: cast::to_f32(cast::reinterpret_f64(self.decoder.read_u64()))
+          }
+        if self.decoder.is_integer_prefix(prefix):
+          match(self.decoder.read_i64_value())
+            Some<i64> { value }:
+              return Ok<f32> { value: cast::to_f32(value) }
+            None:
+              return self.fail<f32>("msgpack reader expected f32")
+        self.fail<f32>("msgpack reader expected f32")
+
+  fn read_f64(~self) -> Result<f64, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        let prefix = self.decoder.peek_u8()
+        if prefix == 203:
+          self.decoder.read_u8()
+          return Ok<f64> { value: cast::reinterpret_f64(self.decoder.read_u64()) }
+        if prefix == 202:
+          self.decoder.read_u8()
+          return Ok<f64> {
+            value: cast::to_f64(cast::reinterpret_f32(self.decoder.read_u32()))
+          }
+        if self.decoder.is_integer_prefix(prefix):
+          match(self.decoder.read_i64_value())
+            Some<i64> { value }:
+              return Ok<f64> { value: cast::to_f64(value) }
+            None:
+              return self.fail<f64>("msgpack reader expected f64")
+        self.fail<f64>("msgpack reader expected f64")
+
+  fn read_string(~self) -> Result<String, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        match(self.decoder.read_string_value())
+          None:
+            self.fail<String>("msgpack reader expected string")
+          Some<String> { value }:
+            Ok<String> { value }
+
+  fn read_bytes(~self) -> Result<Bytes, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        match(self.decoder.read_bytes_value())
+          None:
+            self.fail<Bytes>("msgpack reader expected bytes")
+          Some<Bytes> { value }:
+            Ok<Bytes> { value }
+
+  fn begin_array(~self) -> Result<i32, MsgPackError>
+    self.begin_container(kind: 0)
+
+  fn has_next_element(self) -> Result<bool, MsgPackError>
+    if self.container_kinds.is_empty():
+      return msgpack_reader_failure<bool>("msgpack reader is outside an array")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) != 0:
+      return msgpack_reader_failure<bool>("msgpack reader is outside an array")
+    Ok<bool> { value: self.remaining_values.at(index) > 0 }
+
+  fn end_array(~self) -> Result<Unit, MsgPackError>
+    self.end_container(kind: 0)
+
+  fn begin_record(~self) -> Result<Unit, MsgPackError>
+    match(self.begin_container(kind: 1))
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<i32>:
+        msgpack_reader_success()
+
+  fn next_field(~self) -> Result<Option<String>, MsgPackError>
+    if self.container_kinds.is_empty():
+      return self.fail<Option<String>>("msgpack reader is outside a record")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) == 0:
+      return self.fail<Option<String>>("msgpack reader is outside a record")
+    if self.remaining_values.at(index) <= 0:
+      return Ok<Option<String>> { value: None {} }
+    match(self.decoder.read_string_value())
+      None:
+        self.fail<Option<String>>("msgpack reader expected a string field name")
+      Some<String> { value }:
+        Ok<Option<String>> { value: Some<String> { value } }
+
+  fn skip_value(~self) -> Result<Unit, MsgPackError>
+    match(self.consume_value())
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<Unit>:
+        self.decoder.skip_any(
+          depth: self.container_kinds.len(),
+          limits: self.limits
+        )
+        if self.decoder.ok:
+          return msgpack_reader_success()
+        self.fail<Unit>("msgpack reader could not skip the value")
+
+  fn end_record(~self) -> Result<Unit, MsgPackError>
+    self.end_container(kind: 1)
+
+  fn begin_variant(~self) -> Result<String, MsgPackError>
+    match(self.begin_container(kind: 2))
+      Err<MsgPackError> { error }:
+        Err<MsgPackError> { error }
+      Ok<i32> { value: length }:
+        if length <= 0:
+          return self.fail<String>("msgpack reader expected a variant map")
+        match(self.decoder.read_string_value())
+          None:
+            self.fail<String>("msgpack reader expected the variant tag field")
+          Some<String> { value: key }:
+            if key != "$variant":
+              return self.fail<String>("msgpack reader expected the variant tag first")
+            match(self.decoder.read_string_value())
+              None:
+                self.fail<String>("msgpack reader expected a variant name")
+              Some<String> { value: name }:
+                let index = self.remaining_values.len() - 1
+                self.remaining_values.replace(index, with: length - 1)
+                Ok<String> { value: name }
+
+  fn end_variant(~self) -> Result<Unit, MsgPackError>
+    self.end_container(kind: 2)
+
+fn msgpack_writer_success() -> Result<Unit, MsgPackError>
+  Ok<Unit> { value: Unit {} }
+
+fn msgpack_writer_failure<T>(message: String) -> Result<T, MsgPackError>
+  Err<MsgPackError> {
+    error: make_error(error_code_type_mismatch(), message)
+  }
+
+fn msgpack_reader_success() -> Result<Unit, MsgPackError>
+  Ok<Unit> { value: Unit {} }
+
+fn msgpack_reader_failure<T>(message: String) -> Result<T, MsgPackError>
+  Err<MsgPackError> {
+    error: make_error(error_code_decode_failed(), message)
+  }
+
+/// Encodes a neutral data value directly to MessagePack bytes.
+pub fn encode_data_value_bytes(value: DataValue) -> Result<Bytes, MsgPackError>
+  let ~writer = MsgPackWriter::init()
+  match(write_data_value(writer, value))
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<Unit>:
+      writer.finish()
+
+/// Decodes MessagePack bytes directly into one neutral data value.
+pub fn decode_data_value_bytes(bytes: Bytes) -> Result<DataValue, MsgPackError>
+  let ~reader = MsgPackReader::init(bytes)
+  match(read_data_value(reader))
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<DataValue> { value }:
+      if reader.is_complete():
+        return Ok<DataValue> { value }
+      msgpack_reader_failure<DataValue>("msgpack decode has trailing bytes")
+
+fn write_data_value(
+  ~writer: MsgPackWriter,
+  value: DataValue
+) -> Result<Unit, MsgPackError>
+  value.match(data)
+    DataNull:
+      writer.write_null()
+    DataBool:
+      writer.write_bool(data.value)
+    DataI32:
+      writer.write_i32(data.value)
+    DataI64:
+      writer.write_i64(data.value)
+    DataF32:
+      writer.write_f32(data.value)
+    DataF64:
+      writer.write_f64(data.value)
+    DataString:
+      writer.write_string(data.value)
+    DataBytes:
+      writer.write_bytes(data.value)
+    DataArray:
+      match(writer.begin_array(length: data.values.len()))
+        Err<MsgPackError> { error }:
+          Err<MsgPackError> { error }
+        Ok<Unit>:
+          var index = 0
+          while index < data.values.len():
+            match(write_data_value(writer, data.values.at(index)))
+              Err<MsgPackError> { error }:
+                return Err<MsgPackError> { error }
+              Ok<Unit>:
+                void
+            index = index + 1
+          writer.end_array()
+    DataObject:
+      write_data_fields(writer, data.fields, variant_name: None {})
+    DataVariant:
+      write_data_fields(
+        writer,
+        data.fields,
+        variant_name: Some<String> { value: data.name }
+      )
+
+fn write_data_fields(
+  ~writer: MsgPackWriter,
+  fields: Array<DataField>,
+  { variant_name: Option<String> }
+) -> Result<Unit, MsgPackError>
+  let extra = variant_name.match(value)
+    Some<String>: 1
+    None: 0
+  let kind = if extra == 1 then: 2 else: 1
+  match(writer.begin_container(kind: kind, length: fields.len() + extra))
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<Unit>:
+      match(variant_name)
+        Some<String> { value: name }:
+          match(writer.write_dynamic_field("$variant"))
+            Err<MsgPackError> { error }:
+              return Err<MsgPackError> { error }
+            Ok<Unit>:
+              match(writer.write_string(name))
+                Err<MsgPackError> { error }:
+                  return Err<MsgPackError> { error }
+                Ok<Unit>:
+                  void
+        None:
+          void
+      var index = 0
+      while index < fields.len():
+        let field = fields.at(index)
+        match(writer.write_dynamic_field(field.name))
+          Err<MsgPackError> { error }:
+            return Err<MsgPackError> { error }
+          Ok<Unit>:
+            match(write_data_value(writer, field.value))
+              Err<MsgPackError> { error }:
+                return Err<MsgPackError> { error }
+              Ok<Unit>:
+                void
+        index = index + 1
+      writer.end_container(kind: kind)
+
+fn read_data_value(~reader: MsgPackReader) -> Result<DataValue, MsgPackError>
+  match(reader.kind())
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<DataKind> { value: kind }:
+      kind.match(active)
+        NullKind:
+          match(reader.read_null())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<Unit>:
+              Ok<DataValue> { value: DataNull {} }
+        BoolKind:
+          match(reader.read_bool())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<bool> { value }:
+              Ok<DataValue> { value: DataBool { value } }
+        I32Kind:
+          match(reader.read_i32())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<i32> { value }:
+              Ok<DataValue> { value: DataI32 { value } }
+        I64Kind:
+          match(reader.read_i64())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<i64> { value }:
+              Ok<DataValue> { value: DataI64 { value } }
+        F32Kind:
+          match(reader.read_f32())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<f32> { value }:
+              Ok<DataValue> { value: DataF32 { value } }
+        F64Kind:
+          match(reader.read_f64())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<f64> { value }:
+              Ok<DataValue> { value: DataF64 { value } }
+        StringKind:
+          match(reader.read_string())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<String> { value }:
+              Ok<DataValue> { value: DataString { value } }
+        BytesKind:
+          match(reader.read_bytes())
+            Err<MsgPackError> { error }:
+              Err<MsgPackError> { error }
+            Ok<Bytes> { value }:
+              Ok<DataValue> { value: DataBytes { value } }
+        ArrayKind:
+          read_data_array(reader)
+        RecordKind:
+          read_data_fields(reader)
+        else:
+          msgpack_reader_failure<DataValue>("msgpack reader found an unsupported kind")
+
+fn read_data_array(~reader: MsgPackReader) -> Result<DataValue, MsgPackError>
+  match(reader.begin_array())
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<i32> { value: length }:
+      let ~values = Array<DataValue>::with_capacity(length)
+      while values.len() < length:
+        match(read_data_value(reader))
+          Err<MsgPackError> { error }:
+            return Err<MsgPackError> { error }
+          Ok<DataValue> { value }:
+            values.push(value)
+      match(reader.end_array())
+        Err<MsgPackError> { error }:
+          Err<MsgPackError> { error }
+        Ok<Unit>:
+          Ok<DataValue> { value: DataArray { values } }
+
+fn read_data_fields(~reader: MsgPackReader) -> Result<DataValue, MsgPackError>
+  match(reader.begin_record())
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<Unit>:
+      let ~fields = Array<DataField>::init()
+      var variant_name = "".to_string()
+      var has_variant = false
+      var reading = true
+      while reading:
+        match(reader.next_field())
+          Err<MsgPackError> { error }:
+            return Err<MsgPackError> { error }
+          Ok<Option<String>> { value }:
+            value.match(field)
+              None:
+                reading = false
+              Some<String> { value: name }:
+                if name == "$variant":
+                  match(reader.read_string())
+                    Err<MsgPackError> { error }:
+                      return Err<MsgPackError> { error }
+                    Ok<String> { value }:
+                      variant_name = value
+                      has_variant = true
+                else:
+                  match(read_data_value(reader))
+                    Err<MsgPackError> { error }:
+                      return Err<MsgPackError> { error }
+                    Ok<DataValue> { value }:
+                      fields.push(DataField { name, value })
+      match(reader.end_record())
+        Err<MsgPackError> { error }:
+          Err<MsgPackError> { error }
+        Ok<Unit>:
+          if has_variant:
+            return Ok<DataValue> {
+              value: DataVariant { name: variant_name, fields }
+            }
+          Ok<DataValue> { value: DataObject { fields } }
+
+obj MemoryDecoderSource {
   ptr: i32,
+  len: i32
+}
+
+obj BytesDecoderSource {
+  bytes: Bytes
+}
+
+type DecoderSource = MemoryDecoderSource | BytesDecoderSource
+
+obj Decoder {
+  source: DecoderSource,
   pos: i32,
-  end: i32,
   ok: bool
 }
+
+fn byte_encoder() -> Encoder
+  Encoder {
+    sink: BytesEncoderSink {},
+    buffer: ByteBuffer::with_capacity(64),
+    pos: 0,
+    ok: true
+  }
+
+fn bytes_decoder(bytes: Bytes) -> Decoder
+  Decoder {
+    source: BytesDecoderSource { bytes },
+    pos: 0,
+    ok: true
+  }
 
 /// Encodes one MessagePack value into a caller-provided memory region.
 ///
@@ -62,7 +939,19 @@ pub fn encode_value_result(value: MsgPack, ptr: i32, len: i32): () -> Result<i32
     )
   }
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.encode-value")
+/// Encodes one parsed MessagePack value into immutable bytes.
+pub fn encode_value_bytes(value: MsgPack): () -> Result<Bytes, MsgPackError>
+  let ~encoder = byte_encoder()
+  encoder.encode_any(value)
+  if encoder.ok:
+    return Ok<Bytes> { value: encoder.encoded_bytes() }
+  Err<MsgPackError> {
+    error: make_error(
+      error_code_buffer_too_small(),
+      "msgpack encode failed"
+    )
+  }
+
 pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
   encode_value_raw(value, ptr, len)
 
@@ -98,9 +987,82 @@ pub fn decode_value_result(ptr: i32, len: i32): () -> Result<MsgPack, MsgPackErr
     }
   Ok<MsgPack> { value: value }
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.decode-value")
+/// Decodes exactly one parsed MessagePack value from immutable bytes.
+pub fn decode_value_bytes(bytes: Bytes): () -> Result<MsgPack, MsgPackError>
+  let ~decoder = bytes_decoder(bytes)
+  let value = decoder.decode_any()
+  if decoder.ok == false:
+    return Err<MsgPackError> {
+      error: make_error(
+        error_code_decode_failed(),
+        "msgpack decode failed: malformed or truncated payload"
+      )
+    }
+  if decoder.pos != bytes.len():
+    return Err<MsgPackError> {
+      error: make_error(
+        error_code_trailing_bytes(),
+        "msgpack decode failed: trailing bytes remain after one value"
+      )
+    }
+  Ok<MsgPack> { value: value }
+
 pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
   decode_value_raw(ptr, len)
+
+@compiler_impl(id: "voyd.std.msgpack", version: 1)
+impl HostTransportProvider<MsgPackReader, MsgPackWriter> for MsgPackHostTransport
+  fn create_reader(ptr: i32, len: i32) -> MsgPackReader
+    let limits = DecodeLimits {
+      max_depth: 128,
+      max_bytes: 16777216,
+      max_collection_length: 1048576
+    }
+    MsgPackReader {
+      decoder: Decoder(ptr, len),
+      container_kinds: Array<i32>::init(),
+      remaining_values: Array<i32>::init(),
+      root_consumed: false,
+      failed: (len > limits.max_bytes or ptr < 0 or len < 0),
+      limits: limits,
+      path: "$".to_string(),
+      parents: Array<String>::init()
+    }
+
+  fn reader_complete(reader: MsgPackReader) -> bool
+    let source_length = reader.decoder.source.match(active)
+      MemoryDecoderSource: active.len
+      BytesDecoderSource: active.bytes.len()
+    reader.failed == false
+      and reader.decoder.ok
+      and reader.root_consumed
+      and reader.container_kinds.is_empty()
+      and reader.decoder.pos == source_length
+
+  fn create_writer(ptr: i32, len: i32) -> MsgPackWriter
+    let limits = EncodeLimits {
+      max_depth: 128,
+      max_bytes: 16777216,
+      max_collection_length: 1048576
+    }
+    MsgPackWriter {
+      encoder: Encoder(ptr, len),
+      container_kinds: Array<i32>::init(),
+      remaining_values: Array<i32>::init(),
+      pending_fields: Array<i32>::init(),
+      root_count: 0,
+      failed: (ptr < 0 or len < 0),
+      limits: limits
+    }
+
+  fn finish_writer(writer: MsgPackWriter) -> i32
+    if writer.failed or writer.encoder.ok == false:
+      return -1
+    if writer.container_kinds.is_empty() == false or writer.root_count != 1:
+      return -1
+    if writer.encoder.pos > writer.limits.max_bytes:
+      return -1
+    writer.encoder.pos
 
 fn empty_binary(): () -> Binary
   Binary { bytes: Array<i32>::init() }
@@ -265,94 +1227,6 @@ pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
     else:
       empty_map()
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-i32")
-fn boundary_unpack_i32(value: MsgPack): () -> i32
-  value.match(decoded)
-    I32:
-      decoded.value
-    I64:
-      cast::to_i32_wrapping(decoded.value)
-    else:
-      panic("msgpack boundary decode expected i32")
-      0
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-i64")
-fn boundary_unpack_i64(value: MsgPack): () -> i64
-  value.match(decoded)
-    I64:
-      decoded.value
-    I32:
-      cast::to_i64(decoded.value)
-    else:
-      panic("msgpack boundary decode expected i64")
-      cast::to_i64(0)
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-f32")
-fn boundary_unpack_f32(value: MsgPack): () -> f32
-  value.match(decoded)
-    F32:
-      decoded.value
-    F64:
-      cast::to_f32(decoded.value)
-    I32:
-      cast::to_f32(decoded.value)
-    I64:
-      cast::to_f32(decoded.value)
-    else:
-      panic("msgpack boundary decode expected f32")
-      cast::reinterpret_f32(0)
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-f64")
-fn boundary_unpack_f64(value: MsgPack): () -> f64
-  value.match(decoded)
-    F64:
-      decoded.value
-    F32:
-      cast::to_f64(decoded.value)
-    I32:
-      cast::to_f64(decoded.value)
-    I64:
-      cast::to_f64(decoded.value)
-    else:
-      panic("msgpack boundary decode expected f64")
-      0.0
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-bool")
-fn boundary_unpack_bool(value: MsgPack): () -> bool
-  value.match(decoded)
-    Bool:
-      decoded.value
-    else:
-      panic("msgpack boundary decode expected bool")
-      false
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-string")
-fn boundary_unpack_string(value: MsgPack): () -> String
-  value.match(decoded)
-    String:
-      decoded
-    else:
-      panic("msgpack boundary decode expected string")
-      empty_text()
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-array")
-fn boundary_unpack_array(value: MsgPack): () -> Array<MsgPack>
-  value.match(decoded)
-    Array<MsgPack>:
-      decoded
-    else:
-      panic("msgpack boundary decode expected array")
-      empty_array()
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-map")
-fn boundary_unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
-  value.match(decoded)
-    MsgPackMap:
-      unpack_map(value)
-    else:
-      panic("msgpack boundary decode expected map")
-      empty_map()
-
 pub fn unpack_map_result(value: MsgPack): () -> Result<Dict<String, MsgPack>, MsgPackError>
   value.match(boxed)
     MsgPackMap:
@@ -368,7 +1242,12 @@ pub fn unpack_map_result(value: MsgPack): () -> Result<Dict<String, MsgPack>, Ms
 impl Encoder
   /// Initializes a codec cursor over the provided memory region.
   pub fn init(ptr: i32, len: i32)
-    Encoder { ptr: ptr, pos: 0, len: len, ok: true }
+    Encoder {
+      sink: MemoryEncoderSink { ptr: ptr, len: len },
+      buffer: ByteBuffer::init(),
+      pos: 0,
+      ok: true
+    }
 
   fn can_write(~self, count: i32) -> bool
     if self.ok == false:
@@ -376,20 +1255,36 @@ impl Encoder
     if count <= 0:
       return true
     let next = self.pos + count
-    if next > self.len:
-      self.ok = false
-      return false
-    let memory_end = memory::size() * 65536
-    if (self.ptr + next) > memory_end:
-      self.ok = false
-      return false
-    true
+    self.sink.match(active)
+      MemoryEncoderSink:
+        if next > active.len:
+          self.ok = false
+          return false
+        let memory_end = memory::size() * 65536
+        if (active.ptr + next) > memory_end:
+          self.ok = false
+          return false
+        true
+      BytesEncoderSink:
+        true
 
   fn write_u8(~self, value: i32) -> void
     if self.can_write(1) == false:
       return void
-    memory::store_u8(self.ptr + self.pos, value)
+    self.sink.match(active)
+      MemoryEncoderSink:
+        memory::store_u8(active.ptr + self.pos, value)
+      BytesEncoderSink:
+        self.buffer.push(value)
     self.pos = self.pos + 1
+
+  fn encoded_bytes(self) -> Bytes
+    self.sink.match(active)
+      BytesEncoderSink:
+        self.buffer.as_bytes()
+      MemoryEncoderSink:
+        panic()
+        ByteBuffer::init().as_bytes()
 
   fn write_u16(~self, value: i32) -> void
     if self.can_write(2) == false:
@@ -474,8 +1369,15 @@ impl Encoder
           return void
       index = index + 1
 
-  fn encode_binary(~self, bytes: Array<i32>) -> void
+  fn encode_bytes(~self, bytes: Bytes) -> void
     let len = bytes.len()
+    self.encode_binary_header(len)
+    var index = 0
+    while index < len:
+      self.write_u8(bytes.at(index))
+      index = index + 1
+
+  fn encode_binary_header(~self, len: i32) -> void
     if
       len < 256:
         self.write_u8(196)
@@ -487,6 +1389,10 @@ impl Encoder
         self.write_u8(198)
         self.write_u32(len)
 
+  fn encode_binary(~self, bytes: Array<i32>) -> void
+    let len = bytes.len()
+    self.encode_binary_header(len)
+
     let source = bytes.raw_storage()
     var index = 0
     while index < len:
@@ -495,6 +1401,14 @@ impl Encoder
 
   fn encode_array(~self, value: Array<MsgPack>) -> void
     let len = value.len()
+    self.encode_array_header(len)
+    let source = value.raw_storage()
+    var index = 0
+    while index < len:
+      self.encode_any(__array_get(source, index))
+      index = index + 1
+
+  fn encode_array_header(~self, len: i32) -> void
     if
       len < 16:
         self.write_u8(144 + len)
@@ -505,17 +1419,22 @@ impl Encoder
         self.write_u8(221)
         self.write_u32(len)
 
-    let source = value.raw_storage()
-    var index = 0
-    while index < len:
-      self.encode_any(__array_get(source, index))
-      index = index + 1
-
   fn encode_map(~self, value: Dict<String, MsgPack>) -> void
     self.encode_map_entries(value.entries())
 
   fn encode_map_entries(~self, entries: Array<(String, MsgPack)>) -> void
     let len = entries.len()
+    self.encode_map_header(len)
+    let storage = entries.raw_storage()
+    let entry_count = entries.len()
+    var index = 0
+    while index < entry_count:
+      let entry = __array_get(storage, index)
+      self.encode_string(entry.0)
+      self.encode_any(entry.1)
+      index = index + 1
+
+  fn encode_map_header(~self, len: i32) -> void
     if
       len < 16:
         self.write_u8(128 + len)
@@ -525,15 +1444,6 @@ impl Encoder
       else:
         self.write_u8(223)
         self.write_u32(len)
-
-    let storage = entries.raw_storage()
-    let entry_count = entries.len()
-    var index = 0
-    while index < entry_count:
-      let entry = __array_get(storage, index)
-      self.encode_string(entry.0)
-      self.encode_any(entry.1)
-      index = index + 1
 
   fn encode_any(~self, value: MsgPack) -> void
     value.match(decoded)
@@ -562,27 +1472,270 @@ impl Encoder
 impl Decoder
   /// Initializes a codec cursor over the provided memory region.
   pub fn init(ptr: i32, len: i32)
-    Decoder { ptr: ptr, pos: 0, end: ptr + len, ok: true }
+    Decoder {
+      source: MemoryDecoderSource { ptr: ptr, len: len },
+      pos: 0,
+      ok: true
+    }
+
+  fn source_length(self) -> i32
+    self.source.match(active)
+      MemoryDecoderSource:
+        active.len
+      BytesDecoderSource:
+        active.bytes.len()
+
+  fn at_end(self) -> bool
+    self.pos == self.source_length()
+
+  fn peek_u8(self) -> i32
+    if self.ok == false or self.pos < 0 or self.pos >= self.source_length():
+      return -1
+    self.source.match(active)
+      MemoryDecoderSource:
+        memory::load_u8(active.ptr + self.pos)
+      BytesDecoderSource:
+        active.bytes.at(self.pos)
+
+  fn is_integer_prefix(self, prefix: i32) -> bool
+    prefix < 128
+      or prefix >= 224
+      or (prefix >= 204 and prefix <= 211)
+
+  fn is_string_prefix(self, prefix: i32) -> bool
+    (prefix >= 160 and prefix < 192)
+      or prefix == 217
+      or prefix == 218
+      or prefix == 219
+
+  fn is_binary_prefix(self, prefix: i32) -> bool
+    prefix == 196 or prefix == 197 or prefix == 198
+
+  fn is_array_prefix(self, prefix: i32) -> bool
+    (prefix >= 144 and prefix < 160) or prefix == 220 or prefix == 221
+
+  fn is_map_prefix(self, prefix: i32) -> bool
+    (prefix >= 128 and prefix < 144) or prefix == 222 or prefix == 223
+
+  fn read_i32_value(~self) -> Option<i32>
+    let prefix = self.read_u8()
+    if prefix < 128:
+      return Some<i32> { value: prefix }
+    if prefix >= 224:
+      return Some<i32> { value: prefix - 256 }
+    if prefix == 204:
+      return Some<i32> { value: self.read_u8() }
+    if prefix == 205:
+      return Some<i32> { value: self.read_u16() }
+    if prefix == 206:
+      let value = self.read_u32()
+      if value < 0:
+        return None {}
+      return Some<i32> { value }
+    if prefix == 208:
+      let value = self.read_u8()
+      return Some<i32> { value: if value >= 128 then: value - 256 else: value }
+    if prefix == 209:
+      let value = self.read_u16()
+      return Some<i32> { value: if value >= 32768 then: value - 65536 else: value }
+    if prefix == 210:
+      return Some<i32> { value: self.read_u32() }
+    if prefix == 207:
+      let value = self.read_u64()
+      if value < cast::to_i64(0):
+        return None {}
+      match(cast::to_i32_checked(value))
+        Err:
+          return None {}
+        Ok<i32> { value }:
+          return Some<i32> { value }
+    if prefix == 211:
+      match(cast::to_i32_checked(self.read_u64()))
+        Err:
+          return None {}
+        Ok<i32> { value }:
+          return Some<i32> { value }
+    None {}
+
+  fn read_i64_value(~self) -> Option<i64>
+    let prefix = self.read_u8()
+    if prefix < 128:
+      return Some<i64> { value: cast::to_i64(prefix) }
+    if prefix >= 224:
+      return Some<i64> { value: cast::to_i64(prefix - 256) }
+    if prefix == 204:
+      return Some<i64> { value: cast::to_i64(self.read_u8()) }
+    if prefix == 205:
+      return Some<i64> { value: cast::to_i64(self.read_u16()) }
+    if prefix == 206:
+      return Some<i64> { value: extend_i32_u(self.read_u32()) }
+    if prefix == 207:
+      let value = self.read_u64()
+      if value < cast::to_i64(0):
+        return None {}
+      return Some<i64> { value }
+    if prefix == 211:
+      return Some<i64> { value: self.read_u64() }
+    if prefix == 208:
+      let value = self.read_u8()
+      return Some<i64> {
+        value: cast::to_i64(if value >= 128 then: value - 256 else: value)
+      }
+    if prefix == 209:
+      let value = self.read_u16()
+      return Some<i64> {
+        value: cast::to_i64(if value >= 32768 then: value - 65536 else: value)
+      }
+    if prefix == 210:
+      return Some<i64> { value: cast::to_i64(self.read_u32()) }
+    None {}
+
+  fn read_string_length(~self) -> i32
+    let prefix = self.read_u8()
+    if prefix >= 160 and prefix < 192:
+      return prefix - 160
+    if prefix == 217:
+      return self.read_u8()
+    if prefix == 218:
+      return self.read_u16()
+    if prefix == 219:
+      return self.read_u32()
+    -1
+
+  fn read_string_value(~self) -> Option<String>
+    let length = self.read_string_length()
+    if length < 0:
+      return None {}
+    Some<String> { value: self.decode_string(length) }
+
+  fn read_bytes_value(~self) -> Option<Bytes>
+    let prefix = self.read_u8()
+    let length = if
+      prefix == 196: self.read_u8()
+      prefix == 197: self.read_u16()
+      prefix == 198: self.read_u32()
+      else: -1
+    if length < 0:
+      return None {}
+    let ~bytes = ByteBuffer::with_capacity(length)
+    var index = 0
+    while index < length:
+      bytes.push(self.read_u8())
+      index = index + 1
+    Some<Bytes> { value: bytes.as_bytes() }
+
+  fn read_array_length(~self) -> i32
+    let prefix = self.read_u8()
+    if prefix >= 144 and prefix < 160:
+      return prefix - 144
+    if prefix == 220:
+      return self.read_u16()
+    if prefix == 221:
+      return self.read_u32()
+    -1
+
+  fn read_map_length(~self) -> i32
+    let prefix = self.read_u8()
+    if prefix >= 128 and prefix < 144:
+      return prefix - 128
+    if prefix == 222:
+      return self.read_u16()
+    if prefix == 223:
+      return self.read_u32()
+    -1
+
+  fn skip_bytes(~self, count: i32) -> void
+    if self.can_read(count):
+      self.pos = self.pos + count
+
+  fn skip_any(
+    ~self,
+    { depth: i32, limits: DecodeLimits }
+  ) -> void
+    let prefix = self.read_u8()
+    if self.ok == false:
+      return void
+    if prefix < 128 or prefix >= 224 or prefix == 192 or prefix == 194 or prefix == 195:
+      return void
+    if prefix == 204 or prefix == 208:
+      self.skip_bytes(1)
+      return void
+    if prefix == 205 or prefix == 209:
+      self.skip_bytes(2)
+      return void
+    if prefix == 202 or prefix == 206 or prefix == 210:
+      self.skip_bytes(4)
+      return void
+    if prefix == 203 or prefix == 207 or prefix == 211:
+      self.skip_bytes(8)
+      return void
+    var length = -1
+    if prefix >= 160 and prefix < 192:
+      length = prefix - 160
+    if prefix == 217 or prefix == 196:
+      length = self.read_u8()
+    if prefix == 218 or prefix == 197:
+      length = self.read_u16()
+    if prefix == 219 or prefix == 198:
+      length = self.read_u32()
+    if length >= 0:
+      self.skip_bytes(length)
+      return void
+    var values = -1
+    if prefix >= 144 and prefix < 160:
+      values = prefix - 144
+    if prefix == 220:
+      values = self.read_u16()
+    if prefix == 221:
+      values = self.read_u32()
+    if prefix >= 128 and prefix < 144:
+      values = (prefix - 128) * 2
+    if prefix == 222:
+      values = self.read_u16() * 2
+    if prefix == 223:
+      values = self.read_u32() * 2
+    if values < 0:
+      self.ok = false
+      return void
+    let collection_length = if self.is_map_prefix(prefix) then: values / 2 else: values
+    if collection_length > limits.max_collection_length or depth >= limits.max_depth:
+      self.ok = false
+      return void
+    var index = 0
+    while index < values:
+      self.skip_any(depth: depth + 1, limits: limits)
+      index = index + 1
 
   fn can_read(~self, count: i32) -> bool
     if self.ok == false:
       return false
     if count <= 0:
       return true
-    let next = self.ptr + self.pos + count
-    let memory_end = memory::size() * 65536
-    if next > self.end:
-      self.ok = false
-      return false
-    if next > memory_end:
-      self.ok = false
-      return false
-    true
+    let next = self.pos + count
+    self.source.match(active)
+      MemoryDecoderSource:
+        if next > active.len:
+          self.ok = false
+          return false
+        let memory_end = memory::size() * 65536
+        if active.ptr + next > memory_end:
+          self.ok = false
+          return false
+        true
+      BytesDecoderSource:
+        if next > active.bytes.len():
+          self.ok = false
+          return false
+        true
 
   fn read_u8(~self) -> i32
     if self.can_read(1) == false:
       return 0
-    let value = memory::load_u8(self.ptr + self.pos)
+    let value = self.source.match(active)
+      MemoryDecoderSource:
+        memory::load_u8(active.ptr + self.pos)
+      BytesDecoderSource:
+        active.bytes.at(self.pos)
     self.pos = self.pos + 1
     value
 

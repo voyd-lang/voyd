@@ -72,6 +72,12 @@ The general unit guardrails are:
 - lane wall time: 420,000 ms;
 - file time: 180,000 ms.
 
+V-499 expanded the standard library and compiler work loaded by every portable
+conformance fixture. Two hosted runs of the complete new suite measured 201 and
+203 seconds, with `runtime.test.ts` at 118 seconds and `modules.test.ts` at 63
+seconds. The conformance guardrails are therefore calibrated to 240 seconds for
+the lane, 140 seconds for `runtime.test.ts`, and 80 seconds for other files.
+
 The CLI and language-server packages have a dedicated tooling lane because
 their compile-heavy files can dominate a broad upstream run. The split stays at
 package boundaries so Turbo's affected selection remains authoritative.

@@ -1,5 +1,8 @@
 use std::memory::self as memory
 use std::array::Array
+use std::bytes::ByteBuffer
+use std::data::{ CustomDto, CustomDtoError, DataReader, DataWriter, DecodeLimits, EncodeLimits }
+use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
 use std::optional::types::all
@@ -31,6 +34,35 @@ obj BoundaryCodecEnvelope {
   event: BoundaryCodecEvent
 }
 
+obj RecursiveCodecNode {
+  value: i32,
+  next?: RecursiveCodecNode
+}
+
+obj RecursiveCodecEnvelope {
+  id: i32,
+  root: RecursiveCodecNode
+}
+
+obj MsgPackPositiveId { value: i32 }
+obj MsgPackPositiveIdDto { value: i32 }
+obj MsgPackPositiveEnvelope { id: MsgPackPositiveId }
+
+impl CustomDto<MsgPackPositiveId, MsgPackPositiveIdDto> for MsgPackPositiveId
+  fn write(value: MsgPackPositiveId) -> MsgPackPositiveIdDto
+    MsgPackPositiveIdDto { value: value.value }
+
+  fn read(value: MsgPackPositiveIdDto) -> Result<MsgPackPositiveId, CustomDtoError>
+    if value.value > 0:
+      Ok<MsgPackPositiveId> { value: MsgPackPositiveId { value: value.value } }
+    else:
+      Err<CustomDtoError> {
+        error: CustomDtoError {
+          code: "msgpack_positive_id.non_positive",
+          message: "positive id required"
+        }
+      }
+
 test "derived msgpack codecs preserve nested records arrays optionals and enum payloads":
   let source = BoundaryCodecEnvelope {
     version: 3,
@@ -41,7 +73,7 @@ test "derived msgpack codecs preserve nested records arrays optionals and enum p
     ],
     event: BoundaryCodecEvent::Created { id: 42, labels: ["compiler", "host"] }
   }
-  let packed = pack_boundary_value(source)
+  let packed = from_data_value(data::encode(source))
 
   match(unpack_map(packed))
     Err<MsgPackError>:
@@ -61,29 +93,192 @@ test "derived msgpack codecs preserve nested records arrays optionals and enum p
               assert_string_map_field(event_map, "$variant", "Created")
               assert_i32_map_field(event_map, "id", 42)
 
-  let decoded = unpack_boundary_value<BoundaryCodecEnvelope>(packed)
-  assert(decoded.version, eq: 3)
-  assert(decoded.requestId, eq: "request-7")
-  assert(decoded.profiles.len(), eq: 2)
-  match(decoded.profiles.at(0).nickname)
-    Some<String>:
-      assert(false, eq: true)
-    None:
-      void
-  match(decoded.profiles.at(1).nickname)
-    None:
-      assert(false, eq: true)
-    Some<String> { value }:
-      assert(value, eq: "Amazing Grace")
-  decoded.event.match(event)
-    Created:
-      assert(event.id, eq: 42)
-      assert(event.labels.len(), eq: 2)
-      assert(event.labels.at(1), eq: "host")
-    else:
-      assert(false, eq: true)
+  assert_same_encoding(packed, from_data_value(data::encode(source)))
 
-  assert_same_encoding(packed, pack_boundary_value(source))
+test "typed msgpack encode and decode use immutable bytes":
+  let source = BoundaryCodecEnvelope {
+    version: 4,
+    requestId: "request-8",
+    profiles: [BoundaryCodecProfile { displayName: "Lin" }],
+    event: BoundaryCodecEvent::Deleted { reason: "complete" }
+  }
+
+  match(encode(source))
+    Err<MsgPackError>:
+      assert(false, eq: true)
+    Ok { value: bytes }:
+      assert(bytes.is_empty(), eq: false)
+      match(decode<BoundaryCodecEnvelope>(bytes))
+        Err<MsgPackError>:
+          assert(false, eq: true)
+        Ok<BoundaryCodecEnvelope> { value }:
+          assert(value.version, eq: 4)
+          assert(value.requestId, eq: "request-8")
+          assert(value.profiles.at(0).displayName, eq: "Lin")
+          value.event.match(event)
+            Deleted:
+              assert(event.reason, eq: "complete")
+            else:
+              assert(false, eq: true)
+
+test "typed msgpack codecs enforce explicit resource limits":
+  let encode_limits = EncodeLimits {
+    max_depth: 8,
+    max_bytes: 1024,
+    max_collection_length: 1
+  }
+  match(encode_with_limits([1, 2], limits: encode_limits))
+    Ok:
+      Test::fail()
+    Err<MsgPackError>:
+      void
+
+  let ~unknown = ByteBuffer::with_capacity(10)
+  unknown.push(129)
+  unknown.push(165)
+  unknown.push(101)
+  unknown.push(120)
+  unknown.push(116)
+  unknown.push(114)
+  unknown.push(97)
+  unknown.push(145)
+  unknown.push(145)
+  unknown.push(0)
+  let ~reader = MsgPackReader::init(
+    unknown.as_bytes(),
+    limits: DecodeLimits {
+      max_depth: 1,
+      max_bytes: 1024,
+      max_collection_length: 8
+    }
+  )
+  match(reader.begin_record())
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<Unit>:
+      match(reader.next_field())
+        Err<MsgPackError>:
+          Test::fail()
+        Ok<Option<String>> { value }:
+          value.match(field)
+            None:
+              Test::fail()
+            Some<String>:
+              match(reader.skip_value())
+                Ok<Unit>:
+                  Test::fail()
+                Err<MsgPackError>:
+                  void
+
+  let ~encoded = ByteBuffer::with_capacity(3)
+  encoded.push(146)
+  encoded.push(1)
+  encoded.push(2)
+  let decode_limits = DecodeLimits {
+    max_depth: 8,
+    max_bytes: 1024,
+    max_collection_length: 1
+  }
+  match(decode_with_limits<Array<i32>>(encoded.as_bytes(), limits: decode_limits))
+    Ok:
+      Test::fail()
+    Err<MsgPackError>:
+      void
+
+test "typed msgpack decode accepts compact integer encodings for float DTO fields":
+  let ~encoded = ByteBuffer::with_capacity(1)
+  encoded.push(10)
+  match(decode<f64>(encoded.as_bytes()))
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<f64> { value }:
+      assert(value, eq: 10.0)
+
+test "typed msgpack decode rejects unsigned integers above i64 max":
+  let ~encoded = ByteBuffer::with_capacity(9)
+  encoded.push(207)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+  encoded.push(255)
+
+  match(decode<i32>(encoded.as_bytes()))
+    Ok<i32>:
+      Test::fail()
+    Err<MsgPackError>:
+      void
+  match(decode<i64>(encoded.as_bytes()))
+    Ok<i64>:
+      Test::fail()
+    Err<MsgPackError>:
+      void
+  match(decode<f64>(encoded.as_bytes()))
+    Ok<f64>:
+      Test::fail()
+    Err<MsgPackError>:
+      void
+
+test "typed msgpack codecs stream recursive DTO values":
+  let source = RecursiveCodecNode {
+    value: 1,
+    next: RecursiveCodecNode { value: 2 }
+  }
+  match(encode(source))
+    Err<MsgPackError>:
+      assert(false, eq: true)
+    Ok { value: bytes }:
+      match(decode<RecursiveCodecNode>(bytes))
+        Err<MsgPackError>:
+          assert(false, eq: true)
+        Ok<RecursiveCodecNode> { value }:
+          assert(value.value, eq: 1)
+          match(value.next)
+            None:
+              assert(false, eq: true)
+            Some<RecursiveCodecNode> { value: next }:
+              assert(next.value, eq: 2)
+
+test "typed msgpack decoding preserves nested CustomDto errors":
+  match(encode(MsgPackPositiveEnvelope {
+    id: MsgPackPositiveId { value: 0 }
+  }))
+    Err<MsgPackError>:
+      Test::fail()
+    Ok { value: bytes }:
+      match(decode<MsgPackPositiveEnvelope>(bytes))
+        Ok<MsgPackPositiveEnvelope>:
+          Test::fail()
+        Err<MsgPackError> { error }:
+          assert(error.custom_code, eq: "msgpack_positive_id.non_positive")
+          assert(error.path, eq: "$.id")
+
+test "typed msgpack decode supports nested recursive DTO definitions":
+  let source = RecursiveCodecEnvelope {
+    id: 9,
+    root: RecursiveCodecNode {
+      value: 3,
+      next: RecursiveCodecNode { value: 4 }
+    }
+  }
+  match(encode(source))
+    Err<MsgPackError>:
+      assert(false, eq: true)
+    Ok { value: bytes }:
+      match(decode<RecursiveCodecEnvelope>(bytes))
+        Err<MsgPackError>:
+          assert(false, eq: true)
+        Ok<RecursiveCodecEnvelope> { value }:
+          assert(value.id, eq: 9)
+          assert(value.root.value, eq: 3)
+          match(value.root.next)
+            None:
+              assert(false, eq: true)
+            Some<RecursiveCodecNode> { value: next }:
+              assert(next.value, eq: 4)
 
 test "msgpack encode_value returns error when the destination buffer is too small":
   let base = reserve_test_page()
@@ -130,6 +325,67 @@ test "msgpack unpack_i32 rejects numeric overflow":
       assert(false, eq: true)
     Err<MsgPackError> { error }:
       assert(error.code, eq: error_code_numeric_overflow())
+
+test "MsgPackWriter streams nested DTO values directly to bytes":
+  let ~source = ByteBuffer::with_capacity(2)
+  source.push(255)
+  source.push(0)
+  let ~writer = MsgPackWriter::init()
+  match(writer.begin_array(length: 2))
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.write_i32(1))
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.write_bytes(source.as_bytes()))
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.end_array())
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.finish())
+    Err<MsgPackError>:
+      Test::fail()
+    Ok { value: encoded }:
+      assert(encoded.len(), eq: 6)
+      assert(encoded.at(0), eq: 146)
+      assert(encoded.at(1), eq: 1)
+      assert(encoded.at(2), eq: 196)
+      assert(encoded.at(3), eq: 2)
+      assert(encoded.at(4), eq: 255)
+      assert(encoded.at(5), eq: 0)
+      let ~reader = MsgPackReader::init(encoded)
+      match(reader.begin_array())
+        Err<MsgPackError>:
+          Test::fail()
+        Ok<i32> { value: length }:
+          assert(length, eq: 2)
+      match(reader.read_i32())
+        Err<MsgPackError>:
+          Test::fail()
+        Ok<i32> { value }:
+          assert(value, eq: 1)
+      match(reader.read_bytes())
+        Err<MsgPackError>:
+          Test::fail()
+        Ok { value: bytes }:
+          assert(bytes.len(), eq: 2)
+          assert(bytes.at(0), eq: 255)
+          assert(bytes.at(1), eq: 0)
+      match(reader.end_array())
+        Err<MsgPackError>:
+          Test::fail()
+        Ok<Unit>:
+          void
+      assert(reader.is_complete(), eq: true)
 
 fn assert_i32_map_field(
   map: Dict<String, MsgPack>,

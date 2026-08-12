@@ -15,7 +15,11 @@ import {
   getFixedArrayWasmTypes,
   wasmTypeFor,
 } from "./types.js";
-import { allocateTempLocal } from "./locals.js";
+import {
+  allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "./locals.js";
 import {
   coerceValueToType,
   defaultFixedArrayElementValue,
@@ -41,7 +45,8 @@ import {
 import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
 import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
 import { ensureDispatcher } from "./effects/dispatcher.js";
-import { ensureMsgPackFunctions } from "./effects/host-boundary/msgpack.js";
+import { ensureSelectedHostTransportProvider } from "./host-transport/selected-provider.js";
+import { ensureDataValueFunctions } from "./boundary/data-value.js";
 import {
   getOutcomeValueBoxType,
   unboxOutcomeValue,
@@ -55,17 +60,23 @@ import { ensureLinearMemoryExport } from "./memory-exports.js";
 import {
   BoundarySchemaError,
   deriveBoundarySchema,
+  type BoundarySchema,
+  withDtoFingerprint,
 } from "./boundary/schema.js";
+import { writeDtoValueToTree } from "./boundary/dto-tree-codec.js";
 import {
-  packBoundaryValueAsMsgPack,
-  unpackBoundaryValueFromMsgPack,
-} from "./boundary/msgpack-codec.js";
-import { findSerializerForType } from "./serializer.js";
+  hostStreamWriterResultTypeId,
+  writeDtoValueToHostStream,
+  writeDtoValueToStream,
+  writeHostStreamEvent,
+} from "./boundary/dto-stream-writer.js";
+import {
+  hostStreamNameMatches,
+  readDtoValueFromHostStream,
+  readDtoValueFromStream,
+  readHostStreamValue,
+} from "./boundary/dto-stream-reader.js";
 import { stableCallsiteIdFor } from "../stable-callsite-id.js";
-import {
-  boundaryMsgPackPayloadField,
-  isBoundaryMsgPackValue,
-} from "./boundary-metadata.js";
 import { currentHandlerValue } from "./expressions/call/shared.js";
 import { compileExternalCall } from "./external/imports.js";
 import { emitBoundaryShape } from "./boundary/shape.js";
@@ -75,6 +86,11 @@ import {
   compileOptionalSomeValue,
 } from "./optionals.js";
 import { DiagnosticError, diagnosticFromCode } from "../diagnostics/index.js";
+import {
+  SELECTED_HOST_FRAME_TAG,
+  SELECTED_HOST_FRAME_VERSION,
+} from "./host-transport/frame-codec.js";
+import { emitStringLiteral } from "./expressions/primitives.js";
 import {
   compilePanicTrap,
   ensurePanicTrapGlobals,
@@ -130,6 +146,21 @@ interface EmitFloatUnaryIntrinsicParams {
 const TASK_IMPORT_MODULE = "voyd.task";
 const TASK_IMPORTS_KEY = Symbol("voyd.task.imports");
 const TASK_STARTERS_KEY = Symbol("voyd.task.starters");
+export const TASK_STARTER_BOUNDARIES_KEY = Symbol(
+  "voyd.task.starterBoundaries",
+);
+export type TaskStarterBoundary = {
+  name: string;
+  resultTypeId: TypeId;
+};
+export const RETAINED_CALLBACK_BOUNDARIES_KEY = Symbol(
+  "voyd.callback.boundaries",
+);
+export type RetainedCallbackBoundary = {
+  name: string;
+  params: readonly BoundarySchema[];
+  result?: BoundarySchema;
+};
 const CALLBACK_IMPORT_MODULE = "voyd.callback";
 const CALLBACK_IMPORTS_KEY = Symbol("voyd.callback.imports");
 const CALLBACK_HELPERS_KEY = Symbol("voyd.callback.helpers");
@@ -397,7 +428,6 @@ const ensureTaskStarterHelper = ({
     getOutcomeValueBoxType({
       valueType: taskResultType,
       typeId: desc.returnType,
-      serializer: findSerializerForType(desc.returnType, ctx),
       ctx,
     });
   }
@@ -425,6 +455,12 @@ const ensureTaskStarterHelper = ({
   if (ctx.programHelpers.registerExportName(exportName)) {
     ctx.mod.addFunctionExport(exportName, exportName);
   }
+  ctx.programHelpers
+    .getHelperState(
+      TASK_STARTER_BOUNDARIES_KEY,
+      () => new Map<string, TaskStarterBoundary>(),
+    )
+    .set(exportName, { name: exportName, resultTypeId: desc.returnType });
   starters.set(closureTypeId, exportName);
   return exportName;
 };
@@ -450,54 +486,44 @@ const ensureRetainedCallbackHelper = ({
     throw new Error("callback retention requires a function value");
   }
   ensureLinearMemoryExport(ctx);
-  const msgpack = ensureMsgPackFunctions(ctx);
+  const provider = ensureSelectedHostTransportProvider(ctx);
   const parameterCodecs = desc.parameters.map((parameter, index) => {
-    const serializer = findSerializerForType(parameter.type, ctx);
-    if (serializer && serializer.formatId !== "msgpack") {
-      throw new Error(
-        `callback parameter serializer format ${serializer.formatId} is not supported`,
-      );
-    }
     return {
       typeId: parameter.type,
-      serializer,
-      schema: serializer
-        ? undefined
-        : deriveBoundarySchema({
-            typeId: parameter.type,
-            ctx,
-            label: `callback parameter ${index + 1}`,
-          }),
+      schema: deriveBoundarySchema({
+        typeId: parameter.type,
+        ctx,
+        label: `callback parameter ${index + 1}`,
+        options: { tagStandaloneVariants: true, portableNames: true },
+      }),
     };
   });
   const returnWasmType = wasmTypeFor(desc.returnType, ctx);
   const returnsVoid = returnWasmType === binaryen.none;
-  const returnSerializer = returnsVoid
+  const returnSchema = returnsVoid
     ? undefined
-    : findSerializerForType(desc.returnType, ctx);
-  if (returnSerializer && returnSerializer.formatId !== "msgpack") {
-    throw new Error(
-      `callback return serializer format ${returnSerializer.formatId} is not supported`,
-    );
-  }
-  const returnUsesBoundary =
-    isBoundaryMsgPackValue(desc.returnType, ctx) ||
-    Boolean(boundaryMsgPackPayloadField(desc.returnType, ctx));
-  const returnSchema =
-    returnSerializer || returnsVoid || returnUsesBoundary
-      ? undefined
-      : deriveBoundarySchema({
-          typeId: desc.returnType,
-          ctx,
-          label: "callback return",
-        });
+    : deriveBoundarySchema({
+        typeId: desc.returnType,
+        ctx,
+        label: "callback return",
+        options: { tagStandaloneVariants: true, portableNames: true },
+      });
   const effectful =
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
 
-  const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const base = getClosureTypeInfo(closureTypeId, ctx);
   const exportName = `__voyd_callback_${sanitizeTaskKey(base.key)}`;
+  ctx.programHelpers
+    .getHelperState(
+      RETAINED_CALLBACK_BOUNDARIES_KEY,
+      () => new Map<string, RetainedCallbackBoundary>(),
+    )
+    .set(exportName, {
+      name: exportName,
+      params: parameterCodecs.map(({ schema }) => withDtoFingerprint(schema)),
+      ...(returnSchema ? { result: withDtoFingerprint(returnSchema) } : {}),
+    });
   const locals: binaryen.Type[] = [];
   const helperFnCtx: FunctionContext = {
     bindings: new Map(),
@@ -515,51 +541,131 @@ const ensureRetainedCallbackHelper = ({
     binaryen.i32,
   ]);
   const closureRef = ctx.mod.local.get(0, base.interfaceType);
-  const decodedPayloadValue = (): binaryen.ExpressionRef =>
-    ctx.mod.call(
-      msgpack.decodeValue.wasmName,
-      [ctx.mod.local.get(1, binaryen.i32), ctx.mod.local.get(2, binaryen.i32)],
-      msgPackType,
-    );
-  const payloadElementValue = (index: number): binaryen.ExpressionRef => {
-    if (parameterCodecs.length === 1) {
-      return decodedPayloadValue();
+  const readerLocal = allocateTempLocal(
+    wasmTypeFor(provider.readerTypeId, ctx),
+    helperFnCtx,
+    provider.readerTypeId,
+    ctx,
+  );
+  const invocationIdLocal = allocateTempLocal(binaryen.i32, helperFnCtx);
+  const argLocals = parameterCodecs.map((codec) =>
+    allocateTempLocal(
+      wasmTypeFor(codec.typeId, ctx),
+      helperFnCtx,
+      codec.typeId,
+      ctx,
+    ),
+  );
+  const readerRef = () => loadLocalValue(readerLocal, ctx);
+  const read = (name: string) =>
+    readHostStreamValue({
+      reader: readerRef(),
+      readerTypeId: provider.readerTypeId,
+      name,
+      ctx,
+      fnCtx: helperFnCtx,
+    });
+  const parsePayload: binaryen.ExpressionRef[] = [
+    storeLocalValue({
+      binding: readerLocal,
+      value: ctx.mod.call(
+        provider.createReader.wasmName,
+        [
+          ctx.mod.local.get(1, binaryen.i32),
+          ctx.mod.local.get(2, binaryen.i32),
+        ],
+        provider.createReader.resultType,
+      ),
+      ctx,
+      fnCtx: helperFnCtx,
+    }),
+    ctx.mod.if(
+      ctx.mod.i32.or(
+        ctx.mod.i32.or(
+          ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(5)),
+          ctx.mod.i32.ne(
+            read("read_i32"),
+            ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+          ),
+        ),
+        ctx.mod.i32.ne(
+          read("read_i32"),
+          ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.callbackInvocation),
+        ),
+      ),
+      ctx.mod.unreachable(),
+    ),
+    storeLocalValue({
+      binding: invocationIdLocal,
+      value: read("read_i32"),
+      ctx,
+      fnCtx: helperFnCtx,
+    }),
+    ctx.mod.drop(read("read_i32")),
+    ctx.mod.if(
+      ctx.mod.i32.ne(
+        read("begin_array"),
+        ctx.mod.i32.const(parameterCodecs.length),
+      ),
+      ctx.mod.unreachable(),
+    ),
+  ];
+  parameterCodecs.forEach((codec, index) => {
+    const fingerprint = withDtoFingerprint(codec.schema).fingerprint;
+    if (!fingerprint) {
+      throw new Error(`callback parameter ${index + 1} is missing a DTO fingerprint`);
     }
-    const argsArray = ctx.mod.call(
-      msgpack.unpackArray.wasmName,
-      [decodedPayloadValue()],
-      msgpack.arrayWithCapacity.resultType,
-    );
-    const storage = ctx.mod.call(
-      msgpack.arrayRawStorage.wasmName,
-      [argsArray],
-      msgpack.arrayRawStorage.resultType,
-    );
-    return arrayGet(
-      ctx.mod,
-      storage,
-      ctx.mod.i32.const(index),
-      msgPackType,
-      false,
-    );
-  };
-  const payloadValues = parameterCodecs.map((codec, index) => {
-    const value = payloadElementValue(index);
-    return codec.serializer
-      ? coerceValueToType({
-          value,
-          actualType: msgpack.msgPackTypeId,
-          targetType: codec.typeId,
+    parsePayload.push(
+      ctx.mod.if(
+        ctx.mod.i32.ne(
+          read("begin_array"),
+          ctx.mod.i32.const(2),
+        ),
+        ctx.mod.unreachable(),
+      ),
+      ctx.mod.if(
+        ctx.mod.i32.eqz(
+          hostStreamNameMatches({
+            reader: readerRef(),
+            readerTypeId: provider.readerTypeId,
+            actual: read("read_string"),
+            expected: fingerprint,
+            ctx,
+            fnCtx: helperFnCtx,
+          }),
+        ),
+        ctx.mod.unreachable(),
+      ),
+      storeLocalValue({
+        binding: argLocals[index]!,
+        value: readDtoValueFromHostStream({
+          reader: readerRef(),
+          readerTypeId: provider.readerTypeId,
+          schema: codec.schema,
           ctx,
           fnCtx: helperFnCtx,
-        })
-      : unpackBoundaryValueFromMsgPack({
-          value,
-          schema: codec.schema!,
-          ctx,
-          fnCtx: helperFnCtx,
-        });
+        }),
+        ctx,
+        fnCtx: helperFnCtx,
+      }),
+      ctx.mod.drop(read("end_array")),
+    );
   });
+  parsePayload.push(
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.if(
+      ctx.mod.i32.eqz(
+        ctx.mod.call(
+          provider.readerComplete.wasmName,
+          [readerRef()],
+          provider.readerComplete.resultType,
+        ),
+      ),
+      ctx.mod.unreachable(),
+    ),
+  );
+  const payloadValues = argLocals.map((local) => loadLocalValue(local, ctx));
   const fnField = structGetFieldValue({
     mod: ctx.mod,
     fieldIndex: 0,
@@ -595,7 +701,10 @@ const ensureRetainedCallbackHelper = ({
     ] as number[],
     base.resultType,
   );
-  const setup = loweredPayloads.flatMap((payload) => payload.setup);
+  const setup = [
+    ...parsePayload,
+    ...loweredPayloads.flatMap((payload) => payload.setup),
+  ];
   if (effectful) {
     const rawExportName = `${exportName}_effectful_raw`;
     const retainedTargets = ctx.programHelpers.getHelperState(
@@ -655,48 +764,85 @@ const ensureRetainedCallbackHelper = ({
         ctx,
         fnCtx: helperFnCtx,
       });
+  const returnFingerprint = returnSchema
+    ? withDtoFingerprint(returnSchema).fingerprint
+    : undefined;
   const encodedLength = returnsVoid
     ? ctx.mod.block(null, [resultValue, ctx.mod.i32.const(-2)], binaryen.i32)
     : (() => {
-        const payloadField = boundaryMsgPackPayloadField(desc.returnType, ctx);
-        const encodedResultValue = returnSerializer
-          ? coerceValueToType({
-              value: resultValue,
-              actualType: desc.returnType,
-              targetType: msgpack.msgPackTypeId,
+        if (!returnFingerprint) {
+          throw new Error("callback return is missing a DTO fingerprint");
+        }
+        const writerLocal = allocateTempLocal(
+          wasmTypeFor(provider.writerTypeId, ctx),
+          helperFnCtx,
+          provider.writerTypeId,
+          ctx,
+        );
+        const writerRef = () => loadLocalValue(writerLocal, ctx);
+        const write = (
+          name: string,
+          args: readonly binaryen.ExpressionRef[] = [],
+        ) =>
+          writeHostStreamEvent({
+            writer: writerRef(),
+            writerTypeId: provider.writerTypeId,
+            name,
+            args,
+            ctx,
+            fnCtx: helperFnCtx,
+          });
+        const resultTypeId = hostStreamWriterResultTypeId({
+          writerTypeId: provider.writerTypeId,
+          ctx,
+        });
+        return ctx.mod.block(
+          null,
+          [
+            storeLocalValue({
+              binding: writerLocal,
+              value: ctx.mod.call(
+                provider.createWriter.wasmName,
+                [
+                  ctx.mod.local.get(3, binaryen.i32),
+                  ctx.mod.local.get(4, binaryen.i32),
+                ],
+                provider.createWriter.resultType,
+              ),
               ctx,
               fnCtx: helperFnCtx,
-            })
-          : isBoundaryMsgPackValue(desc.returnType, ctx)
-            ? resultValue
-            : payloadField
-              ? (() => {
-                  const info = getStructuralTypeInfo(desc.returnType, ctx);
-                  if (!info) {
-                    throw new Error(
-                      `boundary payload callback return ${desc.returnType} is missing structural info`,
-                    );
-                  }
-                  return loadStructuralField({
-                    structInfo: info,
-                    field: payloadField,
-                    pointer: () => resultValue,
-                    ctx,
-                    fnCtx: helperFnCtx,
-                  });
-                })()
-              : packBoundaryValueAsMsgPack({
-                  value: resultValue,
-                  schema: returnSchema!,
-                  ctx,
-                  fnCtx: helperFnCtx,
-                });
-        return ctx.mod.call(
-          msgpack.encodeValue.wasmName,
-          [
-            encodedResultValue,
-            ctx.mod.local.get(3, binaryen.i32),
-            ctx.mod.local.get(4, binaryen.i32),
+            }),
+            write("begin_array", [ctx.mod.i32.const(4)]),
+            write("write_i32", [
+              ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+            ]),
+            write("write_i32", [
+              ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.callbackCompletion),
+            ]),
+            write("write_i32", [loadLocalValue(invocationIdLocal, ctx)]),
+            write("begin_array", [ctx.mod.i32.const(2)]),
+            write("write_i32", [ctx.mod.i32.const(0)]),
+            write("begin_array", [ctx.mod.i32.const(2)]),
+            write("write_string", [emitStringLiteral(returnFingerprint, ctx)]),
+            ctx.mod.drop(
+              writeDtoValueToHostStream({
+                writer: writerRef,
+                writerTypeId: provider.writerTypeId,
+                value: resultValue,
+                schema: returnSchema!,
+                resultTypeId,
+                ctx,
+                fnCtx: helperFnCtx,
+              }),
+            ),
+            write("end_array"),
+            write("end_array"),
+            write("end_array"),
+            ctx.mod.call(
+              provider.finishWriter.wasmName,
+              [writerRef()],
+              provider.finishWriter.resultType,
+            ),
           ],
           binaryen.i32,
         );
@@ -1364,7 +1510,7 @@ export const compileIntrinsicCall = ({
       });
     }
     case "__retain_callback":
-    case "__boundary_retain_callback":
+    case "__host_retain_callback":
     case "__render_retain_callback": {
       assertArgCount(name, args, 1);
       const handlerTypeId = getRequiredExprType(
@@ -1382,7 +1528,7 @@ export const compileIntrinsicCall = ({
       });
       const closureInfo = getClosureTypeInfo(handlerTypeId, ctx);
       const render = name === "__render_retain_callback";
-      const boundary = name === "__boundary_retain_callback";
+      const boundary = name === "__host_retain_callback";
       const importName = render
         ? `__voyd_render_retain_callback_${sanitizeTaskKey(helperExport)}`
         : boundary
@@ -1428,80 +1574,83 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 0);
       return ctx.mod.i32.const(stableCallsiteIdFor(call.span));
     }
-    case "__boundary_value_to_msgpack": {
+    case "__dto_value_to_data": {
       assertArgCount(name, args, 1);
       const valueTypeId = getRequiredExprType(
         call.args[0]!.expr,
         ctx,
         instanceId,
       );
-      const serializer = findSerializerForType(valueTypeId, ctx);
-      if (serializer) {
-        if (serializer.formatId !== "msgpack") {
-          throw new Error(
-            `boundary value serializer format ${serializer.formatId} is not supported`,
-          );
-        }
-        const msgpack = ensureMsgPackFunctions(ctx);
-        return coerceValueToType({
-          value: args[0]!,
-          actualType: valueTypeId,
-          targetType: msgpack.msgPackTypeId,
-          ctx,
-          fnCtx,
-        });
-      }
       try {
-        return packBoundaryValueAsMsgPack({
+        return writeDtoValueToTree({
           value: args[0]!,
           schema: deriveBoundarySchema({
             typeId: valueTypeId,
             ctx,
-            label: "__boundary_value_to_msgpack value",
+            label: "data::encode value",
             options: { tagStandaloneVariants: true },
           }),
           ctx,
           fnCtx,
+          provider: ensureDataValueFunctions(ctx),
         });
       } catch (error) {
         rethrowBoundarySchemaDiagnostic({ error, call });
       }
     }
-    case "__boundary_msgpack_to_value": {
+    case "__dto_fingerprint": {
       assertArgCount(name, args, 1);
-      const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
-      try {
-        return emitBoundaryMsgPackToValue({
-          value: args[0]!,
-          returnTypeId,
-          ctx,
-          fnCtx,
-        });
-      } catch (error) {
-        rethrowBoundarySchemaDiagnostic({ error, call });
-      }
-    }
-    case "__boundary_msgpack_to_value_or_identity": {
-      assertArgCount(name, args, 2);
-      const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
-      const sourceTypeId = getRequiredExprType(
+      const valueTypeId = getRequiredExprType(
         call.args[0]!.expr,
         ctx,
         instanceId,
       );
-      if (sourceTypeId === returnTypeId) {
-        return coerceValueToType({
-          value: args[0]!,
-          actualType: sourceTypeId,
-          targetType: returnTypeId,
-          ctx,
-          fnCtx,
-        });
-      }
       try {
-        return emitBoundaryMsgPackToValue({
+        const fingerprint = withDtoFingerprint(
+          deriveBoundarySchema({
+            typeId: valueTypeId,
+            ctx,
+            label: "DTO fingerprint",
+            options: { tagStandaloneVariants: true },
+          }),
+        ).fingerprint;
+        if (!fingerprint) throw new Error("DTO fingerprint is missing");
+        ctx.programHelpers
+          .getHelperState(
+            Symbol.for("voyd.codegen.dtoPayloadFingerprints"),
+            () => new Set<string>(),
+          )
+          .add(fingerprint);
+        return emitStringLiteral(fingerprint, ctx);
+      } catch (error) {
+        rethrowBoundarySchemaDiagnostic({ error, call });
+      }
+    }
+    case "__dto_write": {
+      assertArgCount(name, args, 2);
+      const [intrinsicValueTypeId, , intrinsicWriterTypeId] =
+        intrinsicCallTypeArgs({ call, ctx, instanceId });
+      const writerTypeId =
+        intrinsicWriterTypeId ??
+        paramTypeIds?.[0] ??
+        getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      const valueTypeId =
+        intrinsicValueTypeId ??
+        paramTypeIds?.[1] ??
+        getRequiredExprType(call.args[1]!.expr, ctx, instanceId);
+      const resultTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      try {
+        return writeDtoValueToStream({
+          writer: args[0]!,
+          writerTypeId,
           value: args[1]!,
-          returnTypeId,
+          schema: deriveBoundarySchema({
+            typeId: valueTypeId,
+            ctx,
+            label: "data::write value",
+            options: { tagStandaloneVariants: true },
+          }),
+          resultTypeId,
           ctx,
           fnCtx,
         });
@@ -1509,7 +1658,47 @@ export const compileIntrinsicCall = ({
         rethrowBoundarySchemaDiagnostic({ error, call });
       }
     }
-    case "__boundary_shape_of": {
+    case "__dto_read": {
+      assertArgCount(name, args, 2);
+      const [intrinsicTargetTypeId, , intrinsicReaderTypeId] =
+        intrinsicCallTypeArgs({
+          call,
+          ctx,
+          instanceId,
+        });
+      const resultTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      const targetTypeId =
+        intrinsicTargetTypeId ?? resultOkPayloadType({ resultTypeId, ctx });
+      if (targetTypeId === undefined) {
+        throw intrinsicCodegenDiagnostic({
+          call,
+          message: "data::read requires a resolved target type",
+        });
+      }
+      const readerTypeId =
+        intrinsicReaderTypeId ??
+        paramTypeIds?.[0] ??
+        getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      try {
+        return readDtoValueFromStream({
+          reader: args[0]!,
+          readerTypeId,
+          rejectUnknownFields: args[1]!,
+          schema: deriveBoundarySchema({
+            typeId: targetTypeId,
+            ctx,
+            label: "data::read target",
+            options: { tagStandaloneVariants: true },
+          }),
+          resultTypeId,
+          ctx,
+          fnCtx,
+        });
+      } catch (error) {
+        rethrowBoundarySchemaDiagnostic({ error, call });
+      }
+    }
+    case "__dto_shape_of": {
       assertArgCount(name, args, 0);
       const [targetTypeId] = intrinsicCallTypeArgs({ call, ctx, instanceId });
       if (targetTypeId === undefined) {
@@ -1544,7 +1733,7 @@ export const compileIntrinsicCall = ({
         throw error;
       }
     }
-    case "__boundary_try_shape_of": {
+    case "__dto_try_shape_of": {
       assertArgCount(name, args, 0);
       const [targetTypeId] = intrinsicCallTypeArgs({ call, ctx, instanceId });
       if (targetTypeId === undefined) {
@@ -1856,46 +2045,6 @@ const rethrowBoundarySchemaDiagnostic = ({
   throw error;
 };
 
-const emitBoundaryMsgPackToValue = ({
-  value,
-  returnTypeId,
-  ctx,
-  fnCtx,
-}: {
-  value: binaryen.ExpressionRef;
-  returnTypeId: TypeId;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): binaryen.ExpressionRef => {
-  const serializer = findSerializerForType(returnTypeId, ctx);
-  if (serializer) {
-    if (serializer.formatId !== "msgpack") {
-      throw new Error(
-        `boundary value deserializer format ${serializer.formatId} is not supported`,
-      );
-    }
-    const msgpack = ensureMsgPackFunctions(ctx);
-    return coerceValueToType({
-      value,
-      actualType: msgpack.msgPackTypeId,
-      targetType: returnTypeId,
-      ctx,
-      fnCtx,
-    });
-  }
-  return unpackBoundaryValueFromMsgPack({
-    value,
-    schema: deriveBoundarySchema({
-      typeId: returnTypeId,
-      ctx,
-      label: "__boundary_msgpack_to_value target",
-      options: { tagStandaloneVariants: true },
-    }),
-    ctx,
-    fnCtx,
-  });
-};
-
 const intrinsicCallTypeArgs = ({
   call,
   ctx,
@@ -1921,6 +2070,29 @@ const intrinsicCallTypeArgs = ({
   return substitution
     ? raw.map((typeId) => ctx.program.types.substitute(typeId, substitution))
     : raw;
+};
+
+const resultOkPayloadType = ({
+  resultTypeId,
+  ctx,
+}: {
+  resultTypeId: TypeId;
+  ctx: CodegenContext;
+}): TypeId | undefined => {
+  const desc = ctx.program.types.getTypeDesc(resultTypeId);
+  if (desc.kind !== "union") return undefined;
+  const ok = desc.members.find((typeId) => {
+    const member = ctx.program.types.getTypeDesc(typeId);
+    const owner = ctx.program.types.getNominalOwner(
+      member.kind === "intersection" && member.nominal !== undefined
+        ? member.nominal
+        : typeId,
+    );
+    return owner !== undefined && ctx.program.symbols.getName(owner) === "Ok";
+  });
+  return ok === undefined
+    ? undefined
+    : getStructuralTypeInfo(ok, ctx)?.fieldMap.get("value")?.typeId;
 };
 
 const emitArithmeticIntrinsic = ({

@@ -1,73 +1,54 @@
-export const BOUNDARY_MSGPACK_CONTRACT_IDS = {
-  encodeValue: "voyd.std.boundary.msgpack.encode-value",
-  decodeValue: "voyd.std.boundary.msgpack.decode-value",
-  makeNull: "voyd.std.boundary.msgpack.make-null",
-  makeBool: "voyd.std.boundary.msgpack.make-bool",
-  makeString: "voyd.std.boundary.msgpack.make-string",
-  makeArray: "voyd.std.boundary.msgpack.make-array",
-  makeI32: "voyd.std.boundary.msgpack.make-i32",
-  makeI64: "voyd.std.boundary.msgpack.make-i64",
-  makeF32: "voyd.std.boundary.msgpack.make-f32",
-  makeF64: "voyd.std.boundary.msgpack.make-f64",
-  makeMap: "voyd.std.boundary.msgpack.make-map",
-  unpackBool: "voyd.std.boundary.msgpack.unpack-bool",
-  unpackString: "voyd.std.boundary.msgpack.unpack-string",
-  unpackArray: "voyd.std.boundary.msgpack.unpack-array",
-  unpackI32: "voyd.std.boundary.msgpack.unpack-i32",
-  unpackI64: "voyd.std.boundary.msgpack.unpack-i64",
-  unpackF32: "voyd.std.boundary.msgpack.unpack-f32",
-  unpackF64: "voyd.std.boundary.msgpack.unpack-f64",
-  unpackMap: "voyd.std.boundary.msgpack.unpack-map",
-  arrayWithCapacity: "voyd.std.boundary.msgpack.array-with-capacity",
-  arrayPush: "voyd.std.boundary.msgpack.array-push",
-  arrayLength: "voyd.std.boundary.msgpack.array-length",
-  arrayRawStorage: "voyd.std.boundary.msgpack.array-raw-storage",
-  mapNew: "voyd.std.boundary.msgpack.map-new",
-  mapSet: "voyd.std.boundary.msgpack.map-set",
-  mapGet: "voyd.std.boundary.msgpack.map-get",
-  mapHas: "voyd.std.boundary.msgpack.map-has",
-  mapTagIs: "voyd.std.boundary.msgpack.map-tag-is",
-  newString: "voyd.std.boundary.msgpack.string-new",
+export const DTO_DATA_CONTRACT_IDS = {
+  cycleError: "voyd.std.data.cycle-error",
+  makeNull: "voyd.std.data.make-null",
+  makeBool: "voyd.std.data.make-bool",
+  makeString: "voyd.std.data.make-string",
+  makeBytes: "voyd.std.data.make-bytes",
+  makeArray: "voyd.std.data.make-array",
+  makeI32: "voyd.std.data.make-i32",
+  makeI64: "voyd.std.data.make-i64",
+  makeF32: "voyd.std.data.make-f32",
+  makeF64: "voyd.std.data.make-f64",
+  makeMap: "voyd.std.data.make-map",
+  unpackBool: "voyd.std.data.unpack-bool",
+  unpackString: "voyd.std.data.unpack-string",
+  unpackBytes: "voyd.std.data.unpack-bytes",
+  unpackArray: "voyd.std.data.unpack-array",
+  unpackI32: "voyd.std.data.unpack-i32",
+  unpackI64: "voyd.std.data.unpack-i64",
+  unpackF32: "voyd.std.data.unpack-f32",
+  unpackF64: "voyd.std.data.unpack-f64",
+  unpackMap: "voyd.std.data.unpack-map",
+  arrayWithCapacity: "voyd.std.data.array-with-capacity",
+  arrayPush: "voyd.std.data.array-push",
+  arrayLength: "voyd.std.data.array-length",
+  arrayRawStorage: "voyd.std.data.array-raw-storage",
+  mapNew: "voyd.std.data.map-new",
+  mapSet: "voyd.std.data.map-set",
+  mapGet: "voyd.std.data.map-get",
+  mapHas: "voyd.std.data.map-has",
+  mapTagIs: "voyd.std.data.map-tag-is",
+  newString: "voyd.std.data.string-new",
 } as const;
 
 export const WEB_RENDER_CONTRACT_IDS = {
-  render: "voyd.web.render",
   typedRender: "voyd.web.render-generic",
-  document: "voyd.web.document",
   typedDocument: "voyd.web.document-generic",
-  hydratedDocument: "voyd.web.document-hydrated",
   typedHydratedDocument: "voyd.web.document-hydrated-generic",
-  namedHydratedDocument: "voyd.web.hydrated-document",
   typedNamedHydratedDocument: "voyd.web.hydrated-document-generic",
-  htmlResponse: "voyd.web.html-response",
   typedHtmlResponse: "voyd.web.html-response-generic",
-  hydratedHtmlResponse: "voyd.web.html-response-hydrated",
   typedHydratedHtmlResponse: "voyd.web.html-response-hydrated-generic",
-  namedHydratedHtmlResponse: "voyd.web.hydrated-html-response",
   typedNamedHydratedHtmlResponse: "voyd.web.hydrated-html-response-generic",
   responseHtml: "voyd.web.response-html-generic",
   hydratedResponseHtml: "voyd.web.hydrated-response-html-generic",
-  legacyResponseHtml: "voyd.web.response-html",
-  legacyHydratedResponseHtml: "voyd.web.hydrated-response-html",
 } as const;
 
 export type CompilerFunctionContractId =
-  | (typeof BOUNDARY_MSGPACK_CONTRACT_IDS)[keyof typeof BOUNDARY_MSGPACK_CONTRACT_IDS]
+  | (typeof DTO_DATA_CONTRACT_IDS)[keyof typeof DTO_DATA_CONTRACT_IDS]
   | (typeof WEB_RENDER_CONTRACT_IDS)[keyof typeof WEB_RENDER_CONTRACT_IDS];
 
-/**
- * Loader bootstrap for synthetic entry modules that need every provider in the
- * graph before contract metadata can be indexed. Consumers must resolve roles
- * by ID after loading; these paths are not codegen identities.
- */
-export const BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES = [
-  "std::msgpack",
-  "std::msgpack::fns",
-  "std::string",
-] as const;
-
 export type CompilerContractFeature =
-  | "boundary-msgpack"
+  | "dto-data"
   | "retained-callback-call-scope";
 
 export type CompilerContractPrimitiveType =
@@ -78,10 +59,11 @@ export type CompilerContractPrimitiveType =
   | "f64";
 
 export type CompilerContractSharedType =
-  | "msgpack"
   | "string"
-  | "msgpack-array"
-  | "msgpack-map";
+  | "bytes"
+  | "data"
+  | "data-array"
+  | "data-map";
 
 /** Symbolic types are resolved relationally after typing, at feature use. */
 export type CompilerContractTypeSpec =
@@ -130,19 +112,20 @@ const type = {
   i64: primitive("i64"),
   f32: primitive("f32"),
   f64: primitive("f64"),
-  msgpack: shared("msgpack"),
   string: shared("string"),
-  array: shared("msgpack-array"),
-  map: shared("msgpack-map"),
+  bytes: shared("bytes"),
+  data: shared("data"),
+  dataArray: shared("data-array"),
+  dataMap: shared("data-map"),
 } as const;
 
-const contract = (
+const dataContract = (
   id: CompilerFunctionContractId,
   parameters: readonly CompilerContractTypeSpec[],
   result: CompilerContractTypeSpec,
 ): CompilerFunctionContractSpec => ({
   id,
-  feature: "boundary-msgpack",
+  feature: "dto-data",
   expectedArity: parameters.length,
   provider: { namespace: "std" },
   signature: {
@@ -156,85 +139,66 @@ const contract = (
   },
 });
 
-const boundaryMsgpackContractSpecs: readonly CompilerFunctionContractSpec[] = [
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.encodeValue,
-    [type.msgpack, type.i32, type.i32],
-    type.i32,
-  ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.decodeValue,
-    [type.i32, type.i32],
-    type.msgpack,
-  ),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull, [], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeBool, [type.bool], type.msgpack),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.makeString,
-    [type.string],
-    type.msgpack,
-  ),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeArray, [type.array], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeI32, [type.i32], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeI64, [type.i64], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeF32, [type.f32], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeF64, [type.f64], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeMap, [type.map], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackBool, [type.msgpack], type.bool),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.unpackString,
-    [type.msgpack],
-    type.string,
-  ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.unpackArray,
-    [type.msgpack],
-    type.array,
-  ),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackI32, [type.msgpack], type.i32),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackI64, [type.msgpack], type.i64),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackF32, [type.msgpack], type.f32),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackF64, [type.msgpack], type.f64),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackMap, [type.msgpack], type.map),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.arrayWithCapacity,
+const dtoDataContractSpecs: readonly CompilerFunctionContractSpec[] = [
+  dataContract(DTO_DATA_CONTRACT_IDS.cycleError, [], type.data),
+  dataContract(DTO_DATA_CONTRACT_IDS.makeNull, [], type.data),
+  dataContract(DTO_DATA_CONTRACT_IDS.makeBool, [type.bool], type.data),
+  dataContract(DTO_DATA_CONTRACT_IDS.makeString, [type.string], type.data),
+  dataContract(DTO_DATA_CONTRACT_IDS.makeBytes, [type.bytes], type.data),
+  dataContract(DTO_DATA_CONTRACT_IDS.makeArray, [type.dataArray], type.data),
+  dataContract(DTO_DATA_CONTRACT_IDS.makeI32, [type.i32], type.data),
+  dataContract(DTO_DATA_CONTRACT_IDS.makeI64, [type.i64], type.data),
+  dataContract(DTO_DATA_CONTRACT_IDS.makeF32, [type.f32], type.data),
+  dataContract(DTO_DATA_CONTRACT_IDS.makeF64, [type.f64], type.data),
+  dataContract(DTO_DATA_CONTRACT_IDS.makeMap, [type.dataMap], type.data),
+  dataContract(DTO_DATA_CONTRACT_IDS.unpackBool, [type.data], type.bool),
+  dataContract(DTO_DATA_CONTRACT_IDS.unpackString, [type.data], type.string),
+  dataContract(DTO_DATA_CONTRACT_IDS.unpackBytes, [type.data], type.bytes),
+  dataContract(DTO_DATA_CONTRACT_IDS.unpackArray, [type.data], type.dataArray),
+  dataContract(DTO_DATA_CONTRACT_IDS.unpackI32, [type.data], type.i32),
+  dataContract(DTO_DATA_CONTRACT_IDS.unpackI64, [type.data], type.i64),
+  dataContract(DTO_DATA_CONTRACT_IDS.unpackF32, [type.data], type.f32),
+  dataContract(DTO_DATA_CONTRACT_IDS.unpackF64, [type.data], type.f64),
+  dataContract(DTO_DATA_CONTRACT_IDS.unpackMap, [type.data], type.dataMap),
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.arrayWithCapacity,
     [type.i32],
-    type.array,
+    type.dataArray,
   ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.arrayPush,
-    [type.array, type.msgpack],
-    type.array,
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.arrayPush,
+    [type.dataArray, type.data],
+    type.dataArray,
   ),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.arrayLength, [type.array], type.i32),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.arrayRawStorage,
-    [type.array],
-    fixedArray(type.msgpack),
+  dataContract(DTO_DATA_CONTRACT_IDS.arrayLength, [type.dataArray], type.i32),
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.arrayRawStorage,
+    [type.dataArray],
+    fixedArray(type.data),
   ),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.mapNew, [], type.map),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.mapSet,
-    [type.map, type.string, type.msgpack],
-    type.map,
+  dataContract(DTO_DATA_CONTRACT_IDS.mapNew, [], type.dataMap),
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.mapSet,
+    [type.dataMap, type.string, type.data],
+    type.dataMap,
   ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.mapGet,
-    [type.map, type.string],
-    type.msgpack,
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.mapGet,
+    [type.dataMap, type.string],
+    type.data,
   ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.mapHas,
-    [type.map, type.string],
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.mapHas,
+    [type.dataMap, type.string],
     type.bool,
   ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.mapTagIs,
-    [type.map, type.string],
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.mapTagIs,
+    [type.dataMap, type.string],
     type.bool,
   ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.newString,
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.newString,
     [fixedArray(type.i32)],
     type.string,
   ),
@@ -267,26 +231,16 @@ const webRenderContract = ({
 });
 
 const webRenderContractSpecs: readonly CompilerFunctionContractSpec[] = [
-  webRenderContract({ id: WEB_RENDER_CONTRACT_IDS.render, expectedArity: 1 }),
   webRenderContract({
     id: WEB_RENDER_CONTRACT_IDS.typedRender,
     expectedArity: 1,
   }),
-  webRenderContract({ id: WEB_RENDER_CONTRACT_IDS.document, expectedArity: 1 }),
   webRenderContract({
     id: WEB_RENDER_CONTRACT_IDS.typedDocument,
     expectedArity: 1,
   }),
   webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.hydratedDocument,
-    expectedArity: 2,
-  }),
-  webRenderContract({
     id: WEB_RENDER_CONTRACT_IDS.typedHydratedDocument,
-    expectedArity: 2,
-  }),
-  webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.namedHydratedDocument,
     expectedArity: 2,
   }),
   webRenderContract({
@@ -294,23 +248,11 @@ const webRenderContractSpecs: readonly CompilerFunctionContractSpec[] = [
     expectedArity: 2,
   }),
   webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.htmlResponse,
-    expectedArity: 2,
-  }),
-  webRenderContract({
     id: WEB_RENDER_CONTRACT_IDS.typedHtmlResponse,
     expectedArity: 2,
   }),
   webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.hydratedHtmlResponse,
-    expectedArity: 3,
-  }),
-  webRenderContract({
     id: WEB_RENDER_CONTRACT_IDS.typedHydratedHtmlResponse,
-    expectedArity: 3,
-  }),
-  webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.namedHydratedHtmlResponse,
     expectedArity: 3,
   }),
   webRenderContract({
@@ -327,23 +269,13 @@ const webRenderContractSpecs: readonly CompilerFunctionContractSpec[] = [
     expectedArity: 3,
     methodAlias: "html",
   }),
-  webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.legacyResponseHtml,
-    expectedArity: 2,
-    methodAlias: "html",
-  }),
-  webRenderContract({
-    id: WEB_RENDER_CONTRACT_IDS.legacyHydratedResponseHtml,
-    expectedArity: 3,
-    methodAlias: "html",
-  }),
 ];
 
 export const COMPILER_FUNCTION_CONTRACTS: ReadonlyMap<
   CompilerFunctionContractId,
   CompilerFunctionContractSpec
 > = new Map(
-  [...boundaryMsgpackContractSpecs, ...webRenderContractSpecs].map((spec) => [
+  [...dtoDataContractSpecs, ...webRenderContractSpecs].map((spec) => [
     spec.id,
     spec,
   ]),

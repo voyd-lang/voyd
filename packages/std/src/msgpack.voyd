@@ -8,6 +8,28 @@
 use self::fns::self as msgpack_fns
 use self::fns::{ MsgPack as RawMsgPack }
 use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
+use std::data::{
+  DataArray,
+  DataBool,
+  DataBytes,
+  DataF32,
+  DataF64,
+  DataField,
+  DataI32,
+  DataI64,
+  DataNull,
+  DataObject,
+  DataString,
+  DataValue,
+  DataVariant,
+  DecodeLimits,
+  EncodeLimits,
+  default_decode_limits,
+  default_encode_limits,
+  read as read_dto,
+  write as write_dto,
+}
 use std::dict::{ Dict, DictKey }
 use std::msgpack::errors::{
   MsgPackError,
@@ -20,19 +42,16 @@ use std::number::cast::self as cast
 use std::number::cast::CastError
 use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
-pub use self::fns::MsgPackMap
+pub use self::fns::{ MsgPackMap, MsgPackReader, MsgPackWriter }
 pub use self::errors::MsgPackError
 pub use self::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 
-@serializer("msgpack", std::msgpack::fns::encode_value_raw, std::msgpack::fns::decode_value_raw)
 pub type MsgPack = RawMsgPack
 
 /// Constructs the MessagePack `null` value.
-@compiler_contract(id: "voyd.std.boundary.msgpack.make-null")
 pub fn make_null(): () -> MsgPack
   msgpack_fns::make_null()
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.make-bool")
 pub fn make_bool(value: bool): () -> MsgPack
   msgpack_fns::make_bool(value)
 
@@ -48,45 +67,73 @@ pub fn make_binary(value: Binary): () -> MsgPack
   msgpack_fns::make_binary(value)
 
 /// Constructs a MessagePack array from an existing sequence of values.
-@compiler_contract(id: "voyd.std.boundary.msgpack.make-array")
 pub fn make_array(value: Array<MsgPack>): () -> MsgPack
   msgpack_fns::make_array(value)
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.make-f32")
 pub fn make_f32(value: f32): () -> MsgPack
   msgpack_fns::make_f32(value)
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.make-f64")
 pub fn make_f64(value: f64): () -> MsgPack
   F64 { value }
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.make-i32")
 pub fn make_i32(value: i32): () -> MsgPack
   msgpack_fns::make_i32(value)
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.make-i64")
 pub fn make_i64(value: i64): () -> MsgPack
   msgpack_fns::make_i64(value)
 
 /// Constructs a MessagePack map from string keys to values.
-@compiler_contract(id: "voyd.std.boundary.msgpack.make-map")
 pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
   msgpack_fns::make_map(value)
 
-/// Encodes a boundary-compatible DTO value with its compiler-derived schema.
-///
-/// Record keys use their declared source names, optional fields are omitted
-/// when absent, and named variants use `$variant` plus their payload fields.
-pub fn pack_boundary_value<T>(value: T): () -> MsgPack
-  boundary_value_to_msgpack(value)
+/// Encodes a DTO-compatible value into immutable MessagePack bytes.
+pub fn encode<T>(value: T): () -> Result<Bytes, MsgPackError>
+  encode_with_limits(value, limits: default_encode_limits())
 
-/// Decodes MessagePack using the compiler-derived schema for `T`.
-pub fn unpack_boundary_value<T>(value: MsgPack): () -> T
-  boundary_msgpack_to_value<T>(value)
+/// Encodes with explicit depth, byte, and collection limits.
+pub fn encode_with_limits<T>(value: T, { limits: EncodeLimits }): () -> Result<Bytes, MsgPackError>
+  let ~writer = MsgPackWriter::init(limits: limits)
+  match(write_dto<T, MsgPackError, MsgPackWriter>(writer, value))
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<Unit>:
+      writer.finish()
 
-/// Returns `source` when it already has the target type; otherwise decodes `value`.
-pub fn unpack_boundary_value_or_identity<T, U>(source: U, value: MsgPack): () -> T
-  boundary_msgpack_to_value_or_identity<T, U>(source, value)
+/// Encodes an explicitly constructed MessagePack value into immutable bytes.
+pub fn encode_value_bytes(value: MsgPack): () -> Result<Bytes, MsgPackError>
+  msgpack_fns::encode_value_bytes(value)
+
+/// Decodes immutable MessagePack bytes into a DTO-compatible value.
+pub fn decode<T>(bytes: Bytes): () -> Result<T, MsgPackError>
+  decode_with_limits<T>(bytes, limits: default_decode_limits())
+
+/// Decodes with explicit depth, byte, and collection limits.
+pub fn decode_with_limits<T>(bytes: Bytes, { limits: DecodeLimits }): () -> Result<T, MsgPackError>
+  let ~reader = MsgPackReader::init(bytes, limits: limits)
+  match(read_dto<T, MsgPackError, MsgPackReader>(reader, true))
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<T> { value }:
+      if reader.is_complete():
+        return Ok<T> { value }
+      Err<MsgPackError> {
+        error: make_error(
+          error_code_type_mismatch(),
+          "msgpack typed decode has trailing bytes"
+        )
+      }
+
+/// Decodes immutable bytes into the parsed MessagePack value tree.
+pub fn decode_value_bytes(bytes: Bytes): () -> Result<MsgPack, MsgPackError>
+  msgpack_fns::decode_value_bytes(bytes)
+
+/// Converts a provider-neutral dynamic value into the parsed MessagePack tree.
+pub fn from_data_value(value: DataValue): () -> MsgPack
+  data_value_to_msgpack(value)
+
+/// Converts a parsed MessagePack tree into a provider-neutral dynamic value.
+pub fn to_data_value(value: MsgPack): () -> DataValue
+  msgpack_to_data_value(value)
 
 pub fn unpack_bool(value: MsgPack): () -> Result<bool, MsgPackError>
   value.match(decoded)
@@ -168,70 +215,6 @@ pub fn unpack_i64(value: MsgPack): () -> Result<i64, MsgPackError>
 pub fn unpack_map(value: MsgPack): () -> Result<Dict<String, MsgPack>, MsgPackError>
   msgpack_fns::unpack_map_result(value)
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.array-with-capacity")
-fn msgpack_array_with_capacity(size: i32): () -> Array<MsgPack>
-  Array<MsgPack>::with_capacity(size)
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.array-push")
-fn msgpack_array_push(array: Array<MsgPack>, value: MsgPack): () -> Array<MsgPack>
-  array.pushed(value)
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.array-length")
-fn msgpack_array_length(array: Array<MsgPack>): () -> i32
-  array.len()
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.array-raw-storage")
-fn msgpack_array_raw_storage(array: Array<MsgPack>): () -> FixedArray<MsgPack>
-  array.raw_storage()
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.map-new")
-fn msgpack_map_new(): () -> Dict<String, MsgPack>
-  Dict<String, MsgPack>::init()
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.map-set")
-fn msgpack_map_set(map: Dict<String, MsgPack>, key: String, value: MsgPack): () -> Dict<String, MsgPack>
-  map.setting(key, value)
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.map-get")
-fn msgpack_map_get(map: Dict<String, MsgPack>, key: String): () -> MsgPack
-  match(map.get(key))
-    Some<MsgPack> { value }:
-      value
-    None:
-      make_null()
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.map-has")
-fn msgpack_map_has(map: Dict<String, MsgPack>, key: String): () -> bool
-  map.contains(key)
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.map-tag-is")
-fn msgpack_map_tag_is(map: Dict<String, MsgPack>, expected: String): () -> bool
-  match(map.get("$variant"))
-    Some<MsgPack> { value }:
-      match(unpack_string(value))
-        Ok<String> { value }:
-          value == expected
-        Err<MsgPackError>:
-          false
-    None:
-      false
-
-@compiler_contract(id: "voyd.std.boundary.msgpack.make-string")
-fn msgpack_make_string(value: String): () -> MsgPack
-  msgpack_fns::make_string(value)
-
-@intrinsic(name: "__boundary_value_to_msgpack")
-fn boundary_value_to_msgpack<T>(value: T): () -> MsgPack
-  __boundary_value_to_msgpack(value)
-
-@intrinsic(name: "__boundary_msgpack_to_value")
-fn boundary_msgpack_to_value<T>(value: MsgPack): () -> T
-  __boundary_msgpack_to_value<T>(value)
-
-@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
-fn boundary_msgpack_to_value_or_identity<T, U>(source: U, value: MsgPack): () -> T
-  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
-
 /// Encodes `value` into the caller-provided memory region `[ptr, ptr + len)`.
 ///
 /// Returns the number of bytes written, or `Err(MsgPackError)` when the region
@@ -261,3 +244,110 @@ fn type_mismatch_result<T>(expected: String): () -> Result<T, MsgPackError>
       "msgpack unpack failed: expected ".concat(expected)
     )
   }
+
+fn data_value_to_msgpack(value: DataValue) -> MsgPack
+  value.match(decoded)
+    DataNull:
+      make_null()
+    DataBool:
+      make_bool(decoded.value)
+    DataI32:
+      make_i32(decoded.value)
+    DataI64:
+      make_i64(decoded.value)
+    DataF32:
+      make_f32(decoded.value)
+    DataF64:
+      make_f64(decoded.value)
+    DataString:
+      make_string(decoded.value)
+    DataBytes:
+      make_binary(Binary { bytes: decoded.value.to_array() })
+    DataArray:
+      let ~values = Array<MsgPack>::with_capacity(decoded.values.len())
+      var index = 0
+      while index < decoded.values.len():
+        values.push(data_value_to_msgpack(decoded.values.at(index)))
+        index = index + 1
+      make_array(values)
+    DataObject:
+      make_map(data_fields_to_msgpack(decoded.fields))
+    DataVariant:
+      let ~map = data_fields_to_msgpack(decoded.fields)
+      map.set("$variant", make_string(decoded.name))
+      make_map(map)
+
+fn data_fields_to_msgpack(fields: Array<DataField>) -> Dict<String, MsgPack>
+  let ~out = Dict<String, MsgPack>::init()
+  var index = 0
+  while index < fields.len():
+    let field = fields.at(index)
+    out.set(field.name, data_value_to_msgpack(field.value))
+    index = index + 1
+  out
+
+fn msgpack_to_data_value(value: MsgPack) -> DataValue
+  value.match(decoded)
+    Null:
+      DataNull {}
+    Bool:
+      DataBool { value: decoded.value }
+    I32:
+      DataI32 { value: decoded.value }
+    I64:
+      DataI64 { value: decoded.value }
+    F32:
+      DataF32 { value: decoded.value }
+    F64:
+      DataF64 { value: decoded.value }
+    String:
+      DataString { value: decoded }
+    Binary:
+      DataBytes { value: bytes_from_array(decoded.bytes) }
+    Array<MsgPack>:
+      let ~values = Array<DataValue>::with_capacity(decoded.len())
+      var index = 0
+      while index < decoded.len():
+        values.push(msgpack_to_data_value(decoded.at(index)))
+        index = index + 1
+      DataArray { values }
+    MsgPackMap:
+      msgpack_map_to_data_value(msgpack_fns::unpack_map(value))
+
+fn msgpack_map_to_data_value(value: Dict<String, MsgPack>) -> DataValue
+  let entries = value.entries()
+  let ~fields = Array<DataField>::with_capacity(entries.len())
+  var variant_name = "".to_string()
+  var has_variant = false
+  var index = 0
+  while index < entries.len():
+    let entry = entries.at(index)
+    if entry.0 == "$variant":
+      entry.1.match(tag)
+        String:
+          variant_name = tag
+          has_variant = true
+        else:
+          void
+    else:
+      fields.push(DataField {
+        name: entry.0,
+        value: msgpack_to_data_value(entry.1)
+      })
+    index = index + 1
+  if has_variant:
+    DataVariant { name: variant_name, fields }
+  else:
+    DataObject { fields }
+
+fn bytes_from_array(source: Array<i32>) -> Bytes
+  let ~buffer = ByteBuffer::with_capacity(source.len())
+  var index = 0
+  while index < source.len():
+    buffer.push(source.at(index))
+    index = index + 1
+  buffer.as_bytes()
+
+@intrinsic(name: "__dto_value_to_data")
+fn dto_value_to_data<T>(value: T): () -> DataValue
+  __dto_value_to_data(value)

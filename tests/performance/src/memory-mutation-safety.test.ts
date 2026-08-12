@@ -87,8 +87,6 @@ perfDescribe("performance: memory and mutation safety", () => {
 
       expect(baselineText).not.toContain("ref.eq");
       expect(optimizedText).not.toContain("ref.eq");
-      expect(baselineText).not.toContain("__voyd_panic");
-      expect(optimizedText).not.toContain("__voyd_panic");
       expect(allocationOps(optimizedText)).toBeLessThanOrEqual(
         allocationOps(baselineText),
       );

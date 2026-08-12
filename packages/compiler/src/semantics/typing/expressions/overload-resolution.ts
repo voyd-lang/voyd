@@ -27,6 +27,7 @@ export type OverloadCandidateScore<T extends OverloadResolutionCandidate> = {
   candidate: T;
   shapeMatch: boolean;
   argumentMatch: boolean;
+  argumentConversionPenalty: number;
   borrowFormationPenalty: number;
   dominance: number;
   genericityPenalty: number;
@@ -44,6 +45,7 @@ type OverloadScoreInput<T extends OverloadResolutionCandidate> = Omit<
 >;
 
 export type OverloadMatchScoreOverrides = {
+  argumentConversionPenalty?: number;
   lambdaCompatibility?: number;
 };
 
@@ -169,6 +171,7 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
       state,
     }),
     argumentMatch: false,
+    argumentConversionPenalty: 0,
     lambdaCompatibility: 0,
     expectedReturnCompatibility: expectedReturnCompatible
       ? expectedReturnCompatible(candidate)
@@ -228,6 +231,8 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
   const scoreInputs = shapedScores.map((score) => ({
     ...score,
     argumentMatch: matchesSet.has(score.candidate),
+    argumentConversionPenalty:
+      scoreOverrides.get(score.candidate)?.argumentConversionPenalty ?? 0,
     lambdaCompatibility:
       scoreOverrides.get(score.candidate)?.lambdaCompatibility ?? 0,
   }));
@@ -948,6 +953,7 @@ const scoreOverloadMatches = <T extends OverloadResolutionCandidate>({
         candidate,
         shapeMatch: true,
         argumentMatch: true,
+        argumentConversionPenalty: 0,
         borrowFormationPenalty: overloadBorrowFormationPenalty({
           args: argumentsByCandidate?.get(candidate) ?? [],
           parameters: candidateParams,
@@ -1095,8 +1101,16 @@ const selectOverloadMatchesFromScores = <
     return leastBorrowFormingScores.map(({ candidate }) => candidate);
   }
 
-  const maximalScores = selectScoresByMax(
+  const leastConvertingScores = selectScoresByMin(
     leastBorrowFormingScores,
+    "argumentConversionPenalty",
+  );
+  if (leastConvertingScores.length === 1) {
+    return leastConvertingScores.map(({ candidate }) => candidate);
+  }
+
+  const maximalScores = selectScoresByMax(
+    leastConvertingScores,
     "dominance",
   );
   if (maximalScores.length === 1) {
@@ -1143,7 +1157,10 @@ const selectScoresByMax = <T extends OverloadResolutionCandidate>(
 
 const selectScoresByMin = <T extends OverloadResolutionCandidate>(
   scores: readonly OverloadCandidateScore<T>[],
-  dimension: "borrowFormationPenalty" | "genericityPenalty",
+  dimension:
+    | "argumentConversionPenalty"
+    | "borrowFormationPenalty"
+    | "genericityPenalty",
 ): readonly OverloadCandidateScore<T>[] => {
   const min = Math.min(...scores.map((score) => score[dimension]));
   return scores.filter((score) => score[dimension] === min);
@@ -1171,6 +1188,7 @@ export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
       candidate,
       shapeMatch: true,
       argumentMatch: true,
+      argumentConversionPenalty: 0,
       lambdaCompatibility: 0,
       expectedReturnCompatibility: true,
     })),

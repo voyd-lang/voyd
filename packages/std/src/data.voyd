@@ -5,10 +5,13 @@
 //! after this module validates the matching provider-neutral `Shape`.
 
 use std::array::Array
+use std::bytes::Bytes
 use std::dict::{ Dict, DictKey }
+use std::error::panic
 use std::meta::{
   ArrayShape,
   BoolShape,
+  BytesShape,
   F32Shape,
   F64Shape,
   I32Shape,
@@ -25,11 +28,10 @@ use std::meta::{
   UnitShape,
   shape_of
 }
-use std::msgpack::{ MsgPack }
-use std::msgpack::self as msgpack
 use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
+use std::string::new_string
 use std::string::type::{ String, StringSlice }
 
 /// Neutral null/unit value.
@@ -52,6 +54,9 @@ pub obj DataF64 { api value: f64 }
 
 /// Neutral owned string value.
 pub obj DataString { api value: String }
+
+/// Neutral immutable byte sequence.
+pub obj DataBytes { api value: Bytes }
 
 /// Named field in a neutral object or variant payload.
 pub obj DataField {
@@ -79,9 +84,34 @@ pub type DataValue = DataNull
   | DataF32
   | DataF64
   | DataString
+  | DataBytes
   | DataArray
   | DataObject
   | DataVariant
+
+/// Validation failure reported by a custom DTO representation.
+pub obj CustomDtoError {
+  /// Stable application/provider-independent failure code.
+  api code: String,
+  /// Human-readable detail for diagnostics.
+  api message: String
+}
+
+/// One provider-neutral external representation for an exceptional nominal type.
+///
+/// `Representation` must itself be eligible for automatic DTO derivation.
+/// Implementations are format-independent and singular for `T`.
+pub trait CustomDto<T, Representation>
+  fn write(value: T) -> Representation
+  fn read(value: Representation) -> Result<T, CustomDtoError>
+
+/// Compiler-known lifecycle for a stateless host transport provider.
+@compiler_contract(id: "voyd.std.host-transport-provider")
+pub trait HostTransportProvider<Reader, Writer>
+  fn create_reader(ptr: i32, len: i32) -> Reader
+  fn reader_complete(reader: Reader) -> bool
+  fn create_writer(ptr: i32, len: i32) -> Writer
+  fn finish_writer(writer: Writer) -> i32
 
 /// Ignore object fields absent from the target Voyd type.
 pub obj IgnoreUnknownFields {}
@@ -96,6 +126,866 @@ pub type UnknownFieldPolicy = IgnoreUnknownFields | RejectUnknownFields
 pub obj DecodeOptions {
   api unknown_fields: UnknownFieldPolicy
 }
+
+/// Resource limits applied while writing a DTO value.
+pub obj EncodeLimits {
+  api max_depth: i32,
+  api max_bytes: i32,
+  api max_collection_length: i32
+}
+
+/// Resource limits applied before allocating decoded DTO storage.
+pub obj DecodeLimits {
+  api max_depth: i32,
+  api max_bytes: i32,
+  api max_collection_length: i32
+}
+
+/// Returns conservative default encoding limits.
+pub fn default_encode_limits() -> EncodeLimits
+  EncodeLimits {
+    max_depth: 128,
+    max_bytes: 16777216,
+    max_collection_length: 1048576
+  }
+
+/// Returns conservative default decoding limits.
+pub fn default_decode_limits() -> DecodeLimits
+  DecodeLimits {
+    max_depth: 128,
+    max_bytes: 16777216,
+    max_collection_length: 1048576
+  }
+
+pub obj NullKind {}
+pub obj BoolKind {}
+pub obj I32Kind {}
+pub obj I64Kind {}
+pub obj F32Kind {}
+pub obj F64Kind {}
+pub obj StringKind {}
+pub obj BytesKind {}
+pub obj ArrayKind {}
+pub obj RecordKind {}
+pub obj VariantKind {}
+
+/// Provider-neutral kinds reported by a `DataReader`.
+pub type DataKind = NullKind
+  | BoolKind
+  | I32Kind
+  | I64Kind
+  | F32Kind
+  | F64Kind
+  | StringKind
+  | BytesKind
+  | ArrayKind
+  | RecordKind
+  | VariantKind
+
+/// Stateful sink used by generated DTO traversal.
+///
+/// Calls must form one balanced root value. A writer becomes unusable after
+/// the first sink failure.
+pub trait DataWriter<SinkError>
+  fn reject(~self, message: String) -> Result<Unit, SinkError>
+  fn write_null(~self) -> Result<Unit, SinkError>
+  fn write_bool(~self, value: bool) -> Result<Unit, SinkError>
+  fn write_i32(~self, value: i32) -> Result<Unit, SinkError>
+  fn write_i64(~self, value: i64) -> Result<Unit, SinkError>
+  fn write_f32(~self, value: f32) -> Result<Unit, SinkError>
+  fn write_f64(~self, value: f64) -> Result<Unit, SinkError>
+  fn write_string(~self, value: String) -> Result<Unit, SinkError>
+  fn write_bytes(~self, value: Bytes) -> Result<Unit, SinkError>
+  fn begin_array(~self, { length: i32 }) -> Result<Unit, SinkError>
+  fn end_array(~self) -> Result<Unit, SinkError>
+  fn begin_record(
+    ~self,
+    { name: String, field_count: i32 }
+  ) -> Result<Unit, SinkError>
+  fn write_field(~self, name: String) -> Result<Unit, SinkError>
+  fn end_record(~self) -> Result<Unit, SinkError>
+  fn begin_variant(
+    ~self,
+    { union: String, variant: String, field_count: i32 }
+  ) -> Result<Unit, SinkError>
+  fn end_variant(~self) -> Result<Unit, SinkError>
+
+/// Stateful pull source used by generated DTO traversal.
+pub trait DataReader<SourceError>
+  fn reject(~self, message: String) -> Result<Unit, SourceError>
+  fn reject_custom(
+    ~self,
+    code: String,
+    message: String
+  ) -> Result<Unit, SourceError>
+  fn current_path(self) -> String
+  fn matches_name(self, actual: String, expected: String) -> bool
+  fn enter_field(~self, name: String) -> void
+  fn enter_index(~self, index: i32) -> void
+  fn leave(~self) -> void
+  fn kind(self) -> Result<DataKind, SourceError>
+  fn read_null(~self) -> Result<Unit, SourceError>
+  fn read_bool(~self) -> Result<bool, SourceError>
+  fn read_i32(~self) -> Result<i32, SourceError>
+  fn read_i64(~self) -> Result<i64, SourceError>
+  fn read_f32(~self) -> Result<f32, SourceError>
+  fn read_f64(~self) -> Result<f64, SourceError>
+  fn read_string(~self) -> Result<String, SourceError>
+  fn read_bytes(~self) -> Result<Bytes, SourceError>
+  fn begin_array(~self) -> Result<i32, SourceError>
+  fn has_next_element(self) -> Result<bool, SourceError>
+  fn end_array(~self) -> Result<Unit, SourceError>
+  fn begin_record(~self) -> Result<Unit, SourceError>
+  fn next_field(~self) -> Result<Option<String>, SourceError>
+  fn skip_value(~self) -> Result<Unit, SourceError>
+  fn end_record(~self) -> Result<Unit, SourceError>
+  fn begin_variant(~self) -> Result<String, SourceError>
+  fn end_variant(~self) -> Result<Unit, SourceError>
+
+/// Balanced-stream error reported by `DataValueWriter`.
+pub obj DataValueWriteError {
+  api message: String
+}
+
+obj DataValueLiteralEvent { value: DataValue }
+obj DataValueBeginArrayEvent { length: i32 }
+obj DataValueEndArrayEvent {}
+obj DataValueBeginRecordEvent { field_count: i32 }
+obj DataValueFieldEvent { name: String }
+obj DataValueEndRecordEvent {}
+obj DataValueBeginVariantEvent { name: String, field_count: i32 }
+obj DataValueEndVariantEvent {}
+
+type DataValueWriteEvent = DataValueLiteralEvent
+  | DataValueBeginArrayEvent
+  | DataValueEndArrayEvent
+  | DataValueBeginRecordEvent
+  | DataValueFieldEvent
+  | DataValueEndRecordEvent
+  | DataValueBeginVariantEvent
+  | DataValueEndVariantEvent
+
+obj ParsedDataValue {
+  value: DataValue,
+  next_index: i32
+}
+
+/// Concrete balanced writer that constructs one explicit `DataValue` tree.
+pub obj DataValueWriter {
+  events: Array<DataValueWriteEvent>,
+  depth: i32,
+  root_count: i32,
+  failed: bool
+}
+
+impl DataValueWriter
+  /// Creates an empty writer session.
+  pub fn init() -> DataValueWriter
+    DataValueWriter {
+      events: Array<DataValueWriteEvent>::init(),
+      depth: 0,
+      root_count: 0,
+      failed: false
+    }
+
+  /// Returns true when exactly one balanced root value is ready.
+  api fn is_complete(self) -> bool
+    self.finish().match(result)
+      Ok<DataValue>:
+        true
+      Err<DataValueWriteError>:
+        false
+
+  /// Finishes the session after exactly one balanced root value.
+  api fn finish(self) -> Result<DataValue, DataValueWriteError>
+    if self.failed:
+      return data_writer_failure<DataValue>("data writer session has failed")
+    if self.depth != 0:
+      return data_writer_failure<DataValue>("data writer has unclosed containers")
+    if self.root_count != 1:
+      return data_writer_failure<DataValue>("data writer has no root value")
+    match(parse_data_value(self.events, 0))
+      Err<DataValueWriteError> { error }:
+        Err<DataValueWriteError> { error }
+      Ok<ParsedDataValue> { value: parsed }:
+        if parsed.next_index != self.events.len():
+          return data_writer_failure<DataValue>("data writer has trailing events")
+        Ok<DataValue> { value: parsed.value }
+
+  fn start_value(~self) -> Result<Unit, DataValueWriteError>
+    if self.failed:
+      return data_writer_failure<Unit>("data writer session has failed")
+    if self.depth == 0:
+      if self.root_count != 0:
+        return self.fail("data writer received more than one root value")
+      self.root_count = 1
+    data_writer_success()
+
+  fn write_literal(
+    ~self,
+    value: DataValue
+  ) -> Result<Unit, DataValueWriteError>
+    match(self.start_value())
+      Err<DataValueWriteError> { error }:
+        Err<DataValueWriteError> { error }
+      Ok<Unit>:
+        self.events.push(DataValueLiteralEvent { value })
+        data_writer_success()
+
+  fn fail(~self, message: String) -> Result<Unit, DataValueWriteError>
+    self.failed = true
+    data_writer_failure<Unit>(message)
+
+impl DataWriter<DataValueWriteError> for DataValueWriter
+  fn reject(~self, message: String) -> Result<Unit, DataValueWriteError>
+    self.fail(message)
+
+  fn write_null(~self) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataNull {})
+
+  fn write_bool(~self, value: bool) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataBool { value })
+
+  fn write_i32(~self, value: i32) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataI32 { value })
+
+  fn write_i64(~self, value: i64) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataI64 { value })
+
+  fn write_f32(~self, value: f32) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataF32 { value })
+
+  fn write_f64(~self, value: f64) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataF64 { value })
+
+  fn write_string(~self, value: String) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataString { value })
+
+  fn write_bytes(~self, value: Bytes) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataBytes { value })
+
+  fn begin_array(
+    ~self,
+    { length: i32 }
+  ) -> Result<Unit, DataValueWriteError>
+    if length < 0:
+      return self.fail("data writer array length cannot be negative")
+    match(self.start_value())
+      Err<DataValueWriteError> { error }:
+        Err<DataValueWriteError> { error }
+      Ok<Unit>:
+        self.events.push(DataValueBeginArrayEvent { length })
+        self.depth = self.depth + 1
+        data_writer_success()
+
+  fn end_array(~self) -> Result<Unit, DataValueWriteError>
+    if self.depth <= 0:
+      return self.fail("data writer end_array has no matching container")
+    self.events.push(DataValueEndArrayEvent {})
+    self.depth = self.depth - 1
+    data_writer_success()
+
+  fn begin_record(
+    ~self,
+    { name: String, field_count: i32 }
+  ) -> Result<Unit, DataValueWriteError>
+    if field_count < 0:
+      return self.fail("data writer record field count cannot be negative")
+    match(self.start_value())
+      Err<DataValueWriteError> { error }:
+        Err<DataValueWriteError> { error }
+      Ok<Unit>:
+        self.events.push(DataValueBeginRecordEvent { field_count })
+        self.depth = self.depth + 1
+        data_writer_success()
+
+  fn write_field(~self, name: String) -> Result<Unit, DataValueWriteError>
+    if self.depth <= 0:
+      return self.fail("data writer field is outside a record or variant")
+    self.events.push(DataValueFieldEvent { name })
+    data_writer_success()
+
+  fn end_record(~self) -> Result<Unit, DataValueWriteError>
+    if self.depth <= 0:
+      return self.fail("data writer end_record has no matching container")
+    self.events.push(DataValueEndRecordEvent {})
+    self.depth = self.depth - 1
+    data_writer_success()
+
+  fn begin_variant(
+    ~self,
+    { union: String, variant: String, field_count: i32 }
+  ) -> Result<Unit, DataValueWriteError>
+    match(self.start_value())
+      Err<DataValueWriteError> { error }:
+        Err<DataValueWriteError> { error }
+      Ok<Unit>:
+        self.events.push(DataValueBeginVariantEvent {
+          name: variant,
+          field_count
+        })
+        self.depth = self.depth + 1
+        data_writer_success()
+
+  fn end_variant(~self) -> Result<Unit, DataValueWriteError>
+    if self.depth <= 0:
+      return self.fail("data writer end_variant has no matching container")
+    self.events.push(DataValueEndVariantEvent {})
+    self.depth = self.depth - 1
+    data_writer_success()
+
+fn parse_data_value(
+  events: Array<DataValueWriteEvent>,
+  index: i32
+) -> Result<ParsedDataValue, DataValueWriteError>
+  if index < 0 or index >= events.len():
+    return data_writer_failure<ParsedDataValue>("data writer expected a value")
+  events.at(index).match(event)
+    DataValueLiteralEvent:
+      data_writer_parsed(event.value, index + 1)
+    DataValueBeginArrayEvent:
+      parse_data_array(events, index, event.length)
+    DataValueBeginRecordEvent:
+      parse_data_fields(events, index, event.field_count, record_name: None {})
+    DataValueBeginVariantEvent:
+      parse_data_fields(
+        events,
+        index,
+        event.field_count,
+        record_name: Some<String> { value: event.name }
+      )
+    else:
+      data_writer_failure<ParsedDataValue>("data writer expected a value event")
+
+fn parse_data_array(
+  events: Array<DataValueWriteEvent>,
+  index: i32,
+  length: i32
+) -> Result<ParsedDataValue, DataValueWriteError>
+  let ~values = Array<DataValue>::with_capacity(length)
+  var next_index = index + 1
+  while values.len() < length:
+    match(parse_data_value(events, next_index))
+      Err<DataValueWriteError> { error }:
+        return Err<DataValueWriteError> { error }
+      Ok<ParsedDataValue> { value: parsed }:
+        values.push(parsed.value)
+        next_index = parsed.next_index
+  if next_index >= events.len():
+    return data_writer_failure<ParsedDataValue>("data writer array is not closed")
+  events.at(next_index).match(event)
+    DataValueEndArrayEvent:
+      data_writer_parsed(DataArray { values }, next_index + 1)
+    else:
+      data_writer_failure<ParsedDataValue>("data writer array length does not match")
+
+fn parse_data_fields(
+  events: Array<DataValueWriteEvent>,
+  index: i32,
+  field_count: i32,
+  { record_name: Option<String> }
+) -> Result<ParsedDataValue, DataValueWriteError>
+  let ~fields = Array<DataField>::with_capacity(field_count)
+  var next_index = index + 1
+  while fields.len() < field_count:
+    if next_index >= events.len():
+      return data_writer_failure<ParsedDataValue>("data writer field is missing")
+    events.at(next_index).match(event)
+      DataValueFieldEvent:
+        match(parse_data_value(events, next_index + 1))
+          Err<DataValueWriteError> { error }:
+            return Err<DataValueWriteError> { error }
+          Ok<ParsedDataValue> { value: parsed }:
+            fields.push(DataField { name: event.name, value: parsed.value })
+            next_index = parsed.next_index
+      else:
+        return data_writer_failure<ParsedDataValue>("data writer expected a field")
+  if next_index >= events.len():
+    return data_writer_failure<ParsedDataValue>("data writer record is not closed")
+  match(record_name)
+    None:
+      events.at(next_index).match(event)
+        DataValueEndRecordEvent:
+          data_writer_parsed(DataObject { fields }, next_index + 1)
+        else:
+          data_writer_failure<ParsedDataValue>("data writer record field count does not match")
+    Some<String> { value: name }:
+      events.at(next_index).match(event)
+        DataValueEndVariantEvent:
+          data_writer_parsed(DataVariant { name, fields }, next_index + 1)
+        else:
+          data_writer_failure<ParsedDataValue>("data writer variant field count does not match")
+
+fn data_writer_parsed(
+  value: DataValue,
+  next_index: i32
+) -> Result<ParsedDataValue, DataValueWriteError>
+  Ok<ParsedDataValue> { value: ParsedDataValue { value, next_index } }
+
+fn data_writer_success() -> Result<Unit, DataValueWriteError>
+  Ok<Unit> { value: Unit {} }
+
+fn data_writer_failure<T>(message: String) -> Result<T, DataValueWriteError>
+  Err<DataValueWriteError> { error: DataValueWriteError { message } }
+
+pub obj DataValueSourceFailure {}
+pub obj DataValueCustomFailure { api cause: CustomDtoError }
+pub type DataValueReadErrorKind = DataValueSourceFailure | DataValueCustomFailure
+
+/// Pull-stream error reported by `DataValueReader`.
+pub obj DataValueReadError {
+  api kind: DataValueReadErrorKind,
+  api path: String,
+  api message: String
+}
+
+/// Concrete pull reader over one explicit `DataValue` tree.
+pub obj DataValueReader {
+  events: Array<DataValueWriteEvent>,
+  index: i32,
+  failed: bool,
+  path: String,
+  parents: Array<String>
+}
+
+impl DataValueReader
+  /// Creates a reader positioned at the root value.
+  pub fn init(value: DataValue) -> DataValueReader
+    let ~events = Array<DataValueWriteEvent>::init()
+    append_data_value_events(events, value)
+    DataValueReader {
+      events,
+      index: 0,
+      failed: false,
+      path: "$".to_string(),
+      parents: Array<String>::init()
+    }
+
+  /// Returns true after the root value and all containers have been consumed.
+  api fn is_complete(self) -> bool
+    self.failed == false and self.index == self.events.len()
+
+  fn fail<T>(~self, message: String) -> Result<T, DataValueReadError>
+    self.failed = true
+    Err<DataValueReadError> {
+      error: DataValueReadError {
+        kind: DataValueSourceFailure {},
+        path: self.path,
+        message
+      }
+    }
+
+impl DataReader<DataValueReadError> for DataValueReader
+  fn reject(~self, message: String) -> Result<Unit, DataValueReadError>
+    self.fail<Unit>(message)
+
+  fn reject_custom(
+    ~self,
+    code: String,
+    message: String
+  ) -> Result<Unit, DataValueReadError>
+    self.failed = true
+    Err<DataValueReadError> {
+      error: DataValueReadError {
+        kind: DataValueCustomFailure {
+          cause: CustomDtoError { code, message }
+        },
+        path: self.path,
+        message
+      }
+    }
+
+  fn current_path(self) -> String
+    self.path
+
+  fn matches_name(self, actual: String, expected: String) -> bool
+    actual == expected
+
+  fn enter_field(~self, name: String) -> void
+    self.parents.push(self.path)
+    self.path = self.path.concat(".").concat(name)
+
+  fn enter_index(~self, index: i32) -> void
+    self.parents.push(self.path)
+    self.path = self.path.concat("[").concat(cast::to_string(index)).concat("]")
+
+  fn leave(~self) -> void
+    if self.parents.is_empty() == false:
+      let index = self.parents.len() - 1
+      self.path = self.parents.at(index)
+      self.parents.pop()
+
+  fn kind(self) -> Result<DataKind, DataValueReadError>
+    data_event_kind(self.events, self.index)
+
+  fn read_null(~self) -> Result<Unit, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Unit>("data reader expected null")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataNull:
+            self.index = self.index + 1
+            Ok<Unit> { value: Unit {} }
+          else:
+            self.fail<Unit>("data reader expected null")
+      else:
+        self.fail<Unit>("data reader expected null")
+
+  fn read_bool(~self) -> Result<bool, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<bool>("data reader expected bool")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataBool:
+            self.index = self.index + 1
+            Ok<bool> { value: value.value }
+          else:
+            self.fail<bool>("data reader expected bool")
+      else:
+        self.fail<bool>("data reader expected bool")
+
+  fn read_i32(~self) -> Result<i32, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<i32>("data reader expected i32")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataI32:
+            self.index = self.index + 1
+            Ok<i32> { value: value.value }
+          else:
+            self.fail<i32>("data reader expected i32")
+      else:
+        self.fail<i32>("data reader expected i32")
+
+  fn read_i64(~self) -> Result<i64, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<i64>("data reader expected i64")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataI64:
+            self.index = self.index + 1
+            Ok<i64> { value: value.value }
+          else:
+            self.fail<i64>("data reader expected i64")
+      else:
+        self.fail<i64>("data reader expected i64")
+
+  fn read_f32(~self) -> Result<f32, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<f32>("data reader expected f32")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataF32:
+            self.index = self.index + 1
+            Ok<f32> { value: value.value }
+          else:
+            self.fail<f32>("data reader expected f32")
+      else:
+        self.fail<f32>("data reader expected f32")
+
+  fn read_f64(~self) -> Result<f64, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<f64>("data reader expected f64")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataF64:
+            self.index = self.index + 1
+            Ok<f64> { value: value.value }
+          else:
+            self.fail<f64>("data reader expected f64")
+      else:
+        self.fail<f64>("data reader expected f64")
+
+  fn read_string(~self) -> Result<String, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<String>("data reader expected string")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataString:
+            let result = value.value.as_slice().to_string()
+            self.index = self.index + 1
+            Ok<String> { value: result }
+          else:
+            self.fail<String>("data reader expected string")
+      else:
+        self.fail<String>("data reader expected string")
+
+  fn read_bytes(~self) -> Result<Bytes, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Bytes>("data reader expected bytes")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataBytes:
+            let result = value.value.copied()
+            self.index = self.index + 1
+            Ok<Bytes> { value: result }
+          else:
+            self.fail<Bytes>("data reader expected bytes")
+      else:
+        self.fail<Bytes>("data reader expected bytes")
+
+  fn begin_array(~self) -> Result<i32, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<i32>("data reader expected array")
+    self.events.at(self.index).match(event)
+      DataValueBeginArrayEvent:
+        self.index = self.index + 1
+        Ok<i32> { value: event.length }
+      else:
+        self.fail<i32>("data reader expected array")
+
+  fn has_next_element(self) -> Result<bool, DataValueReadError>
+    if self.index >= self.events.len():
+      return data_reader_failure<bool>("data reader array is not closed")
+    self.events.at(self.index).match(event)
+      DataValueEndArrayEvent:
+        Ok<bool> { value: false }
+      DataValueLiteralEvent:
+        Ok<bool> { value: true }
+      DataValueBeginArrayEvent:
+        Ok<bool> { value: true }
+      DataValueBeginRecordEvent:
+        Ok<bool> { value: true }
+      DataValueBeginVariantEvent:
+        Ok<bool> { value: true }
+      else:
+        data_reader_failure<bool>("data reader expected an array element")
+
+  fn end_array(~self) -> Result<Unit, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Unit>("data reader array is not closed")
+    self.events.at(self.index).match(event)
+      DataValueEndArrayEvent:
+        self.index = self.index + 1
+        Ok<Unit> { value: Unit {} }
+      else:
+        self.fail<Unit>("data reader array has unread elements")
+
+  fn begin_record(~self) -> Result<Unit, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Unit>("data reader expected record")
+    self.events.at(self.index).match(event)
+      DataValueBeginRecordEvent:
+        self.index = self.index + 1
+        Ok<Unit> { value: Unit {} }
+      else:
+        self.fail<Unit>("data reader expected record")
+
+  fn next_field(~self) -> Result<Option<String>, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Option<String>>("data reader record is not closed")
+    self.events.at(self.index).match(event)
+      DataValueEndRecordEvent:
+        Ok<Option<String>> { value: None {} }
+      DataValueEndVariantEvent:
+        Ok<Option<String>> { value: None {} }
+      DataValueFieldEvent:
+        let name = event.name.as_slice().to_string()
+        self.index = self.index + 1
+        Ok<Option<String>> { value: Some<String> { value: name } }
+      else:
+        self.fail<Option<String>>("data reader expected a field")
+
+  fn skip_value(~self) -> Result<Unit, DataValueReadError>
+    match(skip_data_value_event(self.events, self.index))
+      Err<DataValueReadError> { error }:
+        self.failed = true
+        Err<DataValueReadError> { error }
+      Ok<i32> { value: next_index }:
+        self.index = next_index
+        Ok<Unit> { value: Unit {} }
+
+  fn end_record(~self) -> Result<Unit, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Unit>("data reader record is not closed")
+    self.events.at(self.index).match(event)
+      DataValueEndRecordEvent:
+        self.index = self.index + 1
+        Ok<Unit> { value: Unit {} }
+      else:
+        self.fail<Unit>("data reader record has unread fields")
+
+  fn begin_variant(~self) -> Result<String, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<String>("data reader expected variant")
+    self.events.at(self.index).match(event)
+      DataValueBeginVariantEvent:
+        let name = event.name.as_slice().to_string()
+        self.index = self.index + 1
+        Ok<String> { value: name }
+      else:
+        self.fail<String>("data reader expected variant")
+
+  fn end_variant(~self) -> Result<Unit, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Unit>("data reader variant is not closed")
+    self.events.at(self.index).match(event)
+      DataValueEndVariantEvent:
+        self.index = self.index + 1
+        Ok<Unit> { value: Unit {} }
+      else:
+        self.fail<Unit>("data reader variant has unread fields")
+
+fn append_data_value_events(
+  ~events: Array<DataValueWriteEvent>,
+  value: DataValue
+) -> void
+  value.match(data)
+    DataNull:
+      events.push(DataValueLiteralEvent { value: DataNull {} })
+    DataBool:
+      events.push(DataValueLiteralEvent { value: DataBool { value: data.value } })
+    DataI32:
+      events.push(DataValueLiteralEvent { value: DataI32 { value: data.value } })
+    DataI64:
+      events.push(DataValueLiteralEvent { value: DataI64 { value: data.value } })
+    DataF32:
+      events.push(DataValueLiteralEvent { value: DataF32 { value: data.value } })
+    DataF64:
+      events.push(DataValueLiteralEvent { value: DataF64 { value: data.value } })
+    DataString:
+      events.push(DataValueLiteralEvent {
+        value: DataString { value: data.value.as_slice().to_string() }
+      })
+    DataBytes:
+      events.push(DataValueLiteralEvent {
+        value: DataBytes { value: data.value.copied() }
+      })
+    DataArray:
+      events.push(DataValueBeginArrayEvent { length: data.values.len() })
+      var index = 0
+      while index < data.values.len():
+        append_data_value_events(events, data.values.at(index))
+        index = index + 1
+      events.push(DataValueEndArrayEvent {})
+    DataObject:
+      events.push(DataValueBeginRecordEvent { field_count: data.fields.len() })
+      append_data_field_events(events, data.fields)
+      events.push(DataValueEndRecordEvent {})
+    DataVariant:
+      events.push(DataValueBeginVariantEvent {
+        name: data.name.as_slice().to_string(),
+        field_count: data.fields.len()
+      })
+      append_data_field_events(events, data.fields)
+      events.push(DataValueEndVariantEvent {})
+
+fn append_data_field_events(
+  ~events: Array<DataValueWriteEvent>,
+  fields: Array<DataField>
+) -> void
+  var index = 0
+  while index < fields.len():
+    let field = fields.at(index)
+    events.push(DataValueFieldEvent { name: field.name.as_slice().to_string() })
+    append_data_value_events(events, field.value)
+    index = index + 1
+
+fn data_event_kind(
+  events: Array<DataValueWriteEvent>,
+  index: i32
+) -> Result<DataKind, DataValueReadError>
+  if index < 0 or index >= events.len():
+    return data_reader_failure<DataKind>("data reader has no current value")
+  events.at(index).match(event)
+    DataValueBeginArrayEvent:
+      Ok<DataKind> { value: ArrayKind {} }
+    DataValueBeginRecordEvent:
+      Ok<DataKind> { value: RecordKind {} }
+    DataValueBeginVariantEvent:
+      Ok<DataKind> { value: VariantKind {} }
+    DataValueLiteralEvent:
+      event.value.match(value)
+        DataNull:
+          Ok<DataKind> { value: NullKind {} }
+        DataBool:
+          Ok<DataKind> { value: BoolKind {} }
+        DataI32:
+          Ok<DataKind> { value: I32Kind {} }
+        DataI64:
+          Ok<DataKind> { value: I64Kind {} }
+        DataF32:
+          Ok<DataKind> { value: F32Kind {} }
+        DataF64:
+          Ok<DataKind> { value: F64Kind {} }
+        DataString:
+          Ok<DataKind> { value: StringKind {} }
+        DataBytes:
+          Ok<DataKind> { value: BytesKind {} }
+        else:
+          data_reader_failure<DataKind>("data reader literal is invalid")
+    else:
+      data_reader_failure<DataKind>("data reader has no current value")
+
+fn skip_data_value_event(
+  events: Array<DataValueWriteEvent>,
+  index: i32
+) -> Result<i32, DataValueReadError>
+  if index < 0 or index >= events.len():
+    return data_reader_failure<i32>("data reader has no value to skip")
+  events.at(index).match(event)
+    DataValueLiteralEvent:
+      Ok<i32> { value: index + 1 }
+    DataValueBeginArrayEvent:
+      skip_data_container(events, index, event.length, is_record: false)
+    DataValueBeginRecordEvent:
+      skip_data_container(events, index, event.field_count, is_record: true)
+    DataValueBeginVariantEvent:
+      skip_data_container(events, index, event.field_count, is_record: true)
+    else:
+      data_reader_failure<i32>("data reader has no value to skip")
+
+fn skip_data_container(
+  events: Array<DataValueWriteEvent>,
+  index: i32,
+  count: i32,
+  { is_record: bool }
+) -> Result<i32, DataValueReadError>
+  var next_index = index + 1
+  var consumed = 0
+  while consumed < count:
+    if is_record:
+      if next_index >= events.len():
+        return data_reader_failure<i32>("data reader field is missing")
+      events.at(next_index).match(event)
+        DataValueFieldEvent:
+          next_index = next_index + 1
+        else:
+          return data_reader_failure<i32>("data reader expected a field")
+    match(skip_data_value_event(events, next_index))
+      Err<DataValueReadError> { error }:
+        return Err<DataValueReadError> { error }
+      Ok<i32> { value }:
+        next_index = value
+    consumed = consumed + 1
+  if next_index >= events.len():
+    return data_reader_failure<i32>("data reader container is not closed")
+  events.at(next_index).match(event)
+    DataValueEndArrayEvent:
+      Ok<i32> { value: next_index + 1 }
+    DataValueEndRecordEvent:
+      Ok<i32> { value: next_index + 1 }
+    DataValueEndVariantEvent:
+      Ok<i32> { value: next_index + 1 }
+    else:
+      data_reader_failure<i32>("data reader container is not closed")
+
+fn data_reader_failure<T>(message: String) -> Result<T, DataValueReadError>
+  Err<DataValueReadError> {
+    error: DataValueReadError {
+      kind: DataValueSourceFailure {},
+      path: "$".to_string(),
+      message
+    }
+  }
 
 /// A required field was absent.
 pub obj MissingField {}
@@ -115,6 +1005,9 @@ pub obj InvalidVariant {}
 /// A shape reference could not be resolved.
 pub obj InvalidShapeReference {}
 
+/// A custom DTO rejected its otherwise valid representation.
+pub obj CustomDtoFailure { api cause: CustomDtoError }
+
 /// Stable categories of structural decode failures.
 pub type DecodeErrorKind = MissingField
   | UnknownField
@@ -122,6 +1015,7 @@ pub type DecodeErrorKind = MissingField
   | DuplicateField
   | InvalidVariant
   | InvalidShapeReference
+  | CustomDtoFailure
 
 /// Precise, recoverable structural decode failure.
 pub obj DecodeError {
@@ -135,9 +1029,32 @@ pub obj DecodeError {
   api actual: String
 }
 
-/// Returns decoder options that ignore unknown fields.
+/// Returns decoder options that reject unknown fields.
 pub fn default_decode_options() -> DecodeOptions
-  DecodeOptions { unknown_fields: IgnoreUnknownFields {} }
+  DecodeOptions { unknown_fields: RejectUnknownFields {} }
+
+/// Encodes a DTO-compatible value into the neutral dynamic tree.
+pub fn encode<T>(value: T): () -> DataValue
+  dto_value_to_data(value)
+
+/// Writes a closed DTO directly into a stateful provider sink.
+///
+/// The compiler generates the schema traversal. The sink receives compact
+/// record and variant descriptors without an intermediate `DataValue` tree.
+@intrinsic(name: "__dto_write")
+pub fn write<T, SinkError, Writer>(
+  writer: Writer,
+  value: T
+): () -> Result<Unit, SinkError>
+  __dto_write(writer, value)
+
+/// Reads a closed DTO directly from a stateful provider source.
+@intrinsic(name: "__dto_read")
+pub fn read<T, SourceError, Reader>(
+  reader: Reader,
+  reject_unknown_fields: bool
+): () -> Result<T, SourceError>
+  __dto_read<T, SourceError, Reader>(reader, reject_unknown_fields)
 
 /// Fallibly decodes a neutral value into a boundary-compatible Voyd type.
 pub fn decode<T>(value: DataValue): () -> Result<T, DecodeError>
@@ -148,7 +1065,26 @@ pub fn decode<T>(value: DataValue, { options: DecodeOptions }): () -> Result<T, 
   let shape = shape_of<T>()
   match(validate(value, shape.root, shape, options, "$".to_string()))
     Ok<Unit>:
-      Ok<T> { value: boundary_data_to_value<T>(value) }
+      let ~reader = DataValueReader::init(value)
+      match(read<T, DataValueReadError, DataValueReader>(
+        reader,
+        rejects_unknown_fields(options)
+      ))
+        Ok<T> { value }:
+          Ok<T> { value }
+        Err<DataValueReadError> { error }:
+          error.kind.match(kind)
+            DataValueCustomFailure:
+              Err<DecodeError> {
+                error: DecodeError {
+                  kind: CustomDtoFailure { cause: kind.cause },
+                  path: error.path,
+                  expected: "valid custom DTO".to_string(),
+                  actual: error.message
+                }
+              }
+            DataValueSourceFailure:
+              mismatch<T>(error.path, "valid DTO".to_string(), error.message)
     Err<DecodeError> { error }:
       Err<DecodeError> { error }
 
@@ -192,6 +1128,10 @@ fn validate(
       value.match(decoded)
         DataString: valid()
         else: mismatch(path, "string", data_kind_name(value))
+    BytesShape:
+      value.match(decoded)
+        DataBytes: valid()
+        else: mismatch(path, "bytes", data_kind_name(value))
     UnitShape:
       value.match(decoded)
         DataNull: valid()
@@ -398,6 +1338,7 @@ fn shape_kind_name(shape: ShapeNode) -> String
     F32Shape: "f32".to_string()
     F64Shape: "f64".to_string()
     StringShape: "string".to_string()
+    BytesShape: "bytes".to_string()
     UnitShape: "unit".to_string()
     ArrayShape: "array".to_string()
     RecordShape: active.name
@@ -413,50 +1354,193 @@ fn data_kind_name(value: DataValue) -> String
     DataF32: "f32".to_string()
     DataF64: "f64".to_string()
     DataString: "string".to_string()
+    DataBytes: "bytes".to_string()
     DataArray: "array".to_string()
     DataObject: "object".to_string()
     DataVariant: active.name
 
-fn data_value_to_msgpack(value: DataValue): () -> MsgPack
-  value.match(active)
-    DataNull:
-      msgpack::make_null()
-    DataBool:
-      msgpack::make_bool(active.value)
-    DataI32:
-      msgpack::make_i32(active.value)
-    DataI64:
-      msgpack::make_i64(active.value)
-    DataF32:
-      msgpack::make_f32(active.value)
-    DataF64:
-      msgpack::make_f64(active.value)
-    DataString:
-      msgpack::make_string(active.value)
-    DataArray:
-      let ~values = Array<MsgPack>::with_capacity(active.values.len())
-      var index = 0
-      while index < active.values.len():
-        values.push(data_value_to_msgpack(active.values.at(index)))
-        index = index + 1
-      msgpack::make_array(values)
-    DataObject:
-      msgpack::make_map(data_fields_to_msgpack(active.fields))
-    DataVariant:
-      let fields = data_fields_to_msgpack(active.fields).setting(
-        "$variant",
-        msgpack::make_string(active.name)
-      )
-      msgpack::make_map(fields)
+@intrinsic(name: "__dto_value_to_data")
+fn dto_value_to_data<T>(value: T): () -> DataValue
+  __dto_value_to_data(value)
 
-fn data_fields_to_msgpack(fields: Array<DataField>): () -> Dict<String, MsgPack>
-  let ~out = Dict<String, MsgPack>::init()
+@compiler_contract(id: "voyd.std.data.cycle-error")
+fn data_cycle_error() -> DataValue
+  panic("cannot encode a cyclic DTO value".as_slice())
+  DataNull {}
+
+@compiler_contract(id: "voyd.std.data.make-null")
+fn data_make_null() -> DataValue
+  DataNull {}
+
+@compiler_contract(id: "voyd.std.data.make-bool")
+fn data_make_bool(value: bool) -> DataValue
+  DataBool { value }
+
+@compiler_contract(id: "voyd.std.data.make-i32")
+fn data_make_i32(value: i32) -> DataValue
+  DataI32 { value }
+
+@compiler_contract(id: "voyd.std.data.make-i64")
+fn data_make_i64(value: i64) -> DataValue
+  DataI64 { value }
+
+@compiler_contract(id: "voyd.std.data.make-f32")
+fn data_make_f32(value: f32) -> DataValue
+  DataF32 { value }
+
+@compiler_contract(id: "voyd.std.data.make-f64")
+fn data_make_f64(value: f64) -> DataValue
+  DataF64 { value }
+
+@compiler_contract(id: "voyd.std.data.make-string")
+fn data_make_string(value: String) -> DataValue
+  DataString { value }
+
+@compiler_contract(id: "voyd.std.data.make-bytes")
+fn data_make_bytes(value: Bytes) -> DataValue
+  DataBytes { value }
+
+@compiler_contract(id: "voyd.std.data.make-array")
+fn data_make_array(values: Array<DataValue>) -> DataValue
+  DataArray { values }
+
+@compiler_contract(id: "voyd.std.data.make-map")
+fn data_make_map(values: Dict<String, DataValue>) -> DataValue
+  match(values.get("$variant"))
+    Some<DataValue> { value }:
+      value.match(tag)
+        DataString:
+          DataVariant { name: tag.value, fields: data_fields(values) }
+        else:
+          DataObject { fields: data_fields(values) }
+    None:
+      DataObject { fields: data_fields(values) }
+
+@compiler_contract(id: "voyd.std.data.unpack-bool")
+fn data_unpack_bool(value: DataValue) -> bool
+  value.match(active)
+    DataBool: active.value
+    else: false
+
+@compiler_contract(id: "voyd.std.data.unpack-i32")
+fn data_unpack_i32(value: DataValue) -> i32
+  value.match(active)
+    DataI32: active.value
+    else: 0
+
+@compiler_contract(id: "voyd.std.data.unpack-i64")
+fn data_unpack_i64(value: DataValue) -> i64
+  value.match(active)
+    DataI64: active.value
+    else: 0i64
+
+@compiler_contract(id: "voyd.std.data.unpack-f32")
+fn data_unpack_f32(value: DataValue) -> f32
+  value.match(active)
+    DataF32: active.value
+    else: 0.0f32
+
+@compiler_contract(id: "voyd.std.data.unpack-f64")
+fn data_unpack_f64(value: DataValue) -> f64
+  value.match(active)
+    DataF64: active.value
+    else: 0.0
+
+@compiler_contract(id: "voyd.std.data.unpack-string")
+fn data_unpack_string(value: DataValue) -> String
+  value.match(active)
+    DataString: active.value
+    else: "".to_string()
+
+@compiler_contract(id: "voyd.std.data.unpack-bytes")
+fn data_unpack_bytes(value: DataValue) -> Bytes
+  value.match(active)
+    DataBytes: active.value
+    else: Bytes { storage: Array<i32>::init() }
+
+@compiler_contract(id: "voyd.std.data.unpack-array")
+fn data_unpack_array(value: DataValue) -> Array<DataValue>
+  value.match(active)
+    DataArray: active.values
+    else: Array<DataValue>::init()
+
+@compiler_contract(id: "voyd.std.data.unpack-map")
+fn data_unpack_map(value: DataValue) -> Dict<String, DataValue>
+  value.match(active)
+    DataObject:
+      data_map(active.fields)
+    DataVariant:
+      data_map(active.fields).setting("$variant", DataString { value: active.name })
+    else:
+      Dict<String, DataValue>::init()
+
+@compiler_contract(id: "voyd.std.data.array-with-capacity")
+fn data_array_with_capacity(size: i32) -> Array<DataValue>
+  Array<DataValue>::with_capacity(size)
+
+@compiler_contract(id: "voyd.std.data.array-push")
+fn data_array_push(values: Array<DataValue>, value: DataValue) -> Array<DataValue>
+  values.pushed(value)
+
+@compiler_contract(id: "voyd.std.data.array-length")
+fn data_array_length(values: Array<DataValue>) -> i32
+  values.len()
+
+@compiler_contract(id: "voyd.std.data.array-raw-storage")
+fn data_array_raw_storage(values: Array<DataValue>) -> FixedArray<DataValue>
+  values.raw_storage()
+
+@compiler_contract(id: "voyd.std.data.map-new")
+fn data_map_new() -> Dict<String, DataValue>
+  Dict<String, DataValue>::init()
+
+@compiler_contract(id: "voyd.std.data.map-set")
+fn data_map_set(
+  values: Dict<String, DataValue>,
+  name: String,
+  value: DataValue
+) -> Dict<String, DataValue>
+  values.setting(name, value)
+
+@compiler_contract(id: "voyd.std.data.map-get")
+fn data_map_get(values: Dict<String, DataValue>, name: String) -> DataValue
+  match(values.get(name))
+    Some<DataValue> { value }: value
+    None: DataNull {}
+
+@compiler_contract(id: "voyd.std.data.map-has")
+fn data_map_has(values: Dict<String, DataValue>, name: String) -> bool
+  values.contains(name)
+
+@compiler_contract(id: "voyd.std.data.map-tag-is")
+fn data_map_tag_is(values: Dict<String, DataValue>, expected: String) -> bool
+  match(values.get("$variant"))
+    Some<DataValue> { value }:
+      value.match(active)
+        DataString: active.value == expected
+        else: false
+    None: false
+
+@compiler_contract(id: "voyd.std.data.string-new")
+fn data_new_string(from_bytes: FixedArray<i32>) -> String
+  new_string(from_bytes)
+
+fn data_fields(values: Dict<String, DataValue>) -> Array<DataField>
+  let entries = values.entries()
+  let ~fields = Array<DataField>::with_capacity(entries.len())
+  var index = 0
+  while index < entries.len():
+    let entry = entries.at(index)
+    if entry.0 != "$variant":
+      fields.push(DataField { name: entry.0, value: entry.1 })
+    index = index + 1
+  fields
+
+fn data_map(fields: Array<DataField>) -> Dict<String, DataValue>
+  let ~values = Dict<String, DataValue>::init()
   var index = 0
   while index < fields.len():
     let field = fields.at(index)
-    out.set(field.name, data_value_to_msgpack(field.value))
+    values.set(field.name, field.value)
     index = index + 1
-  out
-
-fn boundary_data_to_value<T>(value: DataValue): () -> T
-  msgpack::unpack_boundary_value<T>(data_value_to_msgpack(value))
+  values

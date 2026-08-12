@@ -2,9 +2,13 @@ import type { SymbolId } from "./ids.js";
 import type { SymbolTable } from "./binder/index.js";
 import {
   getCompilerFunctionContractSpec,
+  getCompilerTraitContractSpec,
   getStdIntrinsicTypeContractSpec,
   type CompilerFunctionContractId,
   type CompilerFunctionContractSpec,
+  type CompilerTraitContractId,
+  type CompilerTraitMethodRole,
+  type CompilerTraitContractSpec,
   type StdIntrinsicTypeContractId,
   type StdIntrinsicTypeContractProvider,
 } from "../compiler-contracts/index.js";
@@ -15,15 +19,9 @@ export type IntrinsicFunctionFlags = {
   external?: { interfaceId: string; functionName: string };
 };
 
-export type SerializerMetadata = {
-  formatId: string;
-  encode: { moduleId: string; symbol: SymbolId };
-  decode: { moduleId: string; symbol: SymbolId };
-};
-
-export type BoundaryMetadata = {
-  type: "value" | "payload";
-  field?: string;
+export type CompilerImplementationDeclaration = {
+  id: string;
+  version: number;
 };
 
 export type ModuleSymbolIndex = {
@@ -33,6 +31,19 @@ export type ModuleSymbolIndex = {
   resolveTopLevel(name: string): SymbolId | undefined;
   isModuleScoped(symbol: SymbolId): boolean;
   getIntrinsicType(symbol: SymbolId): string | undefined;
+  resolveIntrinsicType(id: string): SymbolId | undefined;
+  getCompilerImplementation(
+    symbol: SymbolId,
+  ): CompilerImplementationDeclaration | undefined;
+  getCompilerTraitContract(
+    symbol: SymbolId,
+  ): CompilerTraitContractSpec | undefined;
+  resolveCompilerTraitContract(
+    id: CompilerTraitContractId,
+  ): SymbolId | undefined;
+  getCompilerTraitMethodRole(
+    symbol: SymbolId,
+  ): CompilerTraitMethodRole | undefined;
   getStdIntrinsicTypeContract(
     symbol: SymbolId,
   ): StdIntrinsicTypeContractProvider | undefined;
@@ -47,8 +58,6 @@ export type ModuleSymbolIndex = {
   resolveCompilerFunctionContract(
     id: CompilerFunctionContractId,
   ): SymbolId | undefined;
-  getSerializer(symbol: SymbolId): SerializerMetadata | undefined;
-  getBoundary(symbol: SymbolId): BoundaryMetadata | undefined;
 };
 
 export const buildModuleSymbolIndex = ({
@@ -64,6 +73,23 @@ export const buildModuleSymbolIndex = ({
   const topLevelByName = new Map<string, SymbolId>();
   const moduleScopedBySymbol = new Map<SymbolId, boolean>();
   const intrinsicTypeBySymbol = new Map<SymbolId, string>();
+  const symbolsByIntrinsicType = new Map<string, SymbolId[]>();
+  const compilerImplementationBySymbol = new Map<
+    SymbolId,
+    CompilerImplementationDeclaration
+  >();
+  const compilerTraitContractBySymbol = new Map<
+    SymbolId,
+    CompilerTraitContractSpec
+  >();
+  const symbolsByCompilerTraitContract = new Map<
+    CompilerTraitContractId,
+    SymbolId[]
+  >();
+  const compilerTraitMethodRoleBySymbol = new Map<
+    SymbolId,
+    CompilerTraitMethodRole
+  >();
   const stdIntrinsicTypeContractBySymbol = new Map<
     SymbolId,
     StdIntrinsicTypeContractProvider
@@ -82,16 +108,20 @@ export const buildModuleSymbolIndex = ({
     CompilerFunctionContractId,
     SymbolId[]
   >();
-  const serializerBySymbol = new Map<SymbolId, SerializerMetadata>();
-  const boundaryBySymbol = new Map<SymbolId, BoundaryMetadata>();
 
   const snapshot = symbolTable.snapshot();
   snapshot.symbols.forEach((record) => {
     if (!record) return;
     const symbol = record.id as SymbolId;
     nameBySymbol.set(symbol, record.name);
-    moduleScopedBySymbol.set(symbol, symbolTable.getScope(record.scope).kind === "module");
-    if (record.scope === symbolTable.rootScope && !topLevelByName.has(record.name)) {
+    moduleScopedBySymbol.set(
+      symbol,
+      symbolTable.getScope(record.scope).kind === "module",
+    );
+    if (
+      record.scope === symbolTable.rootScope &&
+      !topLevelByName.has(record.name)
+    ) {
       topLevelByName.set(record.name, symbol);
     }
 
@@ -106,12 +136,44 @@ export const buildModuleSymbolIndex = ({
       externalFunction?: unknown;
       compilerFunctionContract?: unknown;
       import?: unknown;
-      serializer?: unknown;
-      boundary?: unknown;
+      compilerImplementation?: unknown;
+      compilerTraitContract?: unknown;
+      compilerTraitMethodRole?: unknown;
     };
 
     if (typeof metadata.intrinsicType === "string") {
       intrinsicTypeBySymbol.set(symbol, metadata.intrinsicType);
+      if (!metadata.import) {
+        const symbols =
+          symbolsByIntrinsicType.get(metadata.intrinsicType) ?? [];
+        symbols.push(symbol);
+        symbolsByIntrinsicType.set(metadata.intrinsicType, symbols);
+      }
+    }
+    if (
+      !metadata.import &&
+      isCompilerImplementationDeclaration(metadata.compilerImplementation)
+    ) {
+      compilerImplementationBySymbol.set(
+        symbol,
+        metadata.compilerImplementation,
+      );
+    }
+    const compilerTraitContract = metadata.import
+      ? undefined
+      : readCompilerTraitContract(metadata.compilerTraitContract);
+    if (compilerTraitContract) {
+      compilerTraitContractBySymbol.set(symbol, compilerTraitContract);
+      const symbols =
+        symbolsByCompilerTraitContract.get(compilerTraitContract.id) ?? [];
+      symbols.push(symbol);
+      symbolsByCompilerTraitContract.set(compilerTraitContract.id, symbols);
+    }
+    if (isCompilerTraitMethodRole(metadata.compilerTraitMethodRole)) {
+      compilerTraitMethodRoleBySymbol.set(
+        symbol,
+        metadata.compilerTraitMethodRole,
+      );
     }
     const stdIntrinsicTypeContract = metadata.import
       ? undefined
@@ -130,7 +192,10 @@ export const buildModuleSymbolIndex = ({
     if (typeof metadata.intrinsicName === "string") {
       intrinsicNameBySymbol.set(symbol, metadata.intrinsicName);
     }
-    if (metadata.intrinsic === true || metadata.intrinsicUsesSignature === true) {
+    if (
+      metadata.intrinsic === true ||
+      metadata.intrinsicUsesSignature === true
+    ) {
       intrinsicFlagsBySymbol.set(symbol, {
         intrinsic: metadata.intrinsic === true,
         intrinsicUsesSignature: metadata.intrinsicUsesSignature === true,
@@ -153,12 +218,6 @@ export const buildModuleSymbolIndex = ({
         contractSymbols,
       );
     }
-    if (isSerializerMetadata(metadata.serializer)) {
-      serializerBySymbol.set(symbol, metadata.serializer);
-    }
-    if (isBoundaryMetadata(metadata.boundary)) {
-      boundaryBySymbol.set(symbol, metadata.boundary);
-    }
   });
 
   return {
@@ -168,6 +227,28 @@ export const buildModuleSymbolIndex = ({
     resolveTopLevel: (name) => topLevelByName.get(name),
     isModuleScoped: (symbol) => moduleScopedBySymbol.get(symbol) === true,
     getIntrinsicType: (symbol) => intrinsicTypeBySymbol.get(symbol),
+    resolveIntrinsicType: (id) => {
+      const symbols = symbolsByIntrinsicType.get(id) ?? [];
+      if (symbols.length > 1) {
+        throw new Error(`duplicate intrinsic type '${id}' in ${moduleId}`);
+      }
+      return symbols[0];
+    },
+    getCompilerImplementation: (symbol) =>
+      compilerImplementationBySymbol.get(symbol),
+    getCompilerTraitContract: (symbol) =>
+      compilerTraitContractBySymbol.get(symbol),
+    resolveCompilerTraitContract: (id) => {
+      const symbols = symbolsByCompilerTraitContract.get(id) ?? [];
+      if (symbols.length > 1) {
+        throw new Error(
+          `duplicate compiler trait contract '${id}' in ${moduleId} on symbols ${symbols.join(", ")}`,
+        );
+      }
+      return symbols[0];
+    },
+    getCompilerTraitMethodRole: (symbol) =>
+      compilerTraitMethodRoleBySymbol.get(symbol),
     getStdIntrinsicTypeContract: (symbol) =>
       stdIntrinsicTypeContractBySymbol.get(symbol),
     resolveStdIntrinsicTypeContract: (id) => {
@@ -200,9 +281,32 @@ export const buildModuleSymbolIndex = ({
       }
       return symbols[0];
     },
-    getSerializer: (symbol) => serializerBySymbol.get(symbol),
-    getBoundary: (symbol) => boundaryBySymbol.get(symbol),
   };
+};
+
+const isCompilerTraitMethodRole = (
+  value: unknown,
+): value is CompilerTraitMethodRole =>
+  value === "createReader" ||
+  value === "readerComplete" ||
+  value === "createWriter" ||
+  value === "finishWriter";
+
+const isCompilerImplementationDeclaration = (
+  value: unknown,
+): value is CompilerImplementationDeclaration =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { id?: unknown }).id === "string" &&
+  typeof (value as { version?: unknown }).version === "number";
+
+const readCompilerTraitContract = (
+  value: unknown,
+): CompilerTraitContractSpec | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const id = (value as { id?: unknown }).id;
+  if (typeof id !== "string") return undefined;
+  return getCompilerTraitContractSpec(id);
 };
 
 const isExternalFunctionMetadata = (
@@ -291,33 +395,4 @@ const readCompilerFunctionContract = (
     return undefined;
   }
   return spec;
-};
-
-const isSerializerMetadata = (value: unknown): value is SerializerMetadata => {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const record = value as {
-    formatId?: unknown;
-    encode?: { moduleId?: unknown; symbol?: unknown };
-    decode?: { moduleId?: unknown; symbol?: unknown };
-  };
-  return (
-    typeof record.formatId === "string" &&
-    typeof record.encode?.moduleId === "string" &&
-    typeof record.encode?.symbol === "number" &&
-    typeof record.decode?.moduleId === "string" &&
-    typeof record.decode?.symbol === "number"
-  );
-};
-
-const isBoundaryMetadata = (value: unknown): value is BoundaryMetadata => {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const record = value as { type?: unknown; field?: unknown };
-  return (
-    (record.type === "value" || record.type === "payload") &&
-    (record.field === undefined || typeof record.field === "string")
-  );
 };
