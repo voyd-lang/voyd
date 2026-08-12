@@ -142,6 +142,9 @@ duplicate providers. At feature use, the typed signature catalog validates the
 entire MsgPack ABI (shared types, primitives, fixed arrays, generics,
 optionality, and effects) before codegen emits boundary calls. Missing or
 incompatible roles fail clearly; there is no silent name-based fallback.
+V-499 later replaced the host-transport subset of these function roles with the
+compiler-contract `HostTransportProvider` trait and a versioned
+`@compiler_impl`; provider-neutral data function contracts remain.
 
 All function-body specializations now share the frozen
 `SpecializationPolicy` carried by `ProgramCodegenOptimizationPlan`. Eligibility

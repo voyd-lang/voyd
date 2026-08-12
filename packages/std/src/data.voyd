@@ -105,10 +105,13 @@ pub trait CustomDto<T, Representation>
   fn write(value: T) -> Representation
   fn read(value: Representation) -> Result<T, CustomDtoError>
 
-/// Compiler-known marker implemented by a stateless host transport provider.
-@intrinsic_type(type: "voyd.std.host-transport-provider")
-pub trait HostTransportProvider
-  fn __host_transport_marker(self) -> void
+/// Compiler-known lifecycle for a stateless host transport provider.
+@compiler_contract(id: "voyd.std.host-transport-provider")
+pub trait HostTransportProvider<Reader, Writer>
+  fn create_reader(ptr: i32, len: i32) -> Reader
+  fn reader_complete(reader: Reader) -> bool
+  fn create_writer(ptr: i32, len: i32) -> Writer
+  fn finish_writer(writer: Writer) -> i32
 
 /// Ignore object fields absent from the target Voyd type.
 pub obj IgnoreUnknownFields {}

@@ -1,11 +1,13 @@
 import type { ProgramSymbolId, SymbolId } from "./ids.js";
 import type { IntrinsicFunctionFlags } from "./symbol-index.js";
-import type { HostTransportDeclaration } from "./symbol-index.js";
+import type { CompilerImplementationDeclaration } from "./symbol-index.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import type {
   CompilerFunctionContractId,
   CompilerFunctionContractSpec,
+  CompilerTraitContractId,
+  CompilerTraitContractSpec,
   StdIntrinsicTypeContractId,
   StdIntrinsicTypeContractProvider,
 } from "../compiler-contracts/index.js";
@@ -25,13 +27,15 @@ export type ProgramSymbolArena = {
   getPackageId(id: ProgramSymbolId): string;
   getIntrinsicType(id: ProgramSymbolId): string | undefined;
   resolveIntrinsicType(id: string): ProgramSymbolId | undefined;
-  getHostTransportDeclaration(
+  getCompilerImplementation(
     id: ProgramSymbolId,
-  ): HostTransportDeclaration | undefined;
-  hostTransportDeclarations(): readonly {
-    symbol: ProgramSymbolId;
-    declaration: HostTransportDeclaration;
-  }[];
+  ): CompilerImplementationDeclaration | undefined;
+  getCompilerTraitContract(
+    id: ProgramSymbolId,
+  ): CompilerTraitContractSpec | undefined;
+  resolveCompilerTraitContract(
+    id: CompilerTraitContractId,
+  ): ProgramSymbolId | undefined;
   getStdIntrinsicTypeContract(
     id: ProgramSymbolId,
   ): StdIntrinsicTypeContractProvider | undefined;
@@ -77,10 +81,16 @@ export const buildProgramSymbolArena = (
   const packageIdsById: string[] = [];
   const intrinsicTypesById: (string | undefined)[] = [];
   const idsByIntrinsicType = new Map<string, ProgramSymbolId[]>();
-  const hostTransportDeclarationsById: (
-    | HostTransportDeclaration
+  const compilerImplementationsById: (
+    | CompilerImplementationDeclaration
     | undefined
   )[] = [];
+  const compilerTraitContractsById: (CompilerTraitContractSpec | undefined)[] =
+    [];
+  const idsByCompilerTraitContract = new Map<
+    CompilerTraitContractId,
+    ProgramSymbolId
+  >();
   const stdIntrinsicTypeContractsById: (
     | StdIntrinsicTypeContractProvider
     | undefined
@@ -127,13 +137,31 @@ export const buildProgramSymbolArena = (
       packageIdsById[id] = mod.binding.packageId;
       intrinsicTypesById[id] = mod.symbols.getIntrinsicType(symbol);
       const intrinsicType = mod.symbols.getIntrinsicType(symbol);
-      if (intrinsicType && mod.symbols.resolveIntrinsicType(intrinsicType) === symbol) {
+      if (
+        intrinsicType &&
+        mod.symbols.resolveIntrinsicType(intrinsicType) === symbol
+      ) {
         const ids = idsByIntrinsicType.get(intrinsicType) ?? [];
         ids.push(id);
         idsByIntrinsicType.set(intrinsicType, ids);
       }
-      hostTransportDeclarationsById[id] =
-        mod.symbols.getHostTransportDeclaration(symbol);
+      compilerImplementationsById[id] =
+        mod.symbols.getCompilerImplementation(symbol);
+      const compilerTraitContract =
+        mod.symbols.getCompilerTraitContract(symbol);
+      compilerTraitContractsById[id] = compilerTraitContract;
+      if (compilerTraitContract) {
+        const existing = idsByCompilerTraitContract.get(
+          compilerTraitContract.id,
+        );
+        if (existing !== undefined) {
+          const first = refsById[existing]!;
+          throw new Error(
+            `duplicate compiler trait contract '${compilerTraitContract.id}': ${first.moduleId}::${first.symbol} and ${mod.moduleId}::${symbol}`,
+          );
+        }
+        idsByCompilerTraitContract.set(compilerTraitContract.id, id);
+      }
       const stdIntrinsicTypeContract =
         mod.symbols.getStdIntrinsicTypeContract(symbol);
       stdIntrinsicTypeContractsById[id] = stdIntrinsicTypeContract;
@@ -215,14 +243,9 @@ export const buildProgramSymbolArena = (
       if (ids.length > 1) throw new Error(`duplicate intrinsic type '${id}'`);
       return ids[0];
     },
-    getHostTransportDeclaration: (id) =>
-      hostTransportDeclarationsById[id],
-    hostTransportDeclarations: () =>
-      hostTransportDeclarationsById.flatMap((declaration, symbol) =>
-        declaration
-          ? [{ symbol: symbol as ProgramSymbolId, declaration }]
-          : [],
-      ),
+    getCompilerImplementation: (id) => compilerImplementationsById[id],
+    getCompilerTraitContract: (id) => compilerTraitContractsById[id],
+    resolveCompilerTraitContract: (id) => idsByCompilerTraitContract.get(id),
     getStdIntrinsicTypeContract: (id) => stdIntrinsicTypeContractsById[id],
     resolveStdIntrinsicTypeContract: (id) =>
       idsByStdIntrinsicTypeContract.get(id),

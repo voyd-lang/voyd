@@ -10,8 +10,8 @@ import type {
 } from "../../semantics/ids.js";
 import type { CodegenOptions } from "../../codegen/context.js";
 import {
-  SELECTED_HOST_TRANSPORT_CONTRACT_IDS,
   DTO_DATA_CONTRACT_IDS,
+  resolveSelectedHostTransportProvider,
   type CompilerFunctionContractId,
 } from "../../compiler-contracts/index.js";
 import { type ProgramOptimizationPass } from "../pass.js";
@@ -454,53 +454,18 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
     };
 
     const enqueueSelectedProviderFunctions = (): void => {
-      SELECTED_HOST_TRANSPORT_CONTRACT_IDS.forEach(
-        enqueueCompilerFunctionContract,
+      const provider = resolveSelectedHostTransportProvider(ctx.ir.baseProgram);
+      [
+        ...Object.values(provider.functions),
+        ...provider.readerImplementation.methods.map(
+          ({ implMethod }) => implMethod,
+        ),
+        ...provider.writerImplementation.methods.map(
+          ({ implMethod }) => implMethod,
+        ),
+      ].forEach((symbol) =>
+        enqueueKnownFunctionInstances(ctx.ir.baseProgram.symbols.refOf(symbol)),
       );
-      const enqueueProviderTrait = ({
-        constructorContract,
-        traitName,
-      }: {
-        constructorContract: CompilerFunctionContractId;
-        traitName: string;
-      }): void => {
-        const constructor =
-          ctx.ir.baseProgram.symbols.resolveCompilerFunctionContract(
-            constructorContract,
-          );
-        if (typeof constructor !== "number") return;
-        const ref = ctx.ir.baseProgram.symbols.refOf(constructor);
-        const typeId = ctx.ir.baseProgram.functions.getSignature(
-          ref.moduleId,
-          ref.symbol,
-        )?.returnType;
-        if (typeof typeId !== "number") return;
-        const desc = ctx.ir.baseProgram.types.getTypeDesc(typeId);
-        const nominal =
-          desc.kind === "intersection" && desc.nominal !== undefined
-            ? desc.nominal
-            : (ctx.ir.baseProgram.types.getNominalOwner(typeId) ?? typeId);
-        const impl = ctx.ir.baseProgram.traits
-          .getImplsByNominal(nominal)
-          .find(
-            (candidate) =>
-              ctx.ir.baseProgram.symbols.getName(candidate.traitSymbol) ===
-              traitName,
-          );
-        impl?.methods.forEach(({ implMethod }) =>
-          enqueueKnownFunctionInstances(
-            ctx.ir.baseProgram.symbols.refOf(implMethod),
-          ),
-        );
-      };
-      enqueueProviderTrait({
-        constructorContract: "voyd.std.host-transport.msgpack.create-reader",
-        traitName: "DataReader",
-      });
-      enqueueProviderTrait({
-        constructorContract: "voyd.std.host-transport.msgpack.create-writer",
-        traitName: "DataWriter",
-      });
     };
 
     const enqueueDataDtoFunctions = (): void => {
@@ -653,9 +618,8 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       if (typeof callerInstanceId !== "number") {
         return undefined;
       }
-      const instance = ctx.ir.baseProgram.functions.getInstance(
-        callerInstanceId,
-      );
+      const instance =
+        ctx.ir.baseProgram.functions.getInstance(callerInstanceId);
       const signature = ctx.ir.baseProgram.functions.getSignature(
         instance.symbolRef.moduleId,
         instance.symbolRef.symbol,
@@ -719,9 +683,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
           typeIds.add(concreteType(typeId));
         }
       });
-      typeIds.forEach((typeId) =>
-        enqueueDtoPlanForType({ typeId, moduleId }),
-      );
+      typeIds.forEach((typeId) => enqueueDtoPlanForType({ typeId, moduleId }));
     };
 
     const enqueueRetainedCallbackDtoPlans = ({
@@ -758,9 +720,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       [
         ...descriptor.parameters.map((parameter) => parameter.type),
         descriptor.returnType,
-      ].forEach((typeId) =>
-        enqueueDtoPlanForType({ typeId, moduleId }),
-      );
+      ].forEach((typeId) => enqueueDtoPlanForType({ typeId, moduleId }));
     };
 
     const exportedFunctionUsesEffectsHostBoundary = ({

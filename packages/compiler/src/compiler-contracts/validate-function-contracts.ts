@@ -5,7 +5,6 @@ import type {
 } from "../semantics/codegen-view/index.js";
 import type { NodeId, TypeId } from "../semantics/ids.js";
 import {
-  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
   COMPILER_FUNCTION_CONTRACTS,
   DTO_DATA_CONTRACT_IDS,
   type CompilerContractSharedType,
@@ -20,11 +19,6 @@ type ResolvedContract = {
   signature: CodegenFunctionSignature;
 };
 
-export type MsgpackHostTransportContractTypes = {
-  readonly reader: TypeId;
-  readonly writer: TypeId;
-};
-
 export type DtoDataContractTypes = {
   readonly data: TypeId;
   readonly string: TypeId;
@@ -34,51 +28,6 @@ export type DtoDataContractTypes = {
 };
 
 type ContractTypes = Partial<Record<CompilerContractSharedType, TypeId>>;
-
-/** Validates the complete relational ABI for the selected MessagePack transport. */
-export const validateMsgpackHostTransportFunctionContracts = (
-  program: ProgramCodegenView,
-): MsgpackHostTransportContractTypes => {
-  const resolved = new Map<CompilerFunctionContractId, ResolvedContract>();
-  Object.values(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS).forEach((contractId) => {
-    const programSymbol =
-      program.symbols.resolveCompilerFunctionContract(contractId);
-    if (typeof programSymbol !== "number") {
-      throw new Error(`missing compiler function contract '${contractId}'`);
-    }
-    const ref = program.symbols.refOf(programSymbol);
-    const signature = program.functions.getSignature(ref.moduleId, ref.symbol);
-    if (!signature) {
-      throw new Error(
-        `compiler function contract '${contractId}' has no typed signature`,
-      );
-    }
-    resolved.set(contractId, {
-      spec: COMPILER_FUNCTION_CONTRACTS.get(contractId)!,
-      signature,
-    });
-  });
-
-  const types: MsgpackHostTransportContractTypes = {
-    reader: resultType(
-      resolved,
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader,
-    ),
-    writer: resultType(
-      resolved,
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createWriter,
-    ),
-  };
-  const sharedTypes: ContractTypes = {
-    "msgpack-reader": types.reader,
-    "msgpack-writer": types.writer,
-  };
-
-  resolved.forEach(({ spec, signature }) =>
-    validateSignature({ program, spec, signature, types: sharedTypes }),
-  );
-  return types;
-};
 
 /** Validates the relational ABI for the provider-neutral DataValue tree. */
 export const validateDtoDataFunctionContracts = (
@@ -241,7 +190,7 @@ const throwDomainTypeError = (
   actual: TypeId,
 ): never => {
   throw new Error(
-    `host-transport-msgpack shared type '${role}' expected ${expected}, but actual type is ${formatType(program, actual)}`,
+    `dto-data shared type '${role}' expected ${expected}, but actual type is ${formatType(program, actual)}`,
   );
 };
 
@@ -377,13 +326,8 @@ const formatExpectedType = (type: CompilerContractTypeSpec): string => {
   if (type.kind === "fixed-array")
     return `FixedArray<${formatExpectedType(type.element)}>`;
   return {
-    msgpack: "MsgPack",
     string: "String",
     bytes: "Bytes",
-    "msgpack-array": "Array<MsgPack>",
-    "msgpack-map": "Map<String, MsgPack>",
-    "msgpack-reader": "MsgPackReader",
-    "msgpack-writer": "MsgPackWriter",
     data: "DataValue",
     "data-array": "Array<DataValue>",
     "data-map": "Map<String, DataValue>",

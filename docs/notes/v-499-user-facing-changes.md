@@ -9,10 +9,12 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - Public exports, external imports, effects, and retained callbacks use the
   framed host ABI v2 protocol. Host adapters must declare a compatible
   transport provider before user code runs.
-- Host transport implementations declare their static identity with
-  `@host_transport(id: ..., version: ...)` on a stateless object that implements
-  the compiler-known `HostTransportProvider` trait. Duplicate or mismatched
-  declarations fail compilation.
+- Host transport implementations use
+  `@compiler_impl(id: ..., version: ...)` on an implementation of the
+  compiler-contract `HostTransportProvider<Reader, Writer>` trait. The compiler
+  derives the concrete lifecycle methods and reader/writer types from that
+  implementation. The former object-level `@host_transport` annotation and
+  MessagePack-specific transport function contracts have been removed.
 - Export, import, effect, and callback values use compiler-derived DTO shapes
   and schema fingerprints. Plain JavaScript values remain the SDK surface.
 - `Bytes` is a first-class DTO primitive and crosses JavaScript boundaries as

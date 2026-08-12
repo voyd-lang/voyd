@@ -40,9 +40,7 @@ import {
   isCompilerPerfEnabled,
   recordCompilerPerfDuration,
 } from "../perf.js";
-import {
-  MSGPACK_HOST_TRANSPORT_CONTRACT_PROVIDER_MODULES,
-} from "../compiler-contracts/function-contracts.js";
+import { SELECTED_HOST_TRANSPORT_PROVIDER_MODULES } from "../compiler-contracts/index.js";
 
 type BuildGraphOptions = {
   entryPath: string;
@@ -73,7 +71,7 @@ const IMPLICIT_PRELUDE_USE_DECL = (() => {
   return entry;
 })();
 const IMPLICIT_HOST_TRANSPORT_USE_DECLS =
-  MSGPACK_HOST_TRANSPORT_CONTRACT_PROVIDER_MODULES.map((moduleId, index) => {
+  SELECTED_HOST_TRANSPORT_PROVIDER_MODULES.map((moduleId, index) => {
     const ast = parseBase(
       `use ${moduleId}::self as __voyd_host_transport_provider_${index}`,
       "<implicit-host-transport>",
@@ -83,7 +81,9 @@ const IMPLICIT_HOST_TRANSPORT_USE_DECLS =
     }
     const entry = ast.rest[0];
     if (!isForm(entry)) {
-      throw new Error("failed to parse implicit host transport use declaration");
+      throw new Error(
+        "failed to parse implicit host transport use declaration",
+      );
     }
     return entry;
   });

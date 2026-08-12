@@ -2,8 +2,8 @@ import { Form } from "../ast/form.js";
 import { interpretWhitespace } from "./interpret-whitespace.js";
 import { intrinsicAttributeMacro } from "./intrinsic-attribute.js";
 import { compilerContractAttributeMacro } from "./compiler-contract-attribute.js";
+import { compilerImplementationAttributeMacro } from "./compiler-impl-attribute.js";
 import { intrinsicTypeAttributeMacro } from "./intrinsic-type-attribute.js";
-import { hostTransportAttributeMacro } from "./host-transport-attribute.js";
 import { effectAttributeMacro } from "./effect-attribute.js";
 import { externalAttributeMacro } from "./external-attribute.js";
 import { borrowContractAttributeMacro } from "./borrow-contract-attribute.js";
@@ -28,8 +28,8 @@ export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
   intrinsicAttributeMacro,
   borrowContractAttributeMacro,
   compilerContractAttributeMacro,
+  compilerImplementationAttributeMacro,
   intrinsicTypeAttributeMacro,
-  hostTransportAttributeMacro,
   externalAttributeMacro,
   effectAttributeMacro,
   testBlockMacro,

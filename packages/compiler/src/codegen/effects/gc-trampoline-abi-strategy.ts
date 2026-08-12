@@ -1,7 +1,7 @@
 import binaryen from "binaryen";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
-import { SELECTED_HOST_TRANSPORT_CONTRACT_IDS } from "../../compiler-contracts/index.js";
+import { resolveSelectedHostTransportProvider } from "../../compiler-contracts/index.js";
 import { isPackageVisible } from "../../semantics/hir/index.js";
 import {
   collectEffectOperationSignatures,
@@ -142,20 +142,15 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
     return;
   }
 
-  const missingContracts = SELECTED_HOST_TRANSPORT_CONTRACT_IDS.filter(
-    (contractId) =>
-      entryCtx.program.symbols.resolveCompilerFunctionContract(contractId) ===
-      undefined,
-  );
-  if (missingContracts.length > 0) {
+  try {
+    resolveSelectedHostTransportProvider(entryCtx.program);
+  } catch (error) {
     entryCtx.diagnostics.report(
       diagnosticFromCode({
         code: "CG0001",
         params: {
           kind: "codegen-error",
-          message: `effectful exports require the selected host-transport compiler contracts; missing: ${missingContracts.join(
-            ", ",
-          )} (provide a compatible std root or disable the host boundary via effectsHostBoundary: "off")`,
+          message: `effectful exports require a valid selected host transport implementation: ${error instanceof Error ? error.message : String(error)} (provide a compatible std root or disable the host boundary via effectsHostBoundary: "off")`,
         },
         span: entryCtx.module.hir.module.span,
       }),

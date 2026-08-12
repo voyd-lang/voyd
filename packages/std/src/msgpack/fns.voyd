@@ -48,12 +48,7 @@ use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ new_string, String, StringSlice }
 
-@host_transport(id: "voyd.std.msgpack", version: 1)
 obj MsgPackHostTransport {}
-
-impl HostTransportProvider for MsgPackHostTransport
-  fn __host_transport_marker(self) -> void
-    void
 
 /// Recursive MessagePack value union used by the serializer boundary.
 pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | MsgPackMap
@@ -1015,61 +1010,59 @@ pub fn decode_value_bytes(bytes: Bytes): () -> Result<MsgPack, MsgPackError>
 pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
   decode_value_raw(ptr, len)
 
-@compiler_contract(id: "voyd.std.host-transport.msgpack.create-reader")
-fn host_transport_create_reader(ptr: i32, len: i32) -> MsgPackReader
-  let limits = DecodeLimits {
-    max_depth: 128,
-    max_bytes: 16777216,
-    max_collection_length: 1048576
-  }
-  MsgPackReader {
-    decoder: Decoder(ptr, len),
-    container_kinds: Array<i32>::init(),
-    remaining_values: Array<i32>::init(),
-    root_consumed: false,
-    failed: (len > limits.max_bytes or ptr < 0 or len < 0),
-    limits: limits,
-    path: "$".to_string(),
-    parents: Array<String>::init()
-  }
+@compiler_impl(id: "voyd.std.msgpack", version: 1)
+impl HostTransportProvider<MsgPackReader, MsgPackWriter> for MsgPackHostTransport
+  fn create_reader(ptr: i32, len: i32) -> MsgPackReader
+    let limits = DecodeLimits {
+      max_depth: 128,
+      max_bytes: 16777216,
+      max_collection_length: 1048576
+    }
+    MsgPackReader {
+      decoder: Decoder(ptr, len),
+      container_kinds: Array<i32>::init(),
+      remaining_values: Array<i32>::init(),
+      root_consumed: false,
+      failed: (len > limits.max_bytes or ptr < 0 or len < 0),
+      limits: limits,
+      path: "$".to_string(),
+      parents: Array<String>::init()
+    }
 
-@compiler_contract(id: "voyd.std.host-transport.msgpack.reader-complete")
-fn host_transport_reader_complete(reader: MsgPackReader) -> bool
-  let source_length = reader.decoder.source.match(active)
-    MemoryDecoderSource: active.len
-    BytesDecoderSource: active.bytes.len()
-  reader.failed == false
-    and reader.decoder.ok
-    and reader.root_consumed
-    and reader.container_kinds.is_empty()
-    and reader.decoder.pos == source_length
+  fn reader_complete(reader: MsgPackReader) -> bool
+    let source_length = reader.decoder.source.match(active)
+      MemoryDecoderSource: active.len
+      BytesDecoderSource: active.bytes.len()
+    reader.failed == false
+      and reader.decoder.ok
+      and reader.root_consumed
+      and reader.container_kinds.is_empty()
+      and reader.decoder.pos == source_length
 
-@compiler_contract(id: "voyd.std.host-transport.msgpack.create-writer")
-fn host_transport_create_writer(ptr: i32, len: i32) -> MsgPackWriter
-  let limits = EncodeLimits {
-    max_depth: 128,
-    max_bytes: 16777216,
-    max_collection_length: 1048576
-  }
-  MsgPackWriter {
-    encoder: Encoder(ptr, len),
-    container_kinds: Array<i32>::init(),
-    remaining_values: Array<i32>::init(),
-    pending_fields: Array<i32>::init(),
-    root_count: 0,
-    failed: (ptr < 0 or len < 0),
-    limits: limits
-  }
+  fn create_writer(ptr: i32, len: i32) -> MsgPackWriter
+    let limits = EncodeLimits {
+      max_depth: 128,
+      max_bytes: 16777216,
+      max_collection_length: 1048576
+    }
+    MsgPackWriter {
+      encoder: Encoder(ptr, len),
+      container_kinds: Array<i32>::init(),
+      remaining_values: Array<i32>::init(),
+      pending_fields: Array<i32>::init(),
+      root_count: 0,
+      failed: (ptr < 0 or len < 0),
+      limits: limits
+    }
 
-@compiler_contract(id: "voyd.std.host-transport.msgpack.finish-writer")
-fn host_transport_finish_writer(writer: MsgPackWriter) -> i32
-  if writer.failed or writer.encoder.ok == false:
-    return -1
-  if writer.container_kinds.is_empty() == false or writer.root_count != 1:
-    return -1
-  if writer.encoder.pos > writer.limits.max_bytes:
-    return -1
-  writer.encoder.pos
+  fn finish_writer(writer: MsgPackWriter) -> i32
+    if writer.failed or writer.encoder.ok == false:
+      return -1
+    if writer.container_kinds.is_empty() == false or writer.root_count != 1:
+      return -1
+    if writer.encoder.pos > writer.limits.max_bytes:
+      return -1
+    writer.encoder.pos
 
 fn empty_binary(): () -> Binary
   Binary { bytes: Array<i32>::init() }

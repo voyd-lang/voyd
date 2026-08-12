@@ -9,6 +9,11 @@ export type CompilerContractAttribute = {
   id: string;
 };
 
+export type CompilerImplementationAttribute = {
+  id: string;
+  version: number;
+};
+
 export type SerializerAttribute = {
   formatId: string;
   encode: Expr;

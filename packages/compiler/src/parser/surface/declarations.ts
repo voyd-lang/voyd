@@ -10,6 +10,7 @@ import {
 import type {
   BorrowContractAttribute,
   CompilerContractAttribute,
+  CompilerImplementationAttribute,
   EffectAttribute,
   OperationAttribute,
   IntrinsicAttribute,
@@ -114,6 +115,7 @@ export interface ParsedTraitDecl {
   regions: readonly ParsedRegionDeclaration[];
   disjoint: readonly ParsedDisjointDeclaration[];
   methods: readonly ParsedTraitMethod[];
+  compilerContract?: CompilerContractAttribute;
 }
 
 export interface ParsedRegionMapping {
@@ -131,6 +133,7 @@ export interface ParsedImplDecl {
   body: Form;
   regionMappings: readonly ParsedRegionMapping[];
   methods: readonly ParsedFunctionDecl[];
+  compilerImplementation?: CompilerImplementationAttribute;
 }
 
 export interface ParsedEffectOperation {
@@ -265,7 +268,7 @@ export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
 const parseTraitMethod = (form: Form): ParsedTraitMethod => {
   if (form.attributes?.compilerContract) {
     throw new ParserSyntaxError(
-      "@compiler_contract can only annotate ordinary top-level functions",
+      "@compiler_contract can only annotate ordinary top-level functions or traits",
       form.location,
     );
   }
@@ -545,6 +548,9 @@ export const parseTraitDecl = (form: Form): ParsedTraitDecl | null => {
     regions,
     disjoint,
     methods,
+    compilerContract: form.attributes?.compilerContract as
+      | CompilerContractAttribute
+      | undefined,
   };
 };
 
@@ -625,6 +631,9 @@ export const parseImplDecl = (form: Form): ParsedImplDecl | null => {
     body,
     regionMappings,
     methods,
+    compilerImplementation: form.attributes?.compilerImplementation as
+      | CompilerImplementationAttribute
+      | undefined,
   };
 };
 

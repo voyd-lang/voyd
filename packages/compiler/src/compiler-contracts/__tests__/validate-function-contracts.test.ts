@@ -6,11 +6,9 @@ import type {
 } from "../../semantics/codegen-view/index.js";
 import type { ProgramSymbolId, TypeId } from "../../semantics/ids.js";
 import {
-  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
   COMPILER_FUNCTION_CONTRACTS,
   DTO_DATA_CONTRACT_IDS,
   STD_INTRINSIC_TYPE,
-  validateMsgpackHostTransportFunctionContracts,
   validateDtoDataFunctionContracts,
   type CompilerContractTypeSpec,
   type CompilerFunctionContractId,
@@ -18,18 +16,13 @@ import {
 
 const ids = { bool: 1, i32: 2, i64: 3, f32: 4, f64: 5 } as const;
 const shared = {
-  msgpack: 10,
   string: 11,
-  array: 12,
-  map: 13,
   bytes: 16,
   data: 17,
   dataArray: 18,
   dataMap: 19,
-  reader: 21,
-  writer: 22,
 } as const;
-const fixed = { msgpack: 14, i32: 15, data: 20 } as const;
+const fixed = { i32: 15, data: 20 } as const;
 const owners = {
   string: 101 as ProgramSymbolId,
   array: 102 as ProgramSymbolId,
@@ -41,24 +34,15 @@ const typeIdFor = (spec: CompilerContractTypeSpec): TypeId => {
   if (spec.kind === "primitive") return ids[spec.name] as TypeId;
   if (spec.kind === "shared") {
     return {
-      msgpack: shared.msgpack,
       string: shared.string,
       bytes: shared.bytes,
-      "msgpack-array": shared.array,
-      "msgpack-map": shared.map,
       data: shared.data,
       "data-array": shared.dataArray,
       "data-map": shared.dataMap,
-      "msgpack-reader": shared.reader,
-      "msgpack-writer": shared.writer,
     }[spec.name] as TypeId;
   }
   if (spec.element.kind === "primitive") return fixed.i32 as TypeId;
-  return (
-    spec.element.kind === "shared" && spec.element.name === "data"
-      ? fixed.data
-      : fixed.msgpack
-  ) as TypeId;
+  return fixed.data as TypeId;
 };
 
 const makeProgramFor = (
@@ -93,26 +77,7 @@ const makeProgramFor = (
     [ids.i64, { kind: "primitive", name: "i64" }],
     [ids.f32, { kind: "primitive", name: "f32" }],
     [ids.f64, { kind: "primitive", name: "f64" }],
-    [shared.msgpack, { kind: "union", members: [] }],
     [shared.data, { kind: "union", members: [] }],
-    [
-      shared.reader,
-      {
-        kind: "nominal-object",
-        owner: 105 as ProgramSymbolId,
-        name: "MsgPackReader",
-        typeArgs: [],
-      },
-    ],
-    [
-      shared.writer,
-      {
-        kind: "nominal-object",
-        owner: 106 as ProgramSymbolId,
-        name: "MsgPackWriter",
-        typeArgs: [],
-      },
-    ],
     [
       shared.bytes,
       {
@@ -129,24 +94,6 @@ const makeProgramFor = (
         owner: owners.string,
         name: "String",
         typeArgs: [],
-      },
-    ],
-    [
-      shared.array,
-      {
-        kind: "nominal-object",
-        owner: owners.array,
-        name: "Array",
-        typeArgs: [shared.msgpack],
-      },
-    ],
-    [
-      shared.map,
-      {
-        kind: "nominal-object",
-        owner: owners.map,
-        name: "Dict",
-        typeArgs: [shared.string, shared.msgpack],
       },
     ],
     [
@@ -167,7 +114,6 @@ const makeProgramFor = (
         typeArgs: [shared.string, shared.data],
       },
     ],
-    [fixed.msgpack, { kind: "fixed-array", element: shared.msgpack }],
     [fixed.i32, { kind: "fixed-array", element: ids.i32 }],
     [fixed.data, { kind: "fixed-array", element: shared.data }],
   ]);
@@ -220,13 +166,6 @@ const makeProgramFor = (
   } as unknown as ProgramCodegenView;
 };
 
-const makeProgram = (
-  mutate?: (
-    signatures: Map<CompilerFunctionContractId, CodegenFunctionSignature>,
-  ) => void,
-): ProgramCodegenView =>
-  makeProgramFor(Object.values(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS), mutate);
-
 const makeDataProgram = (
   mutate?: (
     signatures: Map<CompilerFunctionContractId, CodegenFunctionSignature>,
@@ -239,76 +178,6 @@ const replace = (
   id: CompilerFunctionContractId,
   update: Partial<CodegenFunctionSignature>,
 ) => signatures.set(id, { ...signatures.get(id)!, ...update });
-
-describe("MessagePack host transport compiler contract signature validation", () => {
-  it("accepts the complete relational ABI", () => {
-    expect(
-      validateMsgpackHostTransportFunctionContracts(makeProgram()),
-    ).toEqual({
-      reader: shared.reader,
-      writer: shared.writer,
-    });
-  });
-
-  it("rejects wrong parameter and result types with the contract and signatures", () => {
-    const wrongParameter = makeProgram((signatures) => {
-      const id = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader;
-      const signature = signatures.get(id)!;
-      replace(signatures, id, {
-        parameters: signature.parameters.map((parameter, index) =>
-          index === 1 ? { ...parameter, typeId: ids.bool } : parameter,
-        ),
-      });
-    });
-    expect(() =>
-      validateMsgpackHostTransportFunctionContracts(wrongParameter),
-    ).toThrow(
-      /create-reader.*expected \(i32, i32\).*parameter 2 expected i32, got bool/,
-    );
-
-    const wrongResult = makeProgram((signatures) =>
-      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.finishWriter, {
-        returnType: ids.bool,
-      }),
-    );
-    expect(() =>
-      validateMsgpackHostTransportFunctionContracts(wrongResult),
-    ).toThrow(/finish-writer.*result expected i32, got bool/);
-  });
-
-  it("rejects generic, optional, and effectful providers", () => {
-    const generic = makeProgram((signatures) =>
-      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader, {
-        typeParams: [{ symbol: 1, typeParam: 1, typeRef: 1 }],
-      }),
-    );
-    expect(() =>
-      validateMsgpackHostTransportFunctionContracts(generic),
-    ).toThrow(/create-reader.*expected no type parameters, got 1/);
-
-    const optional = makeProgram((signatures) => {
-      const id = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader;
-      const signature = signatures.get(id)!;
-      replace(signatures, id, {
-        parameters: signature.parameters.map((parameter, index) =>
-          index === 0 ? { ...parameter, optional: true } : parameter,
-        ),
-      });
-    });
-    expect(() =>
-      validateMsgpackHostTransportFunctionContracts(optional),
-    ).toThrow(/create-reader.*parameter 1 must not be optional/);
-
-    const effectful = makeProgram((signatures) =>
-      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader, {
-        effectRow: 1,
-      }),
-    );
-    expect(() =>
-      validateMsgpackHostTransportFunctionContracts(effectful),
-    ).toThrow(/create-reader.*expected a pure effect row/);
-  });
-});
 
 describe("dto-data compiler contract signature validation", () => {
   it("accepts the complete relational ABI", () => {

@@ -1,6 +1,12 @@
-import { MSGPACK_HOST_TRANSPORT_CONTRACT_IDS } from "./function-contracts.js";
+export const SELECTED_HOST_TRANSPORT_IMPLEMENTATION = {
+  id: "voyd.std.msgpack",
+  version: 1,
+  packageId: "std",
+} as const;
 
-/** Build-selected provider roles retained and validated by generic host code. */
-export const SELECTED_HOST_TRANSPORT_CONTRACT_IDS = Object.freeze(
-  Object.values(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS),
-);
+/** Modules linked while source-level provider selection remains internal. */
+export const SELECTED_HOST_TRANSPORT_PROVIDER_MODULES = [
+  "std::msgpack",
+  "std::msgpack::fns",
+  "std::string",
+] as const;

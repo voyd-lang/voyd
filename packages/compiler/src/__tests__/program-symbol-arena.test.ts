@@ -10,7 +10,7 @@ import { parse } from "../parser/index.js";
 import { semanticsPipeline } from "../semantics/pipeline.js";
 import type { ModuleGraph, ModuleNode, ModulePath } from "../modules/types.js";
 import {
-  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
+  DTO_DATA_CONTRACT_IDS,
   STD_INTRINSIC_TYPE,
 } from "../compiler-contracts/index.js";
 
@@ -125,7 +125,7 @@ pub fn main() -> i32
   });
 
   it("rejects duplicate contract declarations deterministically", () => {
-    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.readerComplete;
+    const contractId = DTO_DATA_CONTRACT_IDS.makeBool;
     const left = analyzeContractModule({ name: "left", contractId });
     const right = analyzeContractModule({ name: "right", contractId });
 
@@ -142,7 +142,7 @@ pub fn main() -> i32
     const reverse = captureError([right, left]);
     expect(forward).toBe(reverse);
     expect(forward).toMatch(
-      /duplicate compiler function contract 'voyd\.std\.host-transport\.msgpack\.reader-complete'/,
+      /duplicate compiler function contract 'voyd\.std\.data\.make-bool'/,
     );
     expect(forward).toMatch(/std::left.*std::right/);
   });
@@ -180,7 +180,7 @@ pub fn main() -> i32
   it("does not expose compiler contracts on imported aliases", async () => {
     const srcRoot = resolve("/contract-alias/src");
     const stdRoot = resolve("/contract-alias/std");
-    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.readerComplete;
+    const contractId = DTO_DATA_CONTRACT_IDS.makeBool;
     const host = createMemoryHost({
       [`${srcRoot}${sep}main.voyd`]: `use std::{ contract_target }
 

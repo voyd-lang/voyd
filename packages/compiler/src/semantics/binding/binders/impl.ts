@@ -26,10 +26,7 @@ import {
   methodSignatureKey,
   methodSignatureParamTypeKey,
 } from "../../method-signature-key.js";
-import {
-  bindTypeExpr,
-  resolveBoundIdentifierSymbol,
-} from "./expressions.js";
+import { bindTypeExpr, resolveBoundIdentifierSymbol } from "./expressions.js";
 
 const isStaticMethod = (fn: ParsedFunctionDecl): boolean =>
   fn.signature.params.length === 0 || fn.signature.params[0]?.name !== "self";
@@ -105,6 +102,15 @@ export const bindImplDecl = (
   const traitResolution = decl.trait
     ? resolveTraitDecl(decl.trait, ctx, tracker.current())
     : undefined;
+  const compilerImplementation = resolveCompilerImplementation({
+    decl,
+    traitResolution,
+  });
+  if (compilerImplementation) {
+    ctx.symbolTable.setSymbolMetadata(implSymbol, {
+      compilerImplementation,
+    });
+  }
   const traitSymbolForMemberScope = (() => {
     if (traitResolution) {
       return traitResolution.localSymbol;
@@ -307,6 +313,36 @@ export const bindImplDecl = (
   methods.forEach((method) => {
     method.implId = implDecl.id;
   });
+};
+
+const resolveCompilerImplementation = ({
+  decl,
+  traitResolution,
+}: {
+  decl: ParsedImplDecl;
+  traitResolution: ReturnType<typeof resolveTraitDecl>;
+}): { id: string; version: number } | undefined => {
+  const implementation = decl.compilerImplementation;
+  if (!implementation) return undefined;
+  if (!decl.trait || !traitResolution) {
+    throw new Error(
+      `@compiler_impl '${implementation.id}' must implement a compiler-contract trait`,
+    );
+  }
+  const traitMetadata = traitResolution.sourceSymbolTable.getSymbol(
+    traitResolution.sourceSymbol,
+  ).metadata as { compilerTraitContract?: unknown } | undefined;
+  const contract = traitMetadata?.compilerTraitContract;
+  if (
+    !contract ||
+    typeof contract !== "object" ||
+    typeof (contract as { id?: unknown }).id !== "string"
+  ) {
+    throw new Error(
+      `@compiler_impl '${implementation.id}' must implement a compiler-contract trait`,
+    );
+  }
+  return { id: implementation.id, version: implementation.version };
 };
 
 const inferImplTypeParameters = ({

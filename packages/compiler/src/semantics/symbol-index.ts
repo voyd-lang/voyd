@@ -2,9 +2,12 @@ import type { SymbolId } from "./ids.js";
 import type { SymbolTable } from "./binder/index.js";
 import {
   getCompilerFunctionContractSpec,
+  getCompilerTraitContractSpec,
   getStdIntrinsicTypeContractSpec,
   type CompilerFunctionContractId,
   type CompilerFunctionContractSpec,
+  type CompilerTraitContractId,
+  type CompilerTraitContractSpec,
   type StdIntrinsicTypeContractId,
   type StdIntrinsicTypeContractProvider,
 } from "../compiler-contracts/index.js";
@@ -15,7 +18,10 @@ export type IntrinsicFunctionFlags = {
   external?: { interfaceId: string; functionName: string };
 };
 
-export type HostTransportDeclaration = { id: string; version: number };
+export type CompilerImplementationDeclaration = {
+  id: string;
+  version: number;
+};
 
 export type ModuleSymbolIndex = {
   moduleId: string;
@@ -25,9 +31,15 @@ export type ModuleSymbolIndex = {
   isModuleScoped(symbol: SymbolId): boolean;
   getIntrinsicType(symbol: SymbolId): string | undefined;
   resolveIntrinsicType(id: string): SymbolId | undefined;
-  getHostTransportDeclaration(
+  getCompilerImplementation(
     symbol: SymbolId,
-  ): HostTransportDeclaration | undefined;
+  ): CompilerImplementationDeclaration | undefined;
+  getCompilerTraitContract(
+    symbol: SymbolId,
+  ): CompilerTraitContractSpec | undefined;
+  resolveCompilerTraitContract(
+    id: CompilerTraitContractId,
+  ): SymbolId | undefined;
   getStdIntrinsicTypeContract(
     symbol: SymbolId,
   ): StdIntrinsicTypeContractProvider | undefined;
@@ -58,7 +70,18 @@ export const buildModuleSymbolIndex = ({
   const moduleScopedBySymbol = new Map<SymbolId, boolean>();
   const intrinsicTypeBySymbol = new Map<SymbolId, string>();
   const symbolsByIntrinsicType = new Map<string, SymbolId[]>();
-  const hostTransportBySymbol = new Map<SymbolId, HostTransportDeclaration>();
+  const compilerImplementationBySymbol = new Map<
+    SymbolId,
+    CompilerImplementationDeclaration
+  >();
+  const compilerTraitContractBySymbol = new Map<
+    SymbolId,
+    CompilerTraitContractSpec
+  >();
+  const symbolsByCompilerTraitContract = new Map<
+    CompilerTraitContractId,
+    SymbolId[]
+  >();
   const stdIntrinsicTypeContractBySymbol = new Map<
     SymbolId,
     StdIntrinsicTypeContractProvider
@@ -105,19 +128,37 @@ export const buildModuleSymbolIndex = ({
       externalFunction?: unknown;
       compilerFunctionContract?: unknown;
       import?: unknown;
-      hostTransport?: unknown;
+      compilerImplementation?: unknown;
+      compilerTraitContract?: unknown;
     };
 
     if (typeof metadata.intrinsicType === "string") {
       intrinsicTypeBySymbol.set(symbol, metadata.intrinsicType);
       if (!metadata.import) {
-        const symbols = symbolsByIntrinsicType.get(metadata.intrinsicType) ?? [];
+        const symbols =
+          symbolsByIntrinsicType.get(metadata.intrinsicType) ?? [];
         symbols.push(symbol);
         symbolsByIntrinsicType.set(metadata.intrinsicType, symbols);
       }
     }
-    if (!metadata.import && isHostTransportDeclaration(metadata.hostTransport)) {
-      hostTransportBySymbol.set(symbol, metadata.hostTransport);
+    if (
+      !metadata.import &&
+      isCompilerImplementationDeclaration(metadata.compilerImplementation)
+    ) {
+      compilerImplementationBySymbol.set(
+        symbol,
+        metadata.compilerImplementation,
+      );
+    }
+    const compilerTraitContract = metadata.import
+      ? undefined
+      : readCompilerTraitContract(metadata.compilerTraitContract);
+    if (compilerTraitContract) {
+      compilerTraitContractBySymbol.set(symbol, compilerTraitContract);
+      const symbols =
+        symbolsByCompilerTraitContract.get(compilerTraitContract.id) ?? [];
+      symbols.push(symbol);
+      symbolsByCompilerTraitContract.set(compilerTraitContract.id, symbols);
     }
     const stdIntrinsicTypeContract = metadata.import
       ? undefined
@@ -178,8 +219,19 @@ export const buildModuleSymbolIndex = ({
       }
       return symbols[0];
     },
-    getHostTransportDeclaration: (symbol) =>
-      hostTransportBySymbol.get(symbol),
+    getCompilerImplementation: (symbol) =>
+      compilerImplementationBySymbol.get(symbol),
+    getCompilerTraitContract: (symbol) =>
+      compilerTraitContractBySymbol.get(symbol),
+    resolveCompilerTraitContract: (id) => {
+      const symbols = symbolsByCompilerTraitContract.get(id) ?? [];
+      if (symbols.length > 1) {
+        throw new Error(
+          `duplicate compiler trait contract '${id}' in ${moduleId} on symbols ${symbols.join(", ")}`,
+        );
+      }
+      return symbols[0];
+    },
     getStdIntrinsicTypeContract: (symbol) =>
       stdIntrinsicTypeContractBySymbol.get(symbol),
     resolveStdIntrinsicTypeContract: (id) => {
@@ -215,13 +267,22 @@ export const buildModuleSymbolIndex = ({
   };
 };
 
-const isHostTransportDeclaration = (
+const isCompilerImplementationDeclaration = (
   value: unknown,
-): value is HostTransportDeclaration =>
+): value is CompilerImplementationDeclaration =>
   typeof value === "object" &&
   value !== null &&
   typeof (value as { id?: unknown }).id === "string" &&
   typeof (value as { version?: unknown }).version === "number";
+
+const readCompilerTraitContract = (
+  value: unknown,
+): CompilerTraitContractSpec | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const id = (value as { id?: unknown }).id;
+  if (typeof id !== "string") return undefined;
+  return getCompilerTraitContractSpec(id);
+};
 
 const isExternalFunctionMetadata = (
   value: unknown,

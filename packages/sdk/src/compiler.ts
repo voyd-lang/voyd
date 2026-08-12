@@ -14,7 +14,7 @@ export type {
   SourceSpan,
 } from "@voyd-lang/compiler/diagnostics/index.js";
 export { DiagnosticError } from "@voyd-lang/compiler/diagnostics/index.js";
-export { MSGPACK_HOST_TRANSPORT_CONTRACT_PROVIDER_MODULES } from "@voyd-lang/compiler/compiler-contracts/index.js";
+export { SELECTED_HOST_TRANSPORT_PROVIDER_MODULES } from "@voyd-lang/compiler/compiler-contracts/index.js";
 export {
   modulePathFromFile,
   modulePathToString,

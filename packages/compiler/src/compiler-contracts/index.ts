@@ -1,6 +1,4 @@
 export {
-  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
-  MSGPACK_HOST_TRANSPORT_CONTRACT_PROVIDER_MODULES,
   DTO_DATA_CONTRACT_IDS,
   WEB_RENDER_CONTRACT_IDS,
   COMPILER_FUNCTION_CONTRACTS,
@@ -14,13 +12,28 @@ export {
   type CompilerFunctionContractSignatureSpec,
   type CompilerFunctionContractSpec,
 } from "./function-contracts.js";
-export { SELECTED_HOST_TRANSPORT_CONTRACT_IDS } from "./selected-host-transport.js";
 export {
-  validateMsgpackHostTransportFunctionContracts,
+  SELECTED_HOST_TRANSPORT_IMPLEMENTATION,
+  SELECTED_HOST_TRANSPORT_PROVIDER_MODULES,
+} from "./selected-host-transport.js";
+export {
+  HOST_TRANSPORT_PROVIDER_CONTRACT,
+  HOST_TRANSPORT_PROVIDER_CONTRACT_ID,
+  COMPILER_TRAIT_CONTRACTS,
+  getCompilerTraitContractSpec,
+  isCompilerTraitContractId,
+  type CompilerTraitContractId,
+  type CompilerTraitContractSpec,
+  type CompilerTraitMethodRole,
+} from "./trait-contracts.js";
+export {
+  resolveSelectedHostTransportProvider,
+  type ResolvedHostTransportProvider,
+} from "./resolve-host-transport-provider.js";
+export {
   validateDtoDataFunctionContracts,
-  type MsgpackHostTransportContractTypes,
   type DtoDataContractTypes,
-} from "./validate-host-transport-msgpack.js";
+} from "./validate-function-contracts.js";
 export {
   getStdIntrinsicTypeContractSpec,
   isStdIntrinsicNominalType,

@@ -1,6 +1,6 @@
 # Compiler Contracts and Registered Implementations
 
-Status: Proposed
+Status: Current
 Scope: compiler and standard-library integration
 
 ## Purpose
@@ -15,9 +15,6 @@ The mechanism has two annotations:
   defined by the compiler.
 - `@compiler_impl` registers a stable, versioned implementation of a
   compiler-contract trait.
-
-The current compiler supports function-level `@compiler_contract` declarations.
-Trait contracts and `@compiler_impl` are the intended extension defined here.
 
 ## Contract declarations
 

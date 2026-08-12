@@ -1,13 +1,20 @@
 import type { CodegenContext } from "../context.js";
 import type { ProgramSymbolId } from "../../semantics/ids.js";
-import { MSGPACK_HOST_TRANSPORT_PROVIDER } from "../host-transport/providers/msgpack.js";
+import {
+  resolveSelectedHostTransportProvider,
+  SELECTED_HOST_TRANSPORT_IMPLEMENTATION,
+} from "../../compiler-contracts/index.js";
+import { requireFunctionMeta } from "../function-lookup.js";
+import { stateFor } from "../effects/host-boundary/state.js";
 import type {
   HostTransportIdentity,
   HostTransportProviderFunctions,
 } from "./provider.js";
 
-const BUILD_SELECTED_HOST_TRANSPORT_PROVIDER = MSGPACK_HOST_TRANSPORT_PROVIDER;
-const HOST_TRANSPORT_PROVIDER_INTRINSIC = "voyd.std.host-transport-provider";
+const SELECTED_PROVIDER_KEY = Symbol("voyd.hostTransport.selectedProvider");
+const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
+
+type ReachabilityState = { symbols?: Set<ProgramSymbolId> };
 
 export type SelectedHostTransportProvider = HostTransportProviderFunctions & {
   identity: HostTransportIdentity;
@@ -20,13 +27,37 @@ export type SelectedHostTransportProvider = HostTransportProviderFunctions & {
  */
 export const ensureSelectedHostTransportProvider = (
   ctx: CodegenContext,
-): SelectedHostTransportProvider => ({
-  identity: selectedProviderIdentity(ctx),
-  ...BUILD_SELECTED_HOST_TRANSPORT_PROVIDER.ensureFunctions(ctx),
-});
+): SelectedHostTransportProvider =>
+  stateFor(ctx, SELECTED_PROVIDER_KEY, () => {
+    const resolved = resolveSelectedHostTransportProvider(ctx.program);
+    const functions = {
+      createReader: requireMeta(ctx, resolved.functions.createReader),
+      readerComplete: requireMeta(ctx, resolved.functions.readerComplete),
+      createWriter: requireMeta(ctx, resolved.functions.createWriter),
+      finishWriter: requireMeta(ctx, resolved.functions.finishWriter),
+    };
+    [
+      ...Object.values(resolved.functions),
+      ...resolved.readerImplementation.methods.map(
+        ({ implMethod }) => implMethod,
+      ),
+      ...resolved.writerImplementation.methods.map(
+        ({ implMethod }) => implMethod,
+      ),
+    ].forEach((symbol) => markReachable({ ctx, symbol }));
+    return {
+      identity: resolved.identity,
+      readerTypeId: resolved.readerTypeId,
+      writerTypeId: resolved.writerTypeId,
+      ...functions,
+    };
+  });
 
-export const buildSelectedHostTransportIdentity = (): HostTransportIdentity =>
-  BUILD_SELECTED_HOST_TRANSPORT_PROVIDER.identity;
+export const buildSelectedHostTransportIdentity =
+  (): HostTransportIdentity => ({
+    id: SELECTED_HOST_TRANSPORT_IMPLEMENTATION.id,
+    version: SELECTED_HOST_TRANSPORT_IMPLEMENTATION.version,
+  });
 
 export const enqueueSelectedHostTransportProviderReachability = ({
   ctx,
@@ -35,55 +66,43 @@ export const enqueueSelectedHostTransportProviderReachability = ({
   ctx: CodegenContext;
   enqueue: (symbol: ProgramSymbolId) => void;
 }): void => {
-  selectedProviderIdentity(ctx);
-  BUILD_SELECTED_HOST_TRANSPORT_PROVIDER.enqueueReachability({ ctx, enqueue });
+  const resolved = resolveSelectedHostTransportProvider(ctx.program);
+  Object.values(resolved.functions).forEach(enqueue);
+  resolved.readerImplementation.methods.forEach(({ implMethod }) =>
+    enqueue(implMethod),
+  );
+  resolved.writerImplementation.methods.forEach(({ implMethod }) =>
+    enqueue(implMethod),
+  );
 };
 
-const selectedProviderIdentity = (
-  ctx: CodegenContext,
-): HostTransportIdentity => {
-  const expected = BUILD_SELECTED_HOST_TRANSPORT_PROVIDER.identity;
-  const selected = ctx.program.symbols
-    .hostTransportDeclarations()
-    .filter(
-      ({ declaration }) =>
-        declaration.id === expected.id && declaration.version === expected.version,
-    );
-  if (selected.length !== 1) {
-    throw new Error(
-      selected.length === 0
-        ? `missing @host_transport(id: "${expected.id}", version: ${expected.version}) declaration`
-        : `duplicate @host_transport declaration for ${expected.id}@${expected.version}`,
-    );
-  }
-  const provider = selected[0]!;
-  if (ctx.program.symbols.getPackageId(provider.symbol) !== "std") {
-    throw new Error(
-      "the selected host transport provider is not a registered link root",
-    );
-  }
-  const template = ctx.program.objects.getTemplate(provider.symbol);
-  if (!template || template.fields.length !== 0 || template.params.length !== 0) {
-    throw new Error("@host_transport must annotate a stateless object");
-  }
-  const markerTrait = ctx.program.symbols.resolveIntrinsicType(
-    HOST_TRANSPORT_PROVIDER_INTRINSIC,
+const requireMeta = (ctx: CodegenContext, symbol: ProgramSymbolId) => {
+  const ref = ctx.program.symbols.refOf(symbol);
+  return requireFunctionMeta({
+    ctx,
+    moduleId: ref.moduleId,
+    symbol: ref.symbol,
+  });
+};
+
+const markReachable = ({
+  ctx,
+  symbol,
+}: {
+  ctx: CodegenContext;
+  symbol: ProgramSymbolId;
+}): void => {
+  const state = ctx.programHelpers.getHelperState<ReachabilityState>(
+    REACHABILITY_STATE,
+    () => ({ symbols: new Set<ProgramSymbolId>() }),
   );
-  const marker =
-    markerTrait === undefined
-      ? undefined
-      : ctx.program.traits
-          .getImplTemplates()
-          .find(
-            (impl) =>
-              ctx.program.symbols.getName(impl.traitSymbol) ===
-                ctx.program.symbols.getName(markerTrait) &&
-              ctx.program.types.getNominalOwner(impl.target) === provider.symbol,
-          );
-  if (!marker) {
-    throw new Error(
-      "@host_transport provider must implement the compiler-known HostTransportProvider trait",
-    );
-  }
-  return provider.declaration;
+  const symbols = state.symbols ?? new Set<ProgramSymbolId>();
+  state.symbols = symbols;
+  const ref = ctx.program.symbols.refOf(symbol);
+  symbols.add(
+    ctx.program.symbols.canonicalIdOf(
+      ref.moduleId,
+      ref.symbol,
+    ) as ProgramSymbolId,
+  );
 };

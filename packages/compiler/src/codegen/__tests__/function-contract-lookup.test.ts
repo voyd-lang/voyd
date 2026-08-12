@@ -4,14 +4,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
 import {
-  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
-  SELECTED_HOST_TRANSPORT_CONTRACT_IDS,
+  DTO_DATA_CONTRACT_IDS,
+  HOST_TRANSPORT_PROVIDER_CONTRACT_ID,
 } from "../../compiler-contracts/index.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { gcTrampolineAbiStrategy } from "../effects/gc-trampoline-abi-strategy.js";
 import { requireFunctionMetaByCompilerContract } from "../function-lookup.js";
 
-const CONTRACT_ID = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader;
+const CONTRACT_ID = DTO_DATA_CONTRACT_IDS.makeNull;
 const CODEGEN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const sourceFilesUnder = (root: string): string[] =>
@@ -62,13 +62,13 @@ describe("compiler function contract lookup", () => {
   });
 });
 
-describe("effect host-boundary compiler contracts", () => {
-  it("reports missing contracts before emitting the boundary", () => {
+describe("effect host-boundary compiler implementation", () => {
+  it("reports a missing provider contract before emitting the boundary", () => {
     const diagnostics = new DiagnosticEmitter();
-    const resolveCompilerFunctionContract = vi.fn(() => undefined);
+    const resolveCompilerTraitContract = vi.fn(() => undefined);
     const entryCtx = {
       options: { effectsHostBoundary: "selected" },
-      program: { symbols: { resolveCompilerFunctionContract } },
+      program: { symbols: { resolveCompilerTraitContract } },
       diagnostics,
       module: {
         hir: { module: { span: { file: "main.voyd", start: 0, end: 1 } } },
@@ -81,14 +81,16 @@ describe("effect host-boundary compiler contracts", () => {
       effectfulExports: [{ meta: { effectRow: 1 }, exportName: "main" }],
     });
 
-    expect(resolveCompilerFunctionContract).toHaveBeenCalledTimes(
-      SELECTED_HOST_TRANSPORT_CONTRACT_IDS.length,
+    expect(resolveCompilerTraitContract).toHaveBeenCalledWith(
+      HOST_TRANSPORT_PROVIDER_CONTRACT_ID,
     );
     expect(diagnostics.diagnostics).toHaveLength(1);
     expect(diagnostics.diagnostics[0]?.message).toContain(
-      "effectful exports require the selected host-transport compiler contracts",
+      "effectful exports require a valid selected host transport implementation",
     );
-    expect(diagnostics.diagnostics[0]?.message).toContain(CONTRACT_ID);
+    expect(diagnostics.diagnostics[0]?.message).toContain(
+      HOST_TRANSPORT_PROVIDER_CONTRACT_ID,
+    );
   });
 });
 
@@ -102,8 +104,10 @@ describe("generic host transport architecture", () => {
     ];
     const genericFiles = [resolve(CODEGEN_ROOT, "functions.ts")];
 
-    [...genericRoots.flatMap(sourceFilesUnder), ...genericFiles].forEach((path) => {
-      expect(readFileSync(path, "utf8"), path).not.toMatch(/msgpack/iu);
-    });
+    [...genericRoots.flatMap(sourceFilesUnder), ...genericFiles].forEach(
+      (path) => {
+        expect(readFileSync(path, "utf8"), path).not.toMatch(/msgpack/iu);
+      },
+    );
   });
 });

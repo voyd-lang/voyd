@@ -1,10 +1,3 @@
-export const MSGPACK_HOST_TRANSPORT_CONTRACT_IDS = {
-  createReader: "voyd.std.host-transport.msgpack.create-reader",
-  readerComplete: "voyd.std.host-transport.msgpack.reader-complete",
-  createWriter: "voyd.std.host-transport.msgpack.create-writer",
-  finishWriter: "voyd.std.host-transport.msgpack.finish-writer",
-} as const;
-
 export const DTO_DATA_CONTRACT_IDS = {
   cycleError: "voyd.std.data.cycle-error",
   makeNull: "voyd.std.data.make-null",
@@ -51,23 +44,10 @@ export const WEB_RENDER_CONTRACT_IDS = {
 } as const;
 
 export type CompilerFunctionContractId =
-  | (typeof MSGPACK_HOST_TRANSPORT_CONTRACT_IDS)[keyof typeof MSGPACK_HOST_TRANSPORT_CONTRACT_IDS]
   | (typeof DTO_DATA_CONTRACT_IDS)[keyof typeof DTO_DATA_CONTRACT_IDS]
   | (typeof WEB_RENDER_CONTRACT_IDS)[keyof typeof WEB_RENDER_CONTRACT_IDS];
 
-/**
- * Loader bootstrap for synthetic entry modules that need every provider in the
- * graph before contract metadata can be indexed. Consumers must resolve roles
- * by ID after loading; these paths are not codegen identities.
- */
-export const MSGPACK_HOST_TRANSPORT_CONTRACT_PROVIDER_MODULES = [
-  "std::msgpack",
-  "std::msgpack::fns",
-  "std::string",
-] as const;
-
 export type CompilerContractFeature =
-  | "host-transport-msgpack"
   | "dto-data"
   | "retained-callback-call-scope";
 
@@ -83,9 +63,7 @@ export type CompilerContractSharedType =
   | "bytes"
   | "data"
   | "data-array"
-  | "data-map"
-  | "msgpack-reader"
-  | "msgpack-writer";
+  | "data-map";
 
 /** Symbolic types are resolved relationally after typing, at feature use. */
 export type CompilerContractTypeSpec =
@@ -139,17 +117,15 @@ const type = {
   data: shared("data"),
   dataArray: shared("data-array"),
   dataMap: shared("data-map"),
-  reader: shared("msgpack-reader"),
-  writer: shared("msgpack-writer"),
 } as const;
 
-const contract = (
+const dataContract = (
   id: CompilerFunctionContractId,
   parameters: readonly CompilerContractTypeSpec[],
   result: CompilerContractTypeSpec,
 ): CompilerFunctionContractSpec => ({
   id,
-  feature: "host-transport-msgpack",
+  feature: "dto-data",
   expectedArity: parameters.length,
   provider: { namespace: "std" },
   signature: {
@@ -161,39 +137,6 @@ const contract = (
     result,
     effect: "pure",
   },
-});
-
-const msgpackHostTransportContractSpecs: readonly CompilerFunctionContractSpec[] =
-  [
-    contract(
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createReader,
-      [type.i32, type.i32],
-      type.reader,
-    ),
-    contract(
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.readerComplete,
-      [type.reader],
-      type.bool,
-    ),
-    contract(
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.createWriter,
-      [type.i32, type.i32],
-      type.writer,
-    ),
-    contract(
-      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.finishWriter,
-      [type.writer],
-      type.i32,
-    ),
-  ];
-
-const dataContract = (
-  id: CompilerFunctionContractId,
-  parameters: readonly CompilerContractTypeSpec[],
-  result: CompilerContractTypeSpec,
-): CompilerFunctionContractSpec => ({
-  ...contract(id, parameters, result),
-  feature: "dto-data",
 });
 
 const dtoDataContractSpecs: readonly CompilerFunctionContractSpec[] = [
@@ -332,11 +275,10 @@ export const COMPILER_FUNCTION_CONTRACTS: ReadonlyMap<
   CompilerFunctionContractId,
   CompilerFunctionContractSpec
 > = new Map(
-  [
-    ...msgpackHostTransportContractSpecs,
-    ...dtoDataContractSpecs,
-    ...webRenderContractSpecs,
-  ].map((spec) => [spec.id, spec]),
+  [...dtoDataContractSpecs, ...webRenderContractSpecs].map((spec) => [
+    spec.id,
+    spec,
+  ]),
 );
 
 export const getCompilerFunctionContractSpec = (

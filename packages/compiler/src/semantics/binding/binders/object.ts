@@ -32,9 +32,6 @@ export const bindObjectDecl = (
   const intrinsicType = decl.form.attributes?.intrinsicType;
   const intrinsicTypeMetadata =
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
-  const hostTransport = hostTransportMetadataFromAttribute(
-    decl.form.attributes?.hostTransport,
-  );
   const stdIntrinsicTypeContract = resolveStdIntrinsicTypeContractProvider({
     id: intrinsicType,
     declarationName: decl.name.value,
@@ -61,7 +58,6 @@ export const bindObjectDecl = (
       entity: "object",
       objectKind: decl.objectKind,
       ...intrinsicTypeMetadata,
-      ...(hostTransport ? { hostTransport } : {}),
       ...(stdIntrinsicTypeContract ? { stdIntrinsicTypeContract } : {}),
       ...(boundaryMetadata ? { boundary: boundaryMetadata } : {}),
     },
@@ -125,19 +121,6 @@ export const bindObjectDecl = (
     moduleIndex: ctx.nextModuleIndex++,
     documentation: declarationDocForSyntax(decl.name, ctx),
   });
-};
-
-const hostTransportMetadataFromAttribute = (
-  value: unknown,
-): { id: string; version: number } | undefined => {
-  if (!value || typeof value !== "object") return undefined;
-  const candidate = value as { id?: unknown; version?: unknown };
-  return typeof candidate.id === "string" &&
-    typeof candidate.version === "number" &&
-    Number.isSafeInteger(candidate.version) &&
-    candidate.version > 0
-    ? { id: candidate.id, version: candidate.version }
-    : undefined;
 };
 
 const boundaryMetadataFromAttribute = (value: unknown): unknown | undefined => {
