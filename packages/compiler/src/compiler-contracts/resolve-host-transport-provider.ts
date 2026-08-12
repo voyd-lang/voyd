@@ -132,7 +132,7 @@ const resolveProviderFunctions = ({
 }): Readonly<Record<CompilerTraitMethodRole, ProgramSymbolId>> => {
   const methods = new Map(
     implementation.staticMethods.map(({ traitMethod, implMethod }) => [
-      program.symbols.getName(traitMethod),
+      program.symbols.getCompilerTraitMethodRole(traitMethod),
       implMethod,
     ]),
   );
@@ -144,7 +144,7 @@ const resolveProviderFunctions = ({
 
   const result = {} as Record<CompilerTraitMethodRole, ProgramSymbolId>;
   HOST_TRANSPORT_PROVIDER_CONTRACT.methods.forEach((method) => {
-    const symbol = methods.get(method.name);
+    const symbol = methods.get(method.role);
     if (symbol === undefined) {
       throw new Error(
         `the selected HostTransportProvider implementation is missing '${method.name}'`,

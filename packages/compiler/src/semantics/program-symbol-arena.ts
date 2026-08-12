@@ -7,6 +7,7 @@ import type {
   CompilerFunctionContractId,
   CompilerFunctionContractSpec,
   CompilerTraitContractId,
+  CompilerTraitMethodRole,
   CompilerTraitContractSpec,
   StdIntrinsicTypeContractId,
   StdIntrinsicTypeContractProvider,
@@ -36,6 +37,9 @@ export type ProgramSymbolArena = {
   resolveCompilerTraitContract(
     id: CompilerTraitContractId,
   ): ProgramSymbolId | undefined;
+  getCompilerTraitMethodRole(
+    id: ProgramSymbolId,
+  ): CompilerTraitMethodRole | undefined;
   getStdIntrinsicTypeContract(
     id: ProgramSymbolId,
   ): StdIntrinsicTypeContractProvider | undefined;
@@ -91,6 +95,8 @@ export const buildProgramSymbolArena = (
     CompilerTraitContractId,
     ProgramSymbolId
   >();
+  const compilerTraitMethodRolesById: (CompilerTraitMethodRole | undefined)[] =
+    [];
   const stdIntrinsicTypeContractsById: (
     | StdIntrinsicTypeContractProvider
     | undefined
@@ -162,6 +168,8 @@ export const buildProgramSymbolArena = (
         }
         idsByCompilerTraitContract.set(compilerTraitContract.id, id);
       }
+      compilerTraitMethodRolesById[id] =
+        mod.symbols.getCompilerTraitMethodRole(symbol);
       const stdIntrinsicTypeContract =
         mod.symbols.getStdIntrinsicTypeContract(symbol);
       stdIntrinsicTypeContractsById[id] = stdIntrinsicTypeContract;
@@ -246,6 +254,7 @@ export const buildProgramSymbolArena = (
     getCompilerImplementation: (id) => compilerImplementationsById[id],
     getCompilerTraitContract: (id) => compilerTraitContractsById[id],
     resolveCompilerTraitContract: (id) => idsByCompilerTraitContract.get(id),
+    getCompilerTraitMethodRole: (id) => compilerTraitMethodRolesById[id],
     getStdIntrinsicTypeContract: (id) => stdIntrinsicTypeContractsById[id],
     resolveStdIntrinsicTypeContract: (id) =>
       idsByStdIntrinsicTypeContract.get(id),

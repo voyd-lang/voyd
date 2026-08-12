@@ -40,6 +40,7 @@ import { resolveStdIntrinsicTypeContractProvider } from "../intrinsic-type-contr
 import { bindingIdentityForSyntax } from "../hygiene.js";
 import {
   getCompilerTraitContractSpec,
+  type CompilerTraitMethodRole,
   type CompilerTraitContractSpec,
 } from "../../../compiler-contracts/index.js";
 
@@ -113,6 +114,9 @@ export const bindTraitDecl = (
           tracker,
           traitScope,
           traitSymbol: symbol,
+          compilerTraitMethodRole: compilerTraitContract?.methods.find(
+            (entry) => entry.name === method.signature.name.value,
+          )?.role,
         }),
       );
     });
@@ -174,6 +178,7 @@ const resolveCompilerTraitContract = ({
   const expectedMethods = new Map(
     spec.methods.map((method) => [method.name, method]),
   );
+  const seenMethods = new Set<string>();
   if (decl.methods.length !== expectedMethods.size) {
     throw new Error(
       `@compiler_contract '${id}' on ${decl.name.value} expects exactly ${expectedMethods.size} method(s)`,
@@ -186,6 +191,12 @@ const resolveCompilerTraitContract = ({
         `@compiler_contract '${id}' on ${decl.name.value} has unexpected method '${method.signature.name.value}'`,
       );
     }
+    if (seenMethods.has(expected.name)) {
+      throw new Error(
+        `@compiler_contract '${id}' on ${decl.name.value} declares duplicate method '${expected.name}'`,
+      );
+    }
+    seenMethods.add(expected.name);
     if (method.signature.params.length !== expected.expectedArity) {
       throw new Error(
         `@compiler_contract '${id}' method '${expected.name}' expects ${expected.expectedArity} parameter(s), but declares ${method.signature.params.length}`,
@@ -210,12 +221,14 @@ const bindTraitMethod = ({
   tracker,
   traitScope,
   traitSymbol,
+  compilerTraitMethodRole,
 }: {
   decl: ParsedTraitMethod;
   ctx: BindingContext;
   tracker: BinderScopeTracker;
   traitScope: ScopeId;
   traitSymbol: SymbolId;
+  compilerTraitMethodRole?: CompilerTraitMethodRole;
 }): TraitMethodDeclInput => {
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.body, ctx);
@@ -224,6 +237,7 @@ const bindTraitMethod = ({
   const methodMetadata: Record<string, unknown> = {
     entity: "trait-method",
     trait: traitSymbol,
+    ...(compilerTraitMethodRole ? { compilerTraitMethodRole } : {}),
   };
 
   if (intrinsicMetadata) {

@@ -148,6 +148,19 @@ impl HostTransportProvider<Reader, Writer> for Provider
         HOST_TRANSPORT_PROVIDER_CONTRACT_ID,
       ),
     ).toBe(trait);
+    expect(
+      symbolTable
+        .snapshot()
+        .symbols.filter((record) => record?.metadata?.entity === "trait-method")
+        .map((record) =>
+          semantics.symbols.getCompilerTraitMethodRole(record!.id),
+        ),
+    ).toEqual([
+      "createReader",
+      "readerComplete",
+      "createWriter",
+      "finishWriter",
+    ]);
 
     const impl = symbolTable
       .snapshot()
@@ -177,5 +190,19 @@ impl Ordinary for Target
         path: { namespace: "std", segments: ["ordinary_impl_test"] },
       }),
     ).toThrow(/must implement a compiler-contract trait/);
+  });
+
+  it("rejects duplicate contract methods that omit another required role", () => {
+    expect(() =>
+      analyze({
+        source: `@compiler_contract(id: "${HOST_TRANSPORT_PROVIDER_CONTRACT_ID}")
+trait HostTransportProvider<Reader, Writer>
+  fn create_reader(ptr: i32, len: i32) -> Reader
+  fn create_reader(ptr: i32, len: i32) -> Reader
+  fn reader_complete(reader: Reader) -> bool
+  fn create_writer(ptr: i32, len: i32) -> Writer`,
+        path: { namespace: "std", segments: ["duplicate_method_test"] },
+      }),
+    ).toThrow(/declares duplicate method 'create_reader'/);
   });
 });

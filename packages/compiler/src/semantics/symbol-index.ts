@@ -7,6 +7,7 @@ import {
   type CompilerFunctionContractId,
   type CompilerFunctionContractSpec,
   type CompilerTraitContractId,
+  type CompilerTraitMethodRole,
   type CompilerTraitContractSpec,
   type StdIntrinsicTypeContractId,
   type StdIntrinsicTypeContractProvider,
@@ -40,6 +41,9 @@ export type ModuleSymbolIndex = {
   resolveCompilerTraitContract(
     id: CompilerTraitContractId,
   ): SymbolId | undefined;
+  getCompilerTraitMethodRole(
+    symbol: SymbolId,
+  ): CompilerTraitMethodRole | undefined;
   getStdIntrinsicTypeContract(
     symbol: SymbolId,
   ): StdIntrinsicTypeContractProvider | undefined;
@@ -81,6 +85,10 @@ export const buildModuleSymbolIndex = ({
   const symbolsByCompilerTraitContract = new Map<
     CompilerTraitContractId,
     SymbolId[]
+  >();
+  const compilerTraitMethodRoleBySymbol = new Map<
+    SymbolId,
+    CompilerTraitMethodRole
   >();
   const stdIntrinsicTypeContractBySymbol = new Map<
     SymbolId,
@@ -130,6 +138,7 @@ export const buildModuleSymbolIndex = ({
       import?: unknown;
       compilerImplementation?: unknown;
       compilerTraitContract?: unknown;
+      compilerTraitMethodRole?: unknown;
     };
 
     if (typeof metadata.intrinsicType === "string") {
@@ -159,6 +168,12 @@ export const buildModuleSymbolIndex = ({
         symbolsByCompilerTraitContract.get(compilerTraitContract.id) ?? [];
       symbols.push(symbol);
       symbolsByCompilerTraitContract.set(compilerTraitContract.id, symbols);
+    }
+    if (isCompilerTraitMethodRole(metadata.compilerTraitMethodRole)) {
+      compilerTraitMethodRoleBySymbol.set(
+        symbol,
+        metadata.compilerTraitMethodRole,
+      );
     }
     const stdIntrinsicTypeContract = metadata.import
       ? undefined
@@ -232,6 +247,8 @@ export const buildModuleSymbolIndex = ({
       }
       return symbols[0];
     },
+    getCompilerTraitMethodRole: (symbol) =>
+      compilerTraitMethodRoleBySymbol.get(symbol),
     getStdIntrinsicTypeContract: (symbol) =>
       stdIntrinsicTypeContractBySymbol.get(symbol),
     resolveStdIntrinsicTypeContract: (id) => {
@@ -266,6 +283,14 @@ export const buildModuleSymbolIndex = ({
     },
   };
 };
+
+const isCompilerTraitMethodRole = (
+  value: unknown,
+): value is CompilerTraitMethodRole =>
+  value === "createReader" ||
+  value === "readerComplete" ||
+  value === "createWriter" ||
+  value === "finishWriter";
 
 const isCompilerImplementationDeclaration = (
   value: unknown,

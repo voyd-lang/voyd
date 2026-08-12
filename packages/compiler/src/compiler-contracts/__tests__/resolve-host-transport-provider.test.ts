@@ -105,10 +105,10 @@ const makeProgram = ({
   createReaderResult?: TypeId;
 } = {}): ProgramCodegenView => {
   const names = new Map<ProgramSymbolId, string>([
-    [symbol.createReaderTrait, "create_reader"],
-    [symbol.readerCompleteTrait, "reader_complete"],
-    [symbol.createWriterTrait, "create_writer"],
-    [symbol.finishWriterTrait, "finish_writer"],
+    [symbol.createReaderTrait, "renamed_create_reader"],
+    [symbol.readerCompleteTrait, "renamed_reader_complete"],
+    [symbol.createWriterTrait, "renamed_create_writer"],
+    [symbol.finishWriterTrait, "renamed_finish_writer"],
     [symbol.dataReaderTrait, "DataReader"],
     [symbol.dataWriterTrait, "DataWriter"],
   ]);
@@ -198,6 +198,16 @@ const makeProgram = ({
           : undefined,
       getPackageId: () => "std",
       getName: (id: ProgramSymbolId) => names.get(id),
+      getCompilerTraitMethodRole: (id: ProgramSymbolId) =>
+        id === symbol.createReaderTrait
+          ? "createReader"
+          : id === symbol.readerCompleteTrait
+            ? "readerComplete"
+            : id === symbol.createWriterTrait
+              ? "createWriter"
+              : id === symbol.finishWriterTrait
+                ? "finishWriter"
+                : undefined,
       refOf: (id: ProgramSymbolId) => ({
         moduleId:
           id === symbol.dataReaderTrait || id === symbol.dataWriterTrait
