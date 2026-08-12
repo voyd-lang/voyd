@@ -413,7 +413,7 @@ const runWorker = async (config: WorkerConfig): Promise<WorkerResult> => {
   if (config.runtimeSamples > 0) {
     const { createVoydHost } = await import("@voyd-lang/sdk/js-host");
     const host = await createVoydHost({ wasm: compiled.wasm });
-    const warmupResult = host.runPure<number>(scenario.entryName);
+    const warmupResult = await host.runPure<number>(scenario.entryName);
     if (warmupResult !== scenario.expected) {
       throw new Error(
         `${scenario.name} returned ${warmupResult}, expected ${scenario.expected}`,
@@ -424,7 +424,7 @@ const runWorker = async (config: WorkerConfig): Promise<WorkerResult> => {
       let iterations = 0;
       do {
         const startedAt = performance.now();
-        const result = host.runPure<number>(scenario.entryName);
+        const result = await host.runPure<number>(scenario.entryName);
         elapsedMs += performance.now() - startedAt;
         iterations += 1;
         if (result !== scenario.expected) {
