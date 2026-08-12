@@ -103,10 +103,12 @@ still has a bounded 1,759-byte raw and 683-byte gzip baseline shift, so the PR
 lane uses 2 KiB and 1 KiB absolute floors while retaining the 5% relative size
 gates.
 
-The later V-499 CI investigation also found a costly dependency-snapshot safety
-boundary and superlinear borrowing-analysis growth in selected-provider
-compiles. The raw phase timings, unsafe cache ablation, work counters, and
-recommended inputs for a borrowing-system redesign are preserved in
+The later V-499 CI investigation also found a mutable symbol-table leak in
+dependency snapshot clones and superlinear borrowing-analysis growth in
+selected-provider compiles. V-499 fixed the snapshot ownership boundary so
+source import changes can reuse cached dependencies safely. The raw phase
+timings, cache ablation, work counters, root cause, and recommended inputs for a
+borrowing-system redesign are preserved in
 [`docs/notes/v-499-compiler-performance-findings.md`](notes/v-499-compiler-performance-findings.md).
 
 Compiler perf summaries are versioned and enabled with

@@ -529,31 +529,10 @@ describe("integration: pkg::web", () => {
 
   it("rejects unknown route DSL extractor parameter names", async () => {
     const sdk = webFrameworkSdk;
-    // Match the shared fixture's entry identity and import surface so this
-    // diagnostic-only edit can safely reuse its dependency snapshot.
     const result = await sdk.compile({
-      entryPath: path.join(fixtureRoot, "web-framework.voyd"),
       source: `
 use pkg::web::all
-use pkg::web::{ render as render_html, serve as root_serve }
-use pkg::web::dsl::{ serve as dsl_serve }
-use pkg::web::html::self as server_html
-use pkg::web::router
-use std::http::{ Body, Headers, HttpError, IncomingRequest, Method, QueryString, Response }
-use std::http::{ Response as HttpResponse }
-use std::json::{ JsonBool, JsonValue, stringify }
-use std::number::cast::self as cast
-use std::number::cast::to_string
-use std::optional::types::all
-use std::result::types::all
 use std::string::type::String
-use std::http::server::self as server
-use std::http::server::{ HttpServer, RequestBody, ServeTaskPolicy, ServerConfig }
-use std::error::panic
-use std::task::self as tasks
-use std::time::self as time
-use std::time::{ Duration, Time }
-use std::vx::all
 
 type UserParams = {
   id: String

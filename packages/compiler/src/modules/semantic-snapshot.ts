@@ -7,6 +7,7 @@ import { cloneNestedMap } from "../semantics/typing/call-resolution.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypeArena } from "../semantics/typing/type-arena.js";
 import { cloneModuleExportTable } from "../semantics/modules.js";
+import { SymbolTable } from "../semantics/binder/index.js";
 
 export const cloneSemanticsForTypingState = ({
   semantics,
@@ -18,10 +19,11 @@ export const cloneSemanticsForTypingState = ({
   effectInterner: EffectInterner;
 }): SemanticsPipelineResult => {
   const symbolTable = getSymbolTable(semantics);
+  const clonedSymbolTable = cloneSymbolTable(symbolTable);
   const typing = semantics.typing;
 
   return {
-    binding: semantics.binding,
+    binding: { ...semantics.binding, symbolTable: clonedSymbolTable },
     symbols: semantics.symbols,
     hir: semantics.hir,
     borrowing: {
@@ -131,8 +133,22 @@ export const cloneSemanticsForTypingState = ({
     moduleId: semantics.moduleId,
     exports: cloneModuleExportTable(semantics.exports),
     diagnostics: [...semantics.diagnostics],
-    ...({ symbolTable } as unknown as {}),
+    ...({ symbolTable: clonedSymbolTable } as unknown as {}),
   } as SemanticsPipelineResult;
+};
+
+const cloneSymbolTable = (source: SymbolTable): SymbolTable => {
+  const snapshot = source.snapshot();
+  const root = snapshot.scopes.find((scope) => scope.id === source.rootScope);
+  if (!root) {
+    throw new Error("cannot clone a symbol table without its root scope");
+  }
+  const clone = new SymbolTable({
+    rootOwner: root.owner,
+    rootKind: root.kind === "macro" ? "macro" : "module",
+  });
+  clone.restore(snapshot);
+  return clone;
 };
 
 export const cloneSemanticsMapForTypingState = ({

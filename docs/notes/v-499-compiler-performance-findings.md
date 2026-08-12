@@ -9,12 +9,12 @@ revision `f395d78c` with V-499 revision `8865d267` unless stated otherwise.
 
 Two separate effects were present:
 
-1. A necessary dependency-snapshot safety guard makes repeated SDK compiles
-   cold whenever the source module changes its exact `use` declarations. An
-   ablation showed a large potential speedup from removing the guard, but the
-   full two-worker integration run then produced invalid overload diagnostics
-   from reused std semantics. V-499 therefore keeps the guard and batches the
-   affected compile-heavy tests into one source fixture.
+1. Dependency snapshot clones shared their mutable symbol tables with the
+   canonical cache entry. Lazy import hydration during `src` analysis could
+   therefore mutate cached dependency semantics. A source-import cache-key
+   guard hid the ownership bug by forcing cold compiles. V-499 now clones the
+   symbol tables, removes the guard, and safely reuses dependency semantics
+   across changes to source import selection and aliases.
 2. Boundary-enabled cold compiles perform materially more borrowing work after
    the typed `DataValue` and MessagePack provider expansion. The work grows
    faster than the number of analyzed functions, especially in contract
@@ -33,20 +33,18 @@ The GitHub Actions compiler-codegen test body changed as follows:
 Setup time was slightly lower on V-499. The increase was inside the tests, not
 checkout, dependency installation, or runner provisioning.
 
-## Dependency snapshot safety boundary
+## Dependency snapshot source-import leak
 
-The dependency snapshot key includes the source module's exact import surface.
-At first this appeared broader than the cache boundary documented in
+The dependency snapshot key temporarily included the source module's exact
+import surface. This was broader than the cache boundary documented in
 `docs/compiler-performance.md`: the snapshot contains only non-`src` semantics,
 and every `src` module is reanalyzed against a cloned dependency typing state.
 
 The non-source module fingerprints already include each loaded std/package
 module's source, origin, dependencies, package root, source files, and macro
 exports. Changing a source import so that it loads a different dependency set
-therefore changes the fingerprint set. However, the restored dependency typing
-state is not currently independent of how the source imported those modules.
-Changing only import selection or an alias can expose stale source-conditioned
-overload state, so it cannot safely remain a cache hit today.
+therefore changes the fingerprint set. Changing only import selection or an
+alias should remain a cache hit.
 
 The integration lane exposed this because one SDK instance compiles several
 different source snippets. With the source import surface in the key, every
@@ -80,17 +78,33 @@ no diagnostics in the focused unit case.
 That focused case was insufficient. The exact integration command used by CI,
 with two Vitest workers, failed three positive `pkg::web` tests after the guard
 was removed. Reused `std::dict` semantics reported `TY0008` for valid `next`
-overloads. This demonstrates that source import declarations affect state
-captured in the dependency snapshot even though the snapshot excludes `src`
-modules. The import surface must remain in the key until the dependency typing
-snapshot becomes genuinely source-independent.
+overloads.
 
-The safe V-499 remedy is test batching. Five positive `pkg::web` source snippets
-that loaded the same large provider graph are now entry points in the existing
-shared integration fixture. They compile once. The negative route-DSL test
-remains a separate compile because its diagnostic is the behavior under test.
-This follows the repository's test-cost guidance and avoids hiding the issue
-with longer timeouts or fewer workers.
+The precise leak was in `cloneSemanticsForTypingState`. It cloned the type
+arena, stores, maps, and export table, but retained the dependency semantic
+result's mutable `SymbolTable` through both `binding.symbolTable` and the
+semantics-internal symbol-table field. Source typing creates dependency contexts
+for lazy imported type, trait, and overload hydration. That hydration copies
+importable metadata onto the dependency context's symbol table. Because the
+table still belonged to the canonical cache entry, consecutive source compiles
+accumulated metadata in the snapshot. A three-source reproduction was required:
+either intermediate `pkg::web` source followed by the timeout source passed,
+while both intermediate sources followed by it produced the `std::dict.next`
+failure.
+
+The fix gives every prepared cache hit an independent cloned symbol table and
+uses the same clone from the returned binding and internal semantics field.
+The cache key no longer includes `sourceImports`. Dependency module additions,
+removals, content changes, roots, and compiler options remain represented by
+the existing fingerprints and key fields. A focused compiler regression
+mutates metadata in one prepared snapshot and verifies that a later hit sees
+the original cached state.
+
+The test batching remains useful independently of the cache fix. Five positive
+`pkg::web` source snippets that loaded the same large provider graph are now
+entry points in the existing shared integration fixture. They compile once.
+The negative route-DSL test remains a separate compile because its diagnostic
+is the behavior under test. This follows the repository's test-cost guidance.
 
 ## Borrowing-analysis growth
 
@@ -187,6 +201,6 @@ A redesign should specifically test whether phase time stays close to growth in
 callables and facts, whether projected-origin families remain bounded before a
 large fixed point forms, and whether dependency summaries can be reused
 without retaining source-specific state. For dependency snapshots, the
-two-worker `pkg::web` integration workload should be a correctness gate before
-removing the source-import key: a focused alias-only unit test does not exercise
-the source-conditioned overload state that failed here.
+two-worker `pkg::web` integration workload remains a correctness gate: a
+focused alias-only test did not exercise the mutable symbol-table leak that
+failed here.

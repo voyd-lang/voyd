@@ -12,6 +12,7 @@ import {
 import { analyzeModules, loadModuleGraph } from "../pipeline.js";
 import { projectPackageSemanticInterface } from "../semantics/borrowing/dependency-projection.js";
 import { persistedBorrowQueryInput } from "../semantics/borrowing/query-digest.js";
+import { getSymbolTable } from "../semantics/_internal/symbol-table.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
@@ -151,7 +152,7 @@ describe("compiler dependency snapshots", () => {
     expect(second.analyzed.recomputedModuleIds).toEqual(["src::main"]);
   });
 
-  it("invalidates dependency semantics when the source import surface changes", async () => {
+  it("reuses dependency semantics when the source import surface changes", async () => {
     const cache = createCompilerDependencySnapshotCache();
     const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
     await loadAndAnalyze({
@@ -173,7 +174,47 @@ describe("compiler dependency snapshots", () => {
       cache,
     });
 
-    expect(second.prepared.hit).toBe(false);
+    expect(second.prepared.hit).toBe(true);
+    expect(second.analyzed.recomputedModuleIds).toEqual(["src::main"]);
+  });
+
+  it("isolates lazy source-import metadata between snapshot hits", async () => {
+    const cache = createCompilerDependencySnapshotCache();
+    const project = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
+    await loadAndAnalyze({ files: project.files, roots: project.roots, cache });
+    const graph = await loadModuleGraph({
+      entryPath: `${project.roots.src}${sep}main.voyd`,
+      roots: project.roots,
+      host: createMemoryHost(project.files),
+    });
+
+    const firstReuse = prepareDependencySnapshotReuse({
+      cache,
+      graph,
+      roots: project.roots,
+    });
+    const firstApi = firstReuse.previousSemantics?.get("pkg:dep::api");
+    const exported = firstApi?.exports.get("pkg_value");
+    expect(firstReuse.hit).toBe(true);
+    expect(firstApi).toBeDefined();
+    expect(exported).toBeDefined();
+    getSymbolTable(firstApi!).setSymbolMetadata(exported!.symbol, {
+      sourceHydrationProbe: true,
+    });
+
+    const secondReuse = prepareDependencySnapshotReuse({
+      cache,
+      graph,
+      roots: project.roots,
+    });
+    const secondApi = secondReuse.previousSemantics?.get("pkg:dep::api");
+    const secondSymbolTable = getSymbolTable(secondApi!);
+
+    expect(secondReuse.hit).toBe(true);
+    expect(
+      secondSymbolTable.getSymbol(exported!.symbol).metadata,
+    ).not.toHaveProperty("sourceHydrationProbe");
+    expect(secondApi?.binding.symbolTable).toBe(secondSymbolTable);
   });
 
   it("reuses dependency semantics without retaining borrowing artifact queries", async () => {
