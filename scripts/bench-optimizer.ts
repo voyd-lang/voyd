@@ -349,6 +349,11 @@ const compileOnce = async ({
       // PR gate can benchmark a parent revision that predates optimizationLevel.
       optimize: mode !== "unoptimized",
       optimizationLevel: mode === "unoptimized" ? "none" : mode,
+      // This scorecard measures optimizer output. Host ABI framing has its own
+      // boundary performance gates and would otherwise dominate these small
+      // pure-program scenarios.
+      boundaryExports: false,
+      effectsHostBoundary: "off",
     });
     const durationMs = performance.now() - startedAt;
     if (!result.success) {
@@ -408,7 +413,7 @@ const runWorker = async (config: WorkerConfig): Promise<WorkerResult> => {
   if (config.runtimeSamples > 0) {
     const { createVoydHost } = await import("@voyd-lang/sdk/js-host");
     const host = await createVoydHost({ wasm: compiled.wasm });
-    const warmupResult = await host.run<number>(scenario.entryName);
+    const warmupResult = host.runPure<number>(scenario.entryName);
     if (warmupResult !== scenario.expected) {
       throw new Error(
         `${scenario.name} returned ${warmupResult}, expected ${scenario.expected}`,
@@ -419,7 +424,7 @@ const runWorker = async (config: WorkerConfig): Promise<WorkerResult> => {
       let iterations = 0;
       do {
         const startedAt = performance.now();
-        const result = await host.run<number>(scenario.entryName);
+        const result = host.runPure<number>(scenario.entryName);
         elapsedMs += performance.now() - startedAt;
         iterations += 1;
         if (result !== scenario.expected) {

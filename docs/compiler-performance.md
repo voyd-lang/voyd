@@ -49,7 +49,10 @@ The scorecard uses a fresh child process for every compile warmup and measured
 sample. Compile timing and peak compile RSS exclude runtime execution and WAT
 emission. After the timed compile it validates
 the Wasm, measures gzip and structural shape counts, checks deterministic bytes
-across identical compiles, and runs the public entrypoint after a warmup. CI
+across identical compiles, and runs the pure public entrypoint after a warmup.
+Optimizer scenarios disable host-boundary exports and effect hosting because
+the framed host ABI has separate boundary performance gates. This keeps the
+scorecard focused on generated program code and optimizer behavior. CI
 runtime samples batch entrypoint calls for at least 200 ms and report the
 per-call average, reducing timer and host-scheduling noise. It
 also records compiler phase timings, ordinal optimizer-pass metrics, codegen

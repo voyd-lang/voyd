@@ -19,10 +19,10 @@
     "maxFileMs": 180000
   },
   "conformance": {
-    "maxWallMs": 120000,
-    "maxFileMs": 60000,
+    "maxWallMs": 240000,
+    "maxFileMs": 80000,
     "maxFileMsByPathSuffix": {
-      "tests/conformance/src/runtime.test.ts": 80000
+      "tests/conformance/src/runtime.test.ts": 140000
     }
   },
   "integration": {

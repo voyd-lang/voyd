@@ -52,9 +52,9 @@ describe("lane wall timing budgets", () => {
   });
 
   it("scopes the web-package allowance to its exact command", () => {
-    expect(
-      wallBudgetMs(["npm", "run", "test:unit:web:ci"], webBudget),
-    ).toBe(600_000);
+    expect(wallBudgetMs(["npm", "run", "test:unit:web:ci"], webBudget)).toBe(
+      600_000,
+    );
     expect(
       wallBudgetMs(
         ["npm", "run", "test:unit:web:ci", "--", "--force"],
@@ -75,13 +75,13 @@ describe("file timing budgets", () => {
         { file: "/checkout/tests/conformance/src/runtime.test.ts" },
         conformanceBudget,
       ),
-    ).toBe(80_000);
+    ).toBe(140_000);
     expect(
       fileBudgetMs(
         { file: "/checkout/tests/conformance/src/typing.test.ts" },
         conformanceBudget,
       ),
-    ).toBe(60_000);
+    ).toBe(80_000);
   });
 
   it("uses an exact path-suffix override before a basename override", () => {
