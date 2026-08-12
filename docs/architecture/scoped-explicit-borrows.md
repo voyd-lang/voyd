@@ -12,9 +12,15 @@ bounded call or callback.
 Voyd will remove borrowed results, borrow-carrying containers, named regions,
 borrow contracts, and `ViewIterator`.
 
-This keeps the current safety level. It removes safe but unused forms of
-zero-copy programming. It also gives the compiler a smaller memory-safety model
-to analyze.
+Voyd will also replace path-sensitive borrowing contracts for ordinary `~T`
+code with bounded whole-parameter mutation summaries. Detailed provenance will
+run only for callables whose signatures explicitly contain `Borrow<T>`.
+Release optimizations may request bounded exact-call facts, while fast paths
+that lose their proof must be removed.
+
+This keeps the current mutation-safety level. It removes safe but unused forms
+of zero-copy programming and prevents ordinary generic object graphs from
+creating unbounded borrow-provenance state.
 
 ## Context
 
@@ -52,6 +58,20 @@ closures, module boundaries, and dynamic dispatch. Ordinary runtime code is
 already cheap, so the main expected gain from this decision is faster and
 simpler compilation.
 
+The V-499 provider investigation showed that borrowed-result removal alone is
+not enough. A selected-provider compile changed from 1,093 to 1,701 borrowing
+summary functions while borrowing analysis grew from about 576 ms to 1,274 ms
+on an independent reproduction. Contract inference grew from about 207 ms to
+658 ms, and projection-family widenings grew from 153 to 2,274. The implicated
+`std::data`, `std::msgpack`, and `std::msgpack::fns` modules used no explicit
+`borrow` values. Their generic traits and 199 `~` uses stressed the ordinary
+mutation-analysis path.
+
+These measurements prove superlinear growth for that provider topology. They
+do not establish an exponential complexity class. They do establish that a
+scalable design must prevent ordinary `~T`, generic, trait, and object code from
+entering the general provenance fixed point.
+
 ## Decision
 
 ### Keep four memory-safety concepts
@@ -65,6 +85,117 @@ Voyd will keep this small source model:
 
 Garbage collection continues to manage allocation lifetime. Borrow checking
 continues to prevent overlapping access that includes mutation.
+
+### Preserve ordinary mutation isolation
+
+`~T` remains a safety capability. While `~value` is active, the covered place
+or object allocation cannot be read or mutated through another alias. This
+includes reentrant access through another argument, a callback, a closure,
+module state, dynamic dispatch, or an effect handler.
+
+```voyd
+fn increment(~state: State, notify: () : () -> void) -> void
+  state.count = state.count + 1
+  notify()
+  state.count = state.count + 1
+```
+
+The call is rejected when `notify` is unknown because it could access an alias
+of `state` while the exclusive capability is active. A statically resolved call
+is allowed when its bounded mutation summary proves that it cannot overlap.
+
+Potentially overlapping call arguments must be proven disjoint, checked with a
+bounded runtime identity guard, or rejected. `~T` does not imply whole-program
+uniqueness. An optimizer may use no-alias facts only for the bounded access that
+the safety analysis proves.
+
+Ordinary `~T` duration remains local and non-lexical. It begins when exclusive
+access is activated and may end after the final local use. This requires only
+local control-flow analysis. A nested callable receives a bounded reborrow for
+its invocation; the compiler does not infer that duration through the call
+graph.
+
+For an object, `~obj` covers the handle place and referenced allocation. For a
+`val`, `~value` is bounded inout access with logical copy-in and copy-out
+behavior. The compiler may operate through a physical reference, but it must
+materialize and write back the logical value whenever uncertainty makes that
+necessary.
+
+### Separate ordinary mutation analysis from explicit borrow analysis
+
+The compiler will use two separate analyses:
+
+1. Ordinary mutation analysis enforces `~T` isolation with finite
+   whole-parameter summaries.
+2. Explicit borrow analysis enforces the scope and non-escape rules of
+   `Borrow<T>` and `~Borrow<T>`.
+
+They may share local place and overlap utilities. They must not share a general
+interprocedural provenance solver. A callable without `Borrow<T>` in its
+normalized signature must never create explicit-borrow provenance facts.
+
+### Bound ordinary callable summaries
+
+An ordinary callable summary contains only:
+
+- one access mode per parameter: `unused`, `read`, or `write`;
+- whether the callable accesses ambient object state;
+- whether it invokes an unknown callback; and
+- whether it may suspend.
+
+The summary has no field, tuple, index, dereference, region, result, or generic
+projection paths. Its number of states must not depend on object field count,
+projection depth, generic nesting, returned aggregate shape, call-path count,
+or trait implementation count.
+
+Local analysis may distinguish fields and stable indices inside one callable.
+At an ordinary call or package boundary, access collapses to the whole
+parameter or allocation. A function such as this publishes only that it writes
+parameter zero:
+
+```voyd
+fn update(~state: State) -> void
+  state.profile.count = state.profile.count + 1
+```
+
+Ordinary signatures provide access upper bounds: plain `T` permits at most
+`read`, and `~T` permits at most `write`. A concrete body may refine an unused
+parameter to `unused`. Every trait implementation is checked against the
+declared upper bound, and a dynamic caller uses that bound. Dynamic dispatch
+must not join field-sensitive implementation contracts.
+
+Every callable with a `~T` parameter must prove that it does not perform
+potentially aliasing ambient object access, invoke an unknown callback, or
+suspend. This is a signature-level implementation obligation for ordinary
+functions, trait methods, and every trait implementation. It makes dynamic
+`~T` dispatch safe without joining implementation-specific provenance. A
+statically resolved helper may access state only when local analysis proves it
+disjoint from every active exclusive capability.
+
+While an exclusive capability is active:
+
+- a known call is allowed when its bounded summary is compatible;
+- an unknown callback, suspension, or effect operation is rejected;
+- ambient object access is rejected unless local analysis proves it disjoint;
+  and
+- a reference-bearing call result is conservatively treated as possibly
+  aliasing every reference-bearing argument for the rest of the active scope.
+
+The last rule is local to the caller. It is not a returned-origin contract
+published by the callee.
+
+### Prevent exclusive-capability laundering
+
+An active `~T` capability cannot be stored, captured, suspended, passed to an
+unknown callable as plain `T`, or otherwise hidden from mutation analysis. An
+exclusive reborrow suspends its parent until the nested call returns.
+
+An exclusive capability itself cannot be returned. A callable may return an
+ordinary object handle derived from an argument because its exclusive access
+has ended when the call returns. The caller applies the conservative local
+result-alias rule above, so it cannot use that handle while an overlapping
+parent capability remains active. No callee-specific returned-origin summary is
+needed.
 
 ### Spell scoped borrows as `Borrow<T>`
 
@@ -155,7 +286,9 @@ until the call returns.
 The loan covers the argument place and every source-derived alias reached from
 that place. For an object handle, this includes the referenced allocation. A
 projection may narrow the covered place, but it does not erase the loan's
-origin.
+origin. The compiler represents this across calls as one borrowed-parameter
+origin. It must not enumerate the reachable object graph or publish a distinct
+origin for each projection.
 
 Calls use the existing safe evaluation order:
 
@@ -175,8 +308,7 @@ reborrow. Nested shared reborrows are allowed. Passing a borrowed value to a
 plain `T` parameter is rejected, including concrete parameters, callback
 parameters, overloads, defaults, imports, and callable adaptation. A callable
 with a plain `T` input cannot satisfy a callable type with a `Borrow<T>` input,
-and the reverse adaptation is also rejected. The borrowed-receiver rule below
-is the only exception.
+and the reverse adaptation is also rejected.
 
 ### Form exclusive scoped borrows
 
@@ -264,11 +396,14 @@ trait CollectionAccess<T>
   ): () -> Option<R>
 ```
 
-The callback can return an independent value:
+The callback can return an independent value through a Borrow-aware helper:
 
 ```voyd
+fn item_length(item: Borrow<Item>) -> i32
+  item.length
+
 let length = collection.with_item(0, body: (item) =>
-  item.length()
+  item_length(item)
 )
 ```
 
@@ -314,8 +449,8 @@ module binding, `SharedCell`, or other storage that can outlive the scope.
 ### Preserve scoped origins through projections
 
 Every alias-preserving projection or operation derived from `Borrow<T>` keeps
-the same scoped origin. Its declared field or element type does not erase that
-origin.
+the scoped parameter origin. Its declared field or element type does not erase
+that origin.
 
 ```voyd
 obj Wrapper {
@@ -327,33 +462,41 @@ fn leak(value: Borrow<Wrapper>) -> Box
 // error: value.inner is still scoped to value
 ```
 
-This rule applies to:
+Explicit borrow analysis tracks only the originating borrowed parameter, plus
+local projections needed to check overlap inside the current callable. It does
+not publish field or index projection families across a call or package
+boundary.
+
+The local rule applies to:
 
 - object fields and nested fields;
 - array and container elements;
 - tuples, structural values, destructuring, and pattern bindings;
 - callable fields and closures stored inside borrowed data;
-- method and operator results; and
+- compiler-known operations; and
 - object handles inside a copied `val` or other aggregate.
 
 Local type inference must preserve the scoped origin. Wrapping, copying,
 destructuring, generic substitution, overload resolution, and callable
 adaptation must not erase it.
 
-A proven independent copy may leave the scope as a plain value:
+A value may leave the scope only through this closed independent-result
+classification:
 
 - primitives and scalars are independent copies;
-- a `val`, tuple, or structural value is independent only when none of its
-  result paths contains a mutable object, mutable storage handle, closure, or
-  other alias whose later use could observe or mutate the borrowed origin; and
-- a newly allocated object is independent only when its reachable result paths
-  do not retain such an alias derived from the borrowed origin.
+- a reference-free `val`, tuple, or structural value is independent after its
+  ordinary logical copy;
+- a mutable object, mutable storage handle, closure, or aggregate containing one
+  remains derived from the borrowed parameter;
+- a newly allocated object is independent only when its type structure proves
+  that it contains no derived mutable handle; and
+- a compiler-known stable immutable retained handle may be independent.
 
-A reference-bearing result may still be independent when its ordinary type
-contract guarantees stable immutable backing that the result retains directly.
-`StringSlice` is the current example. Sharing immutable retained storage does
-not provide later access to mutable borrowed state. This is an ordinary type
-contract, not a borrowed-result exception.
+`StringSlice` is the initial stable immutable retained type. The result must
+retain its backing directly, and later mutation of the original owner must not
+change that backing. Adding another type to this category requires a separate
+language or standard-library contract decision. The compiler must not infer the
+category through callable bodies or a provenance fixed point.
 
 A whole `val` containing an object handle is therefore not automatically
 independent. The compiler may copy out its scalar fields, but copying a mutable
@@ -383,39 +526,29 @@ fn inspect<T>(value: Borrow<T>) -> i32
 
 This keeps ordinary generic code free from hidden loan propagation.
 
-### Keep method calls safe
+### Require explicit Borrow-aware calls
 
-A borrowed receiver may call a concrete method while the borrow is active. This
-is a special receiver rule; it does not convert the receiver to plain `T`. The
-method must not store, capture, or return the borrowed receiver or any
-source-derived alias.
-
-A shared `Borrow<T>` receiver cannot call a `~self` method. An exclusive
-`~Borrow<T>` receiver may call a `~self` method through an exclusive reborrow.
-
-An independent result is allowed:
+A borrowed value does not implicitly become a plain method receiver. In the
+initial model, borrowed code uses direct projections, compiler-known operations,
+or helpers whose parameter explicitly normalizes to `Borrow<T>` or
+`~Borrow<T>`:
 
 ```voyd
-cell.with((value) =>
-  value.length()
-)
+fn state_count(value: Borrow<State>) -> i32
+  value.count
+
+cell.with((state) => state_count(state))
 ```
 
-If a method result aliases the borrowed receiver, the call is rejected. The
-compiler must not erase that relationship by typing the result as plain `T`.
-The projection and independent-copy rules above apply to every result path.
+`~Borrow<T>` may call another helper whose parameter is exactly
+`~Borrow<T>`. It may also create a shared `Borrow<T>` reborrow. A shared borrow
+cannot call an exclusive helper.
 
-When the compiler cannot prove that a method is safe for a borrowed receiver,
-it must reject the call. Separate compilation must preserve the small result
-and retention summary needed for this check. The summary must cover reads,
-writes, retention, returned origins, and suspension. Safety admission must use
-semantic facts, never optional optimizer facts.
-
-Dynamic or open-trait dispatch on a borrowed receiver is rejected. A concrete
-implementation may be used only when semantic resolution proves the exact
-target before optimization. A trait method may still accept an explicit
+Ordinary methods, callable adaptation, and dynamic or open-trait dispatch are
+rejected for a borrowed receiver. A trait method may accept an explicit
 `Borrow<T>` non-receiver parameter; every implementation is checked against
-that parameter type.
+that parameter type. Borrow-aware receiver syntax may be considered later, but
+this decision does not require it.
 
 ### Reject closure, effect, and host boundaries
 
@@ -446,9 +579,10 @@ When access may overlap, the compiler must do one of these:
 - insert a bounded runtime identity guard;
 - reject the program.
 
-Every public summary must describe at least the behavior the implementation can
-perform. An optimizer may use more precise facts, but optimizer facts are never
-required for correctness.
+Every public ordinary summary must conservatively fit the finite summary model.
+Every public Borrow-aware boundary preserves only its borrowed-parameter
+origins. An optimizer may use more precise local facts, but optimizer facts are
+never required for correctness.
 
 ### Keep internal physical borrowing
 
@@ -485,12 +619,20 @@ prove that an escaping borrow stays valid through arbitrary program structure.
 The following rules are required for safety:
 
 - plain `T` never hides a source-level borrow;
-- `~T` remains exclusive for its active scope;
+- `~T` remains exclusive for its active scope, including against reentrant
+  access through ordinary aliases;
+- ordinary mutation summaries conservatively describe whole-parameter access,
+  ambient object access, unknown callbacks, and suspension;
+- uncertain ordinary call results are treated locally as possible aliases of
+  their reference-bearing arguments;
+- an active exclusive capability cannot be stored, captured, returned,
+  suspended, or erased as plain `T` at an unknown call;
 - `Borrow<T>` cannot escape, be stored, or be erased by generics;
 - shared access cannot be upgraded to exclusive access;
 - source-derived projections keep their scoped origin unless an independent
   copy is proven;
-- borrowed method receivers cannot escape through method results;
+- borrowed values may call only compiler-known operations or explicitly
+  Borrow-aware helpers;
 - active borrows cannot be captured or cross effect, suspension, task, or
   continuation boundaries;
 - uncertain overlap is guarded or rejected;
@@ -504,9 +646,26 @@ synchronization.
 
 ## Developer Experience
 
-Current application code in this repository is expected to keep working.
-Applications use ordinary values, `~`, and `SharedCell` callbacks. They do not
-use borrowed results.
+Most current application code in this repository is expected to keep working.
+Applications use ordinary values, `~`, and `SharedCell` callbacks rather than
+borrowed results. Code that invokes unknown callbacks during exclusive mutation
+must be restructured.
+
+Some safe callback-heavy mutation APIs may require restructuring. An unknown
+callback cannot run while `~T` is active because it could reenter through an
+ordinary alias:
+
+```voyd
+fn update(~state: State, log: fn(String) : () -> void) -> void
+  state.count = state.count + 1
+  log("updated") // rejected while log has unknown captured access
+```
+
+The initial alternatives are to finish exclusive mutation before invoking the
+callback, pass an independent value to a statically resolved helper, or use an
+explicit runtime-checked abstraction such as `SharedCell`. A future callable
+effect or capture contract may accept more cases without restoring general
+provenance inference.
 
 Scoped callbacks are less convenient when several borrowed values must be used
 together:
@@ -527,26 +686,175 @@ handles, immutable views, and scoped callbacks are materially inadequate.
 
 ### Compiler performance
 
-This decision should reduce mandatory compiler work by removing:
+This decision requires an architectural reduction, not only less source syntax.
+The compiler must remove:
 
 - returned-loan provenance;
 - borrow propagation through result containers and generic wrappers;
 - borrowed-result SCC inference;
 - named-region binding, mapping, and validation;
 - borrowed-result information in package and cache summaries;
-- flow-sensitive analysis triggered only by possible borrowed results.
+- compact-contract composition for ordinary callables;
+- interprocedural projection-family propagation and widening for ordinary
+  mutation analysis; and
+- detailed borrow facts for every callable whose normalized signature contains
+  no `Borrow<T>`.
 
-The exact gain is not known. The change must be measured with the existing
-memory-safety benchmark and the whole Web package compile.
+Ordinary mutation summaries must use a finite representation such as numeric
+access modes and bit flags. Their equality must not depend on serializing
+structural contracts. The solver must operate with a dependency worklist, visit
+only callers whose dependency summary changed, and converge per strongly
+connected component. Its documented bound must depend on callable edges and the
+fixed summary lattice, not on projection-family cardinality.
 
-The compiler should also make borrow analysis demand-driven. Callables that
-cannot create, receive, or use scoped access should not build detailed borrow
-facts.
+Explicit borrow provenance must be parameter-level across calls. Local
+field-sensitive facts must be discarded at the callable boundary. Programs
+without `Borrow<T>` must create zero explicit-borrow provenance facts.
+
+### Separate safety facts from optimization facts
+
+The bounded safety summary is not the only information an optimizer may use.
+A release optimization may request a more precise fact for one exact callable
+when a concrete transformation needs it. This fact is separate from program
+acceptance and may describe:
+
+- direct fields read and written;
+- whether a parameter or derived alias escapes or is retained;
+- whether the result may alias a parameter;
+- external object access;
+- suspension;
+- nested, recursive, dynamic, or unresolved calls; and
+- identity guards or unsupported aliases.
+
+An exact-call optimization fact must be:
+
+- computed only for an actual optimization candidate;
+- limited to an exact callable body or a separately cached exact-body fact;
+- budgeted, cached, and safe to abandon;
+- conservative at recursive, nested, dynamic, and unresolved call boundaries;
+- excluded from safety summaries and safety fixed points; and
+- irrelevant to whether the source program is accepted.
+
+The ordinary ABI or materialized representation is always the fallback. An
+optimizer must not request general provenance inference merely to search for
+candidates.
+
+This path preserves current profitable optimizations when their existing exact
+conditions hold. In particular:
+
+- stable fixed-field load forwarding may use an exact-call field effect;
+- fresh mutable aggregate promotion may use exact field, escape, retention,
+  result-alias, external-access, and suspension facts;
+- wide values may remain physically borrowed until an ownership-demanding or
+  opaque boundary; and
+- exact iterator and scalar-replacement optimizations may keep using bounded
+  escape, reachability, and call-target facts.
+
+### Remove optimization paths that lose their proof
+
+Every optimization that currently consumes borrowing contracts must be
+inventoried during implementation. Each consumer must move to one of these
+owners:
+
+1. the finite ordinary safety summary;
+2. explicit `Borrow<T>` checking;
+3. the bounded exact-call optimization fact; or
+4. deletion.
+
+There must be no compatibility adapter that interprets a coarse summary as a
+legacy precise contract. An optimization must be removed or conservatively
+disabled when it:
+
+- depends on borrowed results, named regions, `disjoint`, or
+  `@borrow_contract`;
+- assumes that a whole-parameter write is disjoint from a field or index;
+- treats `~T` as unique beyond its proven active scope;
+- retains an internal physical borrow across storage, escape, suspension, an
+  opaque call, or conflicting mutation;
+- combines dynamic trait implementation details into a precise field
+  footprint;
+- elides an identity guard without an independent local proof; or
+- depends on returned or retained provenance that neither explicit Borrow
+  analysis nor an exact-call optimization fact proves.
+
+Removing an unsound fast path is required even when it causes a runtime
+regression. A replacement optimization may be added only with a bounded proof
+and a focused behavior, emitted-shape, and performance test.
+
+### Performance acceptance criteria
+
+Performance analysis is a required implementation deliverable. It must compare
+the base revision with the completed implementation on the same machine and
+include these workload families:
+
+1. a provider-neutral generic DTO graph with nested records, variants, traits,
+   projected mutation, and no explicit `Borrow<T>`;
+2. the same graph at several independently generated sizes, including at least
+   four growth points;
+3. explicit-Borrow graphs that independently increase Borrow-aware calls,
+   projection depth, and nested scoped callbacks;
+4. mutation graphs that vary direct calls, dynamic calls, callbacks, ambient
+   state, identity guards, and SCC shape;
+5. a full `pkg::web` cold compile and a representative full-stack application;
+6. a warm source-only edit through one SDK instance;
+7. the historical V-499 selected-provider and host-boundary-disabled compiles
+   as regression controls; and
+8. the accepted checked-access optimization suite, including stable-field
+   forwarding, mutable aggregate promotion, counted-array and Range fast paths,
+   intrinsic Array iteration, and exact iterator specialization.
+
+The implementation must not special-case the V-499 fixture, module names,
+provider, or topology. The generated scaling families and full-stack workloads
+are authoritative when a historical fixture and the general result differ.
+
+Required measurements are:
+
+- total semantic and compilation time;
+- ordinary mutation-analysis time;
+- explicit borrow-analysis time;
+- callable and call-edge count;
+- ordinary summary evaluations and SCC reevaluations;
+- explicit borrow fact count;
+- projection-family and widening count;
+- retained summary bytes and peak resident memory;
+- optimized runtime and emitted Wasm size for affected fast paths; and
+- optimization acceptance and fallback counts by reason.
+
+The implementation must satisfy these structural gates:
+
+- increasing ordinary DTO field count does not increase interprocedural
+  mutation-summary size;
+- ordinary mutation analysis creates no projection families or widenings;
+- a program with no `Borrow<T>` creates zero explicit-borrow provenance facts;
+- ordinary summary evaluations remain close to growth in affected call edges;
+- doubling repeated DTO topology does not produce superlinear summary-state
+  growth;
+- the selected-provider graph no longer routes ordinary `~T` functions through
+  detailed borrow analysis;
+- exact-call optimization analysis stays within its configured work and memory
+  budgets; and
+- removing the legacy contracts does not silently disable an accepted
+  optimization without a recorded disposition and benchmark result.
+
+The report must include the compiler revisions, hardware, commands, sample
+counts, warmup policy, distributions or ranges, raw counters, and same-machine
+ratios. Scaling conclusions must use the generated size series, not two
+endpoints. Counter and state-growth gates are authoritative across machines.
+Regressions must not be hidden with higher timeouts, fewer workers, test-only
+source batching, or benchmark-specific compiler branches.
+
+The source-import dependency-snapshot miss described by the same investigation
+is separate. This decision does not remove the import surface from the cache
+key. Dependency typing snapshots must become source-independent before that
+cache boundary can change.
 
 ### Runtime performance
 
 Ordinary Voyd code already has no persistent runtime loan table. This decision
-is expected to be runtime-neutral for ordinary code.
+adds no persistent runtime bookkeeping to ordinary code. Runtime performance
+may regress where a legacy fast path has lost its proof and no bounded
+replacement is justified. The implementation report must identify each such
+case rather than hiding it.
 
 Bounded identity guards remain available for dynamic uncertainty. Internal
 physical borrowing and iterator specialization remain available for runtime
@@ -560,20 +868,28 @@ performance.
 - Plain values and ordinary generic code have simpler meaning.
 - `SharedCell` keeps its useful scoped API.
 - The compiler no longer supports unused borrowed-result machinery.
-- Public semantic and cache summaries can become smaller.
-- The optimizer can keep precise facts without making them part of the safety
-  contract.
+- Ordinary mutation summaries have fixed size per callable parameter.
+- Ordinary generic and trait graphs do not participate in explicit borrow
+  provenance.
+- Public semantic and cache summaries become smaller and structurally bounded.
+- The optimizer can keep bounded exact-call facts without making them part of
+  the safety contract or global provenance solve.
 
 ### Costs
 
 - Linear borrowed-result APIs are unavailable.
 - Zero-copy access sometimes requires callback nesting.
-- A borrowed receiver cannot call a method that may return or retain it.
+- Borrowed values use explicit Borrow-aware helpers instead of ordinary method
+  dispatch.
+- Unknown callbacks and ambient object access are rejected during ordinary
+  exclusive mutation.
 - Active borrows cannot be captured or used by effectful code.
 - Dynamic trait dispatch on a borrowed receiver is unavailable.
 - Host, Wasm, and FFI boundaries cannot accept source borrows.
 - Some safe programs become invalid until a real use case justifies a new
   design.
+- Some legacy optimization cases may fall back when their old proof cannot be
+  replaced safely within the optimizer budget.
 - Compiler performance improvements are expected but must be measured.
 
 ## Alternatives Considered
@@ -582,6 +898,18 @@ performance.
 
 Rejected because its complexity is much larger than its demonstrated use. It
 also makes ordinary generic and cross-module analysis borrow-aware.
+
+### Keep path-sensitive ordinary mutation contracts
+
+Rejected because V-499 showed superlinear behavior in ordinary generic `~T`
+code with no explicit source borrows. Field and result precision across callable
+boundaries is not required to preserve whole-object mutation isolation.
+
+### Drop mutation isolation for ordinary objects
+
+Rejected because alias-based reentrant observation and mutation would break
+Voyd's local-reasoning guarantee. `~obj` remains a real exclusive capability,
+even though the analysis becomes coarser.
 
 ### Keep concrete borrowed results
 
@@ -612,26 +940,42 @@ compiler cost directly.
 
 Implementation should proceed in this order:
 
-1. Add the unshadowable built-in `Borrow<T>` type, replace `borrow T`, and
+1. Record the base-revision compiler, memory, runtime, and Wasm-size results for
+   every workload family in the performance plan.
+2. Inventory every compiler and codegen consumer of current borrowing
+   contracts. Record whether each consumer will use the finite safety summary,
+   explicit Borrow facts, a bounded exact-call optimization fact, or deletion.
+3. Introduce the finite ordinary mutation summary and dependency worklist.
+4. Route ordinary `~T` safety through that summary while preserving exclusive
+   isolation, local place precision, bounded identity guards, and conservative
+   callback, ambient-access, result-alias, and suspension rules.
+5. Add the unshadowable built-in `Borrow<T>` type, replace `borrow T`, and
    remove the parser's contextual prefix and custom generic-inner-type handling.
-2. Enforce normalized type-position, exact callable, formation, activation,
-   reborrow, and exclusive-access rules.
-3. Migrate all four `SharedCell<T>` methods to `Borrow<T>` and
+6. Enforce normalized type-position, exact callable, formation, activation,
+   reborrow, exclusive-access, and explicit Borrow-aware call rules.
+7. Migrate all four `SharedCell<T>` methods to `Borrow<T>` and
    `~Borrow<T>`.
-4. Preserve scoped origins through projections, calls, methods, copied values,
-   destructuring, overloads, and local inference.
-5. Reject borrowed results, active borrows inside stored values and ordinary
-   generic arguments, closure capture, effects, dynamic borrowed-receiver
-   dispatch, every host or Wasm import and export, every FFI signature, and
-   every host call.
-6. Remove `ViewIterator`, `Array.view_iter()`, and their exports.
-7. Remove named-region and `@borrow_contract` syntax and semantics.
-8. Remove borrowed-result propagation from compiler summaries, module
-   interfaces, and dependency caches. Keep only access, retention, returned
-   origin, and suspension facts required by scoped concrete calls.
-9. Make detailed borrow analysis demand-driven.
-10. Update the memory-safety specification, language reference, conformance
-    manifest, and test inventory.
+8. Preserve only parameter-level scoped origins across Borrow-aware calls. Keep
+   field and index projections local. Apply the closed independent-result
+   classification.
+9. Reject borrowed results, active borrows inside stored values and ordinary
+   generic arguments, ordinary borrowed-receiver dispatch, closure capture,
+   effects, every host or Wasm import and export, every FFI signature, and every
+   host call.
+10. Add the bounded exact-call optimization fact, migrate justified consumers,
+    and remove every optimization whose old proof is no longer valid.
+11. Remove `ViewIterator`, `Array.view_iter()`, named regions,
+    `@borrow_contract`, and their exports and syntax.
+12. Delete borrowed-result SCC inference, ordinary compact-contract
+    composition, interprocedural ordinary projection families and widenings,
+    general returned-origin contracts, and borrow transfers through containers.
+13. Remove obsolete borrow fields from module interfaces, dependency snapshots,
+    caches, and codegen views.
+14. Update the memory-safety specification, language reference, conformance
+    manifest, and test inventory, then run the correctness and performance
+    gates.
+15. Publish the optimization-consumer disposition and complete performance
+    analysis with the implementation.
 
 ## Validation
 
@@ -639,6 +983,21 @@ Validation must cover observable behavior at the smallest useful boundaries.
 
 Required cases include:
 
+- ordinary `~obj` mutation isolation against aliases passed as other arguments;
+- rejection of reentrant alias access through unknown callbacks, module state,
+  closures, effects, suspension, and dynamic calls with uncertain access;
+- acceptance of statically resolved helpers whose bounded summaries are
+  compatible with an active exclusive capability;
+- local field and stable-index disjointness plus bounded identity guards for
+  dynamically uncertain argument overlap;
+- whole-parameter access summaries for generic functions and trait methods,
+  with every implementation checked against the declared access modes;
+- conservative local aliasing of reference-bearing call results;
+- rejection of active `~T` storage, capture, plain-value laundering, exclusive
+  capability results, and exclusive reborrow overlap;
+- acceptance of ordinary object results derived from `~T`, with local alias
+  restrictions until every overlapping parent capability ends;
+- `~val` logical writeback and conservative materialization;
 - shared and exclusive `SharedCell` callbacks;
 - nested shared callbacks and runtime conflict behavior;
 - exact `SharedCell` signatures, exclusive `val` writeback, object-handle
@@ -670,20 +1029,39 @@ Required cases include:
   mutable or otherwise alias-observing object handles;
 - acceptance of a `StringSlice` produced from a borrowed receiver or projection,
   used after the callback ends, and still valid after the source cell is rebound;
-  apply the same rule to other results whose ordinary type contract guarantees
-  stable immutable backing retained directly by the result;
-- safe method calls on borrowed receivers;
-- safe `~self` calls from `~Borrow<T>` and rejection from shared `Borrow<T>`;
-- rejection of method results that retain or alias a borrowed receiver;
+  apply the same rule to other compiler-known results whose ordinary type
+  contract guarantees stable immutable backing retained directly by the
+  result;
+- acceptance of explicit Borrow-aware helpers and nested shared or exclusive
+  reborrows;
+- rejection of ordinary methods, callable adaptation, and dynamic dispatch on
+  borrowed receivers;
 - rejection of every active-borrow closure capture, effect operation,
   suspension, task, host or Wasm import, host or Wasm export, FFI, and host call;
-- conservative summaries across modules and rejection of dynamic or open-trait
-  dispatch on borrowed receivers;
+- parameter-level Borrow origins across module boundaries without published
+  field or index paths;
+- exact-call optimization facts are demand-driven, budgeted, cached, and never
+  affect source acceptance;
+- stable-field forwarding retains its proven exact-call cases and falls back
+  for whole-parameter writes, dynamic calls, or missing field proof;
+- mutable aggregate promotion retains its proven fresh exact-call cases and
+  falls back for retention, result aliases, external access, suspension,
+  identity guards, nested calls, or missing field proof;
+- any optimization based on removed borrowed results, named regions,
+  `disjoint`, or legacy provenance contracts is deleted or disabled;
+- no optimization treats `~T` as unique outside its active scope, treats a
+  coarse write as field-disjoint, or preserves a physical borrow across an
+  opaque boundary;
 - ordinary object alias and `~` behavior;
 - internal wide-value physical borrowing;
 - absence of `ViewIterator`, `Array.view_iter()`, and their public exports;
 - ordinary `Iterator<T>` behavior and optimization.
 
 After implementation, `npm test` and `npm run check` must pass. Compiler
-performance must be measured before and after. Runtime benchmarks must confirm
-that ordinary code has no new loan bookkeeping or material regression.
+performance must pass every acceptance criterion above. The validation report
+must include the generalized scaling series, full-stack workloads, historical
+V-499 controls, same-machine wall-time ratios, peak memory, retained summary
+bytes, optimization dispositions, runtime results, and emitted Wasm sizes.
+Ordinary code must have no new loan bookkeeping. Every material compiler or
+runtime regression must be explained and accepted explicitly; the report is
+part of the implementation, not follow-up work.
