@@ -61,6 +61,8 @@ export type CompileOptions = {
   /** @deprecated Use `optimizationLevel`. true maps to `release`; false maps to `none`. */
   optimize?: boolean;
   boundaryExports?: BoundaryExportsOption;
+  /** @internal Select host framing for effect operations. */
+  effectsHostBoundary?: "selected" | "off";
   /** @internal Include external declarations for adapter binding generation. */
   externalDeclarations?: boolean;
   /**

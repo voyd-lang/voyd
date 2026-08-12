@@ -93,15 +93,15 @@ against revisions that predate optimization levels without silently measuring
 an unoptimized base. Balanced and ablation investigations are current-tree or
 saved-scorecard workflows.
 
-The PR workflow currently gives cold compile time and incremental RSS a bounded
-70% relative allowance. V-499 expands the always-loaded standard-library codec
-graph; paired, reversed-order CI measurements recorded a 64.91% compile-time
-and 62.96% incremental-RSS baseline shift while runtime remained green. The
-vtrace artifact also shifted by 1,987 raw bytes and 783 gzip bytes, so the PR
+V-499 exposed an SDK routing bug where `effectsHostBoundary: "off"` was dropped
+and the selected host transport was loaded even when boundary exports were also
+disabled. That made pure optimizer cases analyze 612 extra `std::data` and
+`std::msgpack` functions. Threading the option through graph loading and codegen
+removed that accidental work; the focused cold compile dropped from 3.14 s to
+1.53 s on the same machine (the parent measured 1.88 s). The vtrace artifact
+still has a bounded 1,759-byte raw and 683-byte gzip baseline shift, so the PR
 lane uses 2 KiB and 1 KiB absolute floors while retaining the 5% relative size
-gates. The whole-Web absolute time and memory gates continue to cap package-scale
-cost. These temporary allowances should be tightened after the cold
-semantic-analysis and standard-library loading work tracked by V-468.
+gates.
 
 Compiler perf summaries are versioned and enabled with
 `VOYD_COMPILER_PERF=1`. Optimizer passes emit both aggregate and canonical

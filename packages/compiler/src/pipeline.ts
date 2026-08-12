@@ -1,6 +1,7 @@
 import { buildModuleGraph } from "./modules/graph.js";
 import { createFsModuleHost } from "./modules/fs-host.js";
 import type { ModuleGraph } from "./modules/types.js";
+import { requiresSelectedHostTransport } from "./codegen/host-transport/requirements.js";
 import {
   compileProgramWithLoader,
   type CompileProgramOptions,
@@ -32,10 +33,9 @@ export const compileProgram = (
       host: loadOptions.host ?? createFsModuleHost(),
       roots: loadOptions.roots,
       includeTests: loadOptions.includeTests,
-      includeSelectedHostTransport:
-        options.codegenOptions?.effectsHostBoundary !== "off" ||
-        (options.codegenOptions?.boundaryExports !== undefined &&
-          options.codegenOptions.boundaryExports !== "off" &&
-          options.codegenOptions.boundaryExports !== false),
+      includeSelectedHostTransport: requiresSelectedHostTransport({
+        effectsHostBoundary: options.codegenOptions?.effectsHostBoundary,
+        boundaryExports: options.codegenOptions?.boundaryExports,
+      }),
     }),
   );

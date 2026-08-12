@@ -1,5 +1,6 @@
 import { buildModuleGraph } from "./modules/graph.js";
 import type { ModuleGraph } from "./modules/types.js";
+import { requiresSelectedHostTransport } from "./codegen/host-transport/requirements.js";
 import {
   compileProgramWithLoader,
   type CompileProgramOptions,
@@ -10,7 +11,7 @@ import {
 export * from "./pipeline-shared.js";
 
 export const loadModuleGraph = async (
-  options: LoadModulesOptions
+  options: LoadModulesOptions,
 ): Promise<ModuleGraph> => {
   if (!options.host) {
     throw new Error("ModuleHost is required in browser builds");
@@ -25,7 +26,7 @@ export const loadModuleGraph = async (
 };
 
 export const compileProgram = (
-  options: CompileProgramOptions
+  options: CompileProgramOptions,
 ): Promise<CompileProgramResult> =>
   compileProgramWithLoader(options, (loadOptions) => {
     if (!loadOptions.host) {
@@ -36,10 +37,9 @@ export const compileProgram = (
       host: loadOptions.host,
       roots: loadOptions.roots,
       includeTests: loadOptions.includeTests,
-      includeSelectedHostTransport:
-        options.codegenOptions?.effectsHostBoundary !== "off" ||
-        (options.codegenOptions?.boundaryExports !== undefined &&
-          options.codegenOptions.boundaryExports !== "off" &&
-          options.codegenOptions.boundaryExports !== false),
+      includeSelectedHostTransport: requiresSelectedHostTransport({
+        effectsHostBoundary: options.codegenOptions?.effectsHostBoundary,
+        boundaryExports: options.codegenOptions?.boundaryExports,
+      }),
     });
   });

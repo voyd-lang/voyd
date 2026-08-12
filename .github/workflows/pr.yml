@@ -537,14 +537,12 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.sha }}
-          # V-448's cold semantic analysis cost is tracked by V-468. V-499 also
-          # expands the always-loaded std codec graph; paired CI measurements
-          # record a 64.91% compile and 62.96% incremental-RSS baseline shift.
-          # Keep a bounded temporary allowance while the package-scale absolute
-          # gate above prevents unbounded time and memory growth.
-          OPTIMIZER_BENCH_COMPILE_MAX_PCT: "70"
+          # V-448's cold semantic analysis cost is tracked by V-468. Keep a
+          # bounded temporary allowance while the package-scale absolute gate
+          # above prevents unbounded time and memory growth.
+          OPTIMIZER_BENCH_COMPILE_MAX_PCT: "45"
           OPTIMIZER_BENCH_RUNTIME_MAX_PCT: "20"
-          OPTIMIZER_BENCH_RSS_MAX_PCT: "70"
+          OPTIMIZER_BENCH_RSS_MAX_PCT: "20"
           OPTIMIZER_BENCH_WASM_MAX_PCT: "5"
           OPTIMIZER_BENCH_WASM_MIN_BYTES: "2048"
           OPTIMIZER_BENCH_GZIP_MAX_PCT: "5"

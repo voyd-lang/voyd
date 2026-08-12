@@ -745,16 +745,18 @@ pub fn main() -> i32
       host.run("echo_i64", [Number.MAX_SAFE_INTEGER + 1]),
     ).rejects.toThrow("typed export echo_i64 arg0 expected i64, got number");
     expect(exports).not.toContain("__voyd_serialized_export_primitive");
-    expect(abi.exports).toContainEqual(expect.objectContaining({
-      id: expect.any(Number),
-      name: "primitive",
-      abi: "direct",
-      params: [],
-      result: expect.objectContaining({
-        kind: "i32",
-        fingerprint: expect.any(String),
+    expect(abi.exports).toContainEqual(
+      expect.objectContaining({
+        id: expect.any(Number),
+        name: "primitive",
+        abi: "direct",
+        params: [],
+        result: expect.objectContaining({
+          kind: "i32",
+          fingerprint: expect.any(String),
+        }),
       }),
-    }));
+    );
     await expect(
       host.run("translate", [{ x: 1, y: 2 }, 10, 20]),
     ).resolves.toEqual({ x: 11, y: 22 });
@@ -870,21 +872,23 @@ pub fn main() -> i32
 
     expect(result.wasm.byteLength).toBeLessThan(2_000);
     expect(exports).not.toContain("__voyd_serialized_export_increment");
-    expect(abi.exports).toContainEqual(expect.objectContaining({
-      id: expect.any(Number),
-      name: "increment",
-      abi: "direct",
-      params: [
-        expect.objectContaining({
+    expect(abi.exports).toContainEqual(
+      expect.objectContaining({
+        id: expect.any(Number),
+        name: "increment",
+        abi: "direct",
+        params: [
+          expect.objectContaining({
+            kind: "i32",
+            fingerprint: expect.any(String),
+          }),
+        ],
+        result: expect.objectContaining({
           kind: "i32",
           fingerprint: expect.any(String),
         }),
-      ],
-      result: expect.objectContaining({
-        kind: "i32",
-        fingerprint: expect.any(String),
       }),
-    }));
+    );
     await expect(host.run("increment", [41])).resolves.toBe(42);
     await expect(host.run("increment", ["41"])).rejects.toThrow(
       "typed export increment arg0 expected i32, got string",
@@ -938,6 +942,48 @@ pub fn shift(point: AliasPoint) -> AliasPoint
         abi: "direct",
       }),
     );
+  });
+
+  it("does not load the host transport when every host boundary is off", async () => {
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-voyd-sdk-no-host-transport-"),
+    );
+    const srcDir = path.join(projectRoot, "src");
+    const stdDir = path.join(projectRoot, "std");
+    const entryPath = path.join(srcDir, "main.voyd");
+
+    try {
+      await fs.mkdir(srcDir, { recursive: true });
+      await fs.mkdir(stdDir, { recursive: true });
+      await fs.writeFile(
+        entryPath,
+        `#!no_prelude
+pub fn main() -> i32
+  42
+`,
+      );
+      await fs.writeFile(
+        path.join(stdDir, "msgpack.voyd"),
+        "this selected provider must not be parsed",
+      );
+
+      for (const boundaryExports of [false, { mode: "off" }] as const) {
+        const result = expectCompileSuccess(
+          await createSdk().compile({
+            entryPath,
+            roots: { src: srcDir, std: stdDir },
+            boundaryExports,
+            effectsHostBoundary: "off",
+          }),
+        );
+
+        await expect(result.run<number>({ entryName: "main" })).resolves.toBe(
+          42,
+        );
+      }
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it("compiles when entryPath is relative with subdirectories", async () => {

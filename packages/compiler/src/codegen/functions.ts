@@ -114,6 +114,7 @@ import {
   buildSelectedHostTransportIdentity,
   enqueueSelectedHostTransportProviderReachability,
 } from "./host-transport/selected-provider.js";
+import { requiresSelectedHostTransport } from "./host-transport/requirements.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -1770,11 +1771,12 @@ export const emitModuleExports = (
   );
   emitExportAbiSection({
     mod: ctx.mod,
-    transport:
-      ctx.options.effectsHostBoundary !== "off" ||
-      ctx.options.boundaryExports !== false
-        ? buildSelectedHostTransportIdentity()
-        : undefined,
+    transport: requiresSelectedHostTransport({
+      effectsHostBoundary: ctx.options.effectsHostBoundary,
+      boundaryExports: ctx.options.boundaryExports,
+    })
+      ? buildSelectedHostTransportIdentity()
+      : undefined,
     entries: exportAbiEntries,
     taskCompletions,
     callbacks: Array.from(
