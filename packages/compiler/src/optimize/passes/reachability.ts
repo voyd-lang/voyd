@@ -11,6 +11,7 @@ import type {
 import type { CodegenOptions } from "../../codegen/context.js";
 import {
   DTO_DATA_CONTRACT_IDS,
+  HOST_TRANSPORT_PROVIDER_CONTRACT_ID,
   resolveSelectedHostTransportProvider,
   type CompilerFunctionContractId,
 } from "../../compiler-contracts/index.js";
@@ -454,6 +455,15 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
     };
 
     const enqueueSelectedProviderFunctions = (): void => {
+      if (
+        ctx.ir.baseProgram.symbols.resolveCompilerTraitContract(
+          HOST_TRANSPORT_PROVIDER_CONTRACT_ID,
+        ) === undefined
+      ) {
+        // Compiler-only programs may omit std and fall back to direct exports.
+        // A linked but invalid provider remains a strict resolution error.
+        return;
+      }
       const provider = resolveSelectedHostTransportProvider(ctx.ir.baseProgram);
       [
         ...Object.values(provider.functions),
