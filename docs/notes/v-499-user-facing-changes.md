@@ -89,8 +89,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - Canvas frame version 1 has been removed. The VX DOM renderer accepts only
   version 2 canvas frames.
 - Canvas paths, draws, gradients, and frames now use one typed custom DTO
-  representation at host boundaries. `Point` and `Transform` are immutable
-  objects so nested optional canvas fields have a stable DTO layout.
+  representation at host boundaries. `Point` and `Transform` remain
+  fixed-layout value types.
 - VX events, HTML/program mappers, and canvas measurement commands no longer
   accept caller-owned numeric handler IDs or raw MessagePack callbacks. Use
   typed message values and typed closures; the runtime owns callback

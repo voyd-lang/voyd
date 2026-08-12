@@ -10,13 +10,13 @@ use super::command::{ CommandWire, Cmd, command_plan, mark_owned_handler, retain
 use super::payload::encode_payload
 
 /// A logical point in CSS-pixel canvas coordinates.
-pub obj Point {
+pub val Point {
   api x: f64,
   api y: f64
 }
 
 /// A 2D affine transform using the browser Canvas matrix convention.
-pub obj Transform {
+pub val Transform {
   api a: f64,
   api b: f64,
   api c: f64,
