@@ -3,5 +3,7 @@
 Docs intended for maintainers of the voyd language
 
 - Diagnostics workflow: `docs/diagnostics.md`
+- Compiler contracts and registered implementations:
+  `docs/architecture/compiler-contracts.md`
 - Compiler optimization pipeline: `docs/architecture/compiler-optimization-pipeline.md`
 - Testing and CI modes: `docs/testing-ci-modes.md`
