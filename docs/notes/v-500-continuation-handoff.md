@@ -10,10 +10,13 @@ worktree.
 
 - Worktree: `/Users/drewy/.codex/worktrees/4ffe/voyd`
 - Branch: `drew/v-500-implement-scoped-explicit-borrows-proposal`
-- Current `HEAD` and required benchmark base:
-  `b2a35155fca53d1e93e1465a3a4fde2a3f7bd2b0`
-- The implementation is still uncommitted on top of that base. The large dirty
-  tree is intentional V-500 work; do not reset, restore, or discard it.
+- Required benchmark base: `b2a35155fca53d1e93e1465a3a4fde2a3f7bd2b0`.
+- The complete V-500 checkpoint is committed as
+  `06bfff63d42c3848de59388c257f4d514dca3e11` (`Implement scoped explicit
+  borrows`). This handoff update is a separate documentation commit on top of
+  that checkpoint.
+- The checkpoint includes known failing release gates and the unverified hunk
+  documented below. Continue from these commits; do not reset or discard them.
 - Linear V-500 is already **In Progress** and assigned to Drew.
 - Required PR title: `[V-500] Implement scoped explicit borrows`
 - Required PR state: ready for review, not draft.
@@ -277,9 +280,11 @@ read-only correctness reviewer over only that changed lens before publishing.
 
 ## Commit and benchmark sequence
 
-Do not benchmark the dirty worktree. After all correctness gates pass:
+Do not benchmark the current checkpoint as a completed implementation. After
+all correctness gates pass, create a new clean implementation commit (or amend
+the checkpoint only if it has not been shared further), then:
 
-1. Stage and commit the implementation on the current branch.
+1. Record the final implementation commit on the current branch.
 2. Create a clean detached head checkout at
    `/private/tmp/v500-bench-final/head` from that commit.
 3. Run `npm install` in the head checkout so workspace links resolve into that
@@ -395,7 +400,7 @@ not draft.
 
 ## Things not to do
 
-- Do not reset or restore the large dirty tree.
+- Do not reset or discard the V-500 checkpoint commits.
 - Do not recreate legacy borrow contracts, named regions, capability tiers,
   result provenance, or fresh-result interprocedural safety facts.
 - Do not adapt the four-field summary into a path-sensitive contract.
