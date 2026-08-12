@@ -1,22 +1,46 @@
 import binaryen from "binaryen";
 import { callRef, refCast } from "@voyd-lang/lib/binaryen-gc/index.js";
-import { getFunctionRefType, getRequiredExprType, wasmTypeFor } from "../../types.js";
+import {
+  getFunctionRefType,
+  getRequiredExprType,
+  wasmTypeFor,
+} from "../../types.js";
 import { boxOutcomeValue } from "../outcome-values.js";
 import type { CodegenContext, FunctionContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
-import { ensureMsgPackFunctions } from "./msgpack.js";
-import { unpackMsgPackValueForType } from "./msgpack-values.js";
-import { unpackBoundaryValueFromMsgPack } from "../../boundary/msgpack-codec.js";
+import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 import { hostBoundaryPayloadSupportForType } from "./payload-compatibility.js";
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
 import type { ContinuationSite } from "../effect-lowering/types.js";
+import {
+  SELECTED_HOST_FRAME_TAG,
+  SELECTED_HOST_FRAME_VERSION,
+} from "../../host-transport/frame-codec.js";
+import {
+  readDtoValueFromHostStream,
+  readHostStreamValue,
+} from "../../boundary/dto-stream-reader.js";
+import {
+  allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "../../locals.js";
+import {
+  deriveBoundarySchema,
+  type BoundarySchema,
+} from "../../boundary/schema.js";
+import type { SelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 
-const RESUME_CONTINUATION_KEY = Symbol("voyd.effects.hostBoundary.resumeContinuation");
-const RESUME_EFFECTFUL_KEY = Symbol("voyd.effects.hostBoundary.resumeEffectful");
+const RESUME_CONTINUATION_KEY = Symbol(
+  "voyd.effects.hostBoundary.resumeContinuation",
+);
+const RESUME_EFFECTFUL_KEY = Symbol(
+  "voyd.effects.hostBoundary.resumeEffectful",
+);
 const RESUME_EFFECTFUL_RAW_KEY = Symbol(
-  "voyd.effects.hostBoundary.resumeEffectfulRaw"
+  "voyd.effects.hostBoundary.resumeEffectfulRaw",
 );
 const END_REQUEST_RAW_KEY = Symbol("voyd.effects.hostBoundary.endRequestRaw");
 
@@ -46,7 +70,7 @@ const ownerReturnTypeId = ({
       throw new Error("missing lambda owner for continuation site");
     }
     const lambdaType = ctx.program.types.getTypeDesc(
-      getRequiredExprType(site.owner.exprId, ctx)
+      getRequiredExprType(site.owner.exprId, ctx),
     );
     if (lambdaType.kind !== "function") {
       throw new Error("lambda continuation owner must have a function type");
@@ -75,6 +99,97 @@ const functionRefType = ({
   ctx: CodegenContext;
 }): binaryen.Type => getFunctionRefType({ params, result, ctx, label: "host" });
 
+const buildEffectOutcomeStream = ({
+  ctx,
+  provider,
+  fnCtx,
+  readerLocal,
+  ptr,
+  len,
+  requestId,
+}: {
+  ctx: CodegenContext;
+  provider: SelectedHostTransportProvider;
+  fnCtx: FunctionContext;
+  readerLocal: number;
+  ptr: binaryen.ExpressionRef;
+  len: binaryen.ExpressionRef;
+  requestId: binaryen.ExpressionRef;
+}): {
+  readerRef: () => binaryen.ExpressionRef;
+  setup: binaryen.ExpressionRef[];
+  finish: binaryen.ExpressionRef[];
+} => {
+  const readerType = wasmTypeFor(provider.readerTypeId, ctx);
+  const readerRef = () => ctx.mod.local.get(readerLocal, readerType);
+  const read = (name: string) =>
+    readHostStreamValue({
+      reader: readerRef(),
+      readerTypeId: provider.readerTypeId,
+      name,
+      ctx,
+      fnCtx,
+    });
+  const setup = [
+    ctx.mod.local.set(
+      readerLocal,
+      ctx.mod.call(
+        provider.createReader.wasmName,
+        [ptr, len],
+        provider.createReader.resultType,
+      ),
+    ),
+    ctx.mod.if(
+      ctx.mod.i32.or(
+        ctx.mod.i32.or(
+          ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(4)),
+          ctx.mod.i32.ne(
+            read("read_i32"),
+            ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+          ),
+        ),
+        ctx.mod.i32.or(
+          ctx.mod.i32.ne(
+            read("read_i32"),
+            ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.effectOutcome),
+          ),
+          ctx.mod.i32.ne(read("read_i32"), requestId),
+        ),
+      ),
+      ctx.mod.unreachable(),
+    ),
+    ctx.mod.if(
+      ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(2)),
+      ctx.mod.unreachable(),
+    ),
+    ctx.mod.if(
+      ctx.mod.i32.ne(read("read_i32"), ctx.mod.i32.const(0)),
+      ctx.mod.unreachable(),
+    ),
+    ctx.mod.if(
+      ctx.mod.i32.ne(read("begin_array"), ctx.mod.i32.const(2)),
+      ctx.mod.unreachable(),
+    ),
+    ctx.mod.drop(read("read_string")),
+  ];
+  const finish = [
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.drop(read("end_array")),
+    ctx.mod.if(
+      ctx.mod.i32.eqz(
+        ctx.mod.call(
+          provider.readerComplete.wasmName,
+          [readerRef()],
+          provider.readerComplete.resultType,
+        ),
+      ),
+      ctx.mod.unreachable(),
+    ),
+  ];
+  return { readerRef, setup, finish };
+};
+
 export const createResumeContinuation = ({
   ctx,
   runtime,
@@ -87,8 +202,8 @@ export const createResumeContinuation = ({
   exportName?: string;
 }): string =>
   stateFor(ctx, RESUME_CONTINUATION_KEY, () => {
-    const msgpack = ensureMsgPackFunctions(ctx);
-    const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+    const provider = ensureSelectedHostTransportProvider(ctx);
+    const readerType = wasmTypeFor(provider.readerTypeId, ctx);
 
     const name = `${ctx.moduleLabel}__resume_continuation`;
     const params = binaryen.createType([
@@ -99,7 +214,7 @@ export const createResumeContinuation = ({
     const locals: binaryen.Type[] = [
       runtime.tailGuardType,
       runtime.continuationType,
-      msgPackType,
+      readerType,
     ];
     const scratch: FunctionContext = {
       bindings: new Map(),
@@ -114,30 +229,42 @@ export const createResumeContinuation = ({
     const resumeLenLocal = 2;
     const guardLocal = 3;
     const contLocal = 4;
-    const decodedLocal = 5;
+    const readerLocal = 5;
     const opIndexExpr = (): binaryen.ExpressionRef =>
       runtime.requestOpIndex(
-        ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+        ctx.mod.local.get(requestLocal, runtime.effectRequestType),
       );
 
     const guard = (): binaryen.ExpressionRef =>
       ctx.mod.local.get(guardLocal, runtime.tailGuardType);
+    const stream = buildEffectOutcomeStream({
+      ctx,
+      provider,
+      fnCtx: scratch,
+      readerLocal,
+      ptr: ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+      len: ctx.mod.local.get(resumeLenLocal, binaryen.i32),
+      requestId: opIndexExpr(),
+    });
     const guardInit = ctx.mod.if(
       ctx.mod.ref.is_null(guard()),
       ctx.mod.local.set(guardLocal, runtime.makeTailGuard()),
-      ctx.mod.nop()
+      ctx.mod.nop(),
     );
     const guardOps = [
       ctx.mod.if(
         ctx.mod.i32.and(
-          ctx.mod.i32.gt_u(runtime.tailGuardExpected(guard()), ctx.mod.i32.const(0)),
+          ctx.mod.i32.gt_u(
+            runtime.tailGuardExpected(guard()),
+            ctx.mod.i32.const(0),
+          ),
           ctx.mod.i32.ge_u(
             runtime.tailGuardObserved(guard()),
-            runtime.tailGuardExpected(guard())
-          )
+            runtime.tailGuardExpected(guard()),
+          ),
         ),
         ctx.mod.unreachable(),
-        ctx.mod.nop()
+        ctx.mod.nop(),
       ),
       runtime.bumpTailGuardObserved(guard()),
     ];
@@ -152,26 +279,30 @@ export const createResumeContinuation = ({
     const branches = signatures.map((sig) => {
       const matches = ctx.mod.i32.eq(
         opIndexExpr(),
-        ctx.mod.i32.const(sig.opIndex)
+        ctx.mod.i32.const(sig.opIndex),
       );
-      const resumeValue =
+      const schema =
+        sig.externalBoundary?.result ??
+        deriveBoundarySchema({
+          typeId: sig.returnTypeId,
+          ctx,
+          label: sig.label,
+          options: { tagStandaloneVariants: true, portableNames: true },
+        });
+      const resumeLocal =
         sig.returnType === binaryen.none
-          ? ctx.mod.nop()
-          : sig.externalBoundary
-          ? unpackBoundaryValueFromMsgPack({
-              value: ctx.mod.local.get(decodedLocal, msgPackType),
-              schema: sig.externalBoundary.result,
-              ctx,
-              fnCtx: scratch,
-            })
-          : unpackMsgPackValueForType({
-              value: ctx.mod.local.get(decodedLocal, msgPackType),
-              typeId: sig.returnTypeId,
-              msgpack,
-              ctx,
-              label: sig.label,
-              serializerOverride: sig.returnSerializerOverride,
-            });
+          ? undefined
+          : allocateTempLocal(sig.returnType, scratch, sig.returnTypeId, ctx);
+      const readResumeValue = readDtoValueFromHostStream({
+        reader: stream.readerRef(),
+        readerTypeId: provider.readerTypeId,
+        schema,
+        ctx,
+        fnCtx: scratch,
+      });
+      const resumeValue = resumeLocal
+        ? loadLocalValue(resumeLocal, ctx)
+        : ctx.mod.nop();
       const resumeBox =
         sig.returnType === binaryen.none
           ? ctx.mod.ref.null(binaryen.eqref)
@@ -179,7 +310,6 @@ export const createResumeContinuation = ({
               value: resumeValue,
               valueType: sig.returnType,
               typeId: sig.returnTypeId,
-              serializer: sig.returnSerializerOverride,
               ctx,
               fnCtx: scratch,
             });
@@ -188,9 +318,23 @@ export const createResumeContinuation = ({
         ctx.mod,
         refCast(ctx.mod, runtime.continuationFn(contRef()), fnRefType),
         operands as number[],
-        runtime.outcomeType
+        runtime.outcomeType,
       );
-      return ctx.mod.if(matches, ctx.mod.return(call));
+      return ctx.mod.if(
+        matches,
+        ctx.mod.block(null, [
+          resumeLocal
+            ? storeLocalValue({
+                binding: resumeLocal,
+                value: readResumeValue,
+                ctx,
+                fnCtx: scratch,
+              })
+            : readResumeValue,
+          ...stream.finish,
+          ctx.mod.return(call),
+        ]),
+      );
     });
 
     ctx.mod.addFunction(
@@ -201,30 +345,26 @@ export const createResumeContinuation = ({
       ctx.mod.block(null, [
         ctx.mod.local.set(
           guardLocal,
-          runtime.requestTailGuard(ctx.mod.local.get(requestLocal, runtime.effectRequestType))
+          runtime.requestTailGuard(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+          ),
         ),
         ctx.mod.local.set(
           contLocal,
-          runtime.requestContinuation(ctx.mod.local.get(requestLocal, runtime.effectRequestType))
+          runtime.requestContinuation(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+          ),
         ),
         guardInit,
         ...guardOps,
-        ctx.mod.local.set(
-          decodedLocal,
-          ctx.mod.call(
-            msgpack.decodeValue.wasmName,
-            [
-              ctx.mod.local.get(bufPtrLocal, binaryen.i32),
-              ctx.mod.local.get(resumeLenLocal, binaryen.i32),
-            ],
-            msgPackType
-          )
-        ),
+        ...stream.setup,
         ...branches,
         ctx.mod.return(
-          runtime.makeOutcomeEffect(ctx.mod.local.get(requestLocal, runtime.effectRequestType))
+          runtime.makeOutcomeEffect(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+          ),
         ),
-      ])
+      ]),
     );
     ctx.mod.addFunctionExport(name, exportName);
     return name;
@@ -250,11 +390,15 @@ export const createResumeEffectful = ({
       binaryen.i32,
       binaryen.i32,
       binaryen.i32,
+      binaryen.i32,
+      binaryen.i32,
     ]);
     const contParam = 0;
     const bufPtrParam = 1;
     const resumeLenParam = 2;
     const bufCapParam = 3;
+    const completionKindParam = 4;
+    const completionIdParam = 5;
 
     const resumedOutcome = ctx.mod.call(
       resumeContinuation,
@@ -263,7 +407,7 @@ export const createResumeEffectful = ({
         ctx.mod.local.get(bufPtrParam, binaryen.i32),
         ctx.mod.local.get(resumeLenParam, binaryen.i32),
       ],
-      runtime.outcomeType
+      runtime.outcomeType,
     );
 
     ctx.mod.addFunction(
@@ -277,13 +421,15 @@ export const createResumeEffectful = ({
           ctx.mod.call(
             ensureDispatcher(ctx),
             [resumedOutcome],
-            runtime.outcomeType
+            runtime.outcomeType,
           ),
           ctx.mod.local.get(bufPtrParam, binaryen.i32),
           ctx.mod.local.get(bufCapParam, binaryen.i32),
+          ctx.mod.local.get(completionKindParam, binaryen.i32),
+          ctx.mod.local.get(completionIdParam, binaryen.i32),
         ],
-        runtime.effectResultType
-      )
+        runtime.effectResultType,
+      ),
     );
     ctx.mod.addFunctionExport(name, exportName);
     return name;
@@ -314,7 +460,7 @@ export const createResumeEffectfulRaw = ({
         ctx.mod.local.get(1, binaryen.i32),
         ctx.mod.local.get(2, binaryen.i32),
       ],
-      runtime.outcomeType
+      runtime.outcomeType,
     );
 
     ctx.mod.addFunction(
@@ -325,8 +471,8 @@ export const createResumeEffectfulRaw = ({
       ctx.mod.call(
         ensureDispatcher(ctx),
         [resumedOutcome],
-        runtime.outcomeType
-      )
+        runtime.outcomeType,
+      ),
     );
     ctx.mod.addFunctionExport(name, exportName);
     return name;
@@ -344,8 +490,8 @@ export const createEndRequestRaw = ({
   exportName?: string;
 }): string =>
   stateFor(ctx, END_REQUEST_RAW_KEY, () => {
-    const msgpack = ensureMsgPackFunctions(ctx);
-    const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+    const provider = ensureSelectedHostTransportProvider(ctx);
+    const readerType = wasmTypeFor(provider.readerTypeId, ctx);
     const specializedSites = [...ctx.effectsState.contSiteByKey.values()];
     const specializedSiteIds = new Set(
       specializedSites.map((site) => site.siteId),
@@ -358,8 +504,8 @@ export const createEndRequestRaw = ({
       ...ctx.effectLowering.sites.filter(
         (site) => !specializedSiteIds.has(site.siteId),
       ),
-    ]
-      .reduce((sites, variant) => {
+    ].reduce(
+      (sites, variant) => {
         if (sites.some((site) => site.siteOrder === variant.siteOrder)) {
           return sites;
         }
@@ -375,11 +521,13 @@ export const createEndRequestRaw = ({
             }),
           },
         ];
-      }, [] as Array<{
+      },
+      [] as Array<{
         siteOrder: number;
         typeId: number;
         support: ReturnType<typeof hostBoundaryPayloadSupportForType>;
-      }>);
+      }>,
+    );
 
     const name = `${ctx.moduleLabel}__end_request_raw`;
     const params = binaryen.createType([
@@ -387,7 +535,7 @@ export const createEndRequestRaw = ({
       binaryen.i32,
       binaryen.i32,
     ]);
-    const locals: binaryen.Type[] = [msgPackType];
+    const locals: binaryen.Type[] = [readerType];
     const scratch: FunctionContext = {
       bindings: new Map(),
       tempLocals: new Map(),
@@ -399,84 +547,112 @@ export const createEndRequestRaw = ({
     const requestLocal = 0;
     const bufPtrLocal = 1;
     const resumeLenLocal = 2;
-    const decodedLocal = 3;
+    const readerLocal = 3;
     const opIndexExpr = (): binaryen.ExpressionRef =>
       runtime.requestOpIndex(
-        ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+        ctx.mod.local.get(requestLocal, runtime.effectRequestType),
       );
     const continuationSiteExpr = (): binaryen.ExpressionRef =>
       runtime.continuationSite(
         runtime.requestContinuation(
-          ctx.mod.local.get(requestLocal, runtime.effectRequestType)
-        )
+          ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+        ),
       );
 
-    const decodedValue = (): binaryen.ExpressionRef =>
-      ctx.mod.local.get(decodedLocal, msgPackType);
+    const stream = buildEffectOutcomeStream({
+      ctx,
+      provider,
+      fnCtx: scratch,
+      readerLocal,
+      ptr: ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+      len: ctx.mod.local.get(resumeLenLocal, binaryen.i32),
+      requestId: opIndexExpr(),
+    });
+    const decodeBranch = ({
+      matches,
+      typeId,
+      schema,
+    }: {
+      matches: binaryen.ExpressionRef;
+      typeId: number;
+      schema: BoundarySchema;
+    }): binaryen.ExpressionRef => {
+      const returnType = wasmTypeFor(typeId, ctx);
+      const valueLocal =
+        returnType === binaryen.none
+          ? undefined
+          : allocateTempLocal(returnType, scratch, typeId, ctx);
+      const readValue = readDtoValueFromHostStream({
+        reader: stream.readerRef(),
+        readerTypeId: provider.readerTypeId,
+        schema,
+        ctx,
+        fnCtx: scratch,
+      });
+      const payload = valueLocal
+        ? boxOutcomeValue({
+            value: loadLocalValue(valueLocal, ctx),
+            valueType: returnType,
+            typeId,
+            ctx,
+            fnCtx: scratch,
+          })
+        : ctx.mod.ref.null(binaryen.eqref);
+      return ctx.mod.if(
+        matches,
+        ctx.mod.block(null, [
+          valueLocal
+            ? storeLocalValue({
+                binding: valueLocal,
+                value: readValue,
+                ctx,
+                fnCtx: scratch,
+              })
+            : readValue,
+          ...stream.finish,
+          ctx.mod.return(runtime.makeOutcomeValue(payload)),
+        ]),
+      );
+    };
 
     const siteBranches = endSites.map((siteInfo) => {
       const matches = ctx.mod.i32.eq(
         continuationSiteExpr(),
-        ctx.mod.i32.const(siteInfo.siteOrder)
+        ctx.mod.i32.const(siteInfo.siteOrder),
       );
       if (!siteInfo.support.supported) {
         return ctx.mod.if(matches, ctx.mod.unreachable());
       }
 
-      const returnType = wasmTypeFor(siteInfo.typeId, ctx);
-      const payload =
-        returnType === binaryen.none
-          ? ctx.mod.ref.null(binaryen.eqref)
-          : boxOutcomeValue({
-              value: unpackMsgPackValueForType({
-                value: decodedValue(),
-                typeId: siteInfo.typeId,
-                msgpack,
-                ctx,
-                label: `end_request_raw(site ${siteInfo.siteOrder})`,
-              }),
-              valueType: returnType,
-              typeId: siteInfo.typeId,
-              ctx,
-              fnCtx: scratch,
-            });
-      return ctx.mod.if(matches, ctx.mod.return(runtime.makeOutcomeValue(payload)));
+      return decodeBranch({
+        matches,
+        typeId: siteInfo.typeId,
+        schema: deriveBoundarySchema({
+          typeId: siteInfo.typeId,
+          ctx,
+          label: `end_request_raw(site ${siteInfo.siteOrder})`,
+          options: { tagStandaloneVariants: true, portableNames: true },
+        }),
+      });
     });
 
     const signatureBranches = signatures.map((sig) => {
       const matches = ctx.mod.i32.eq(
         opIndexExpr(),
-        ctx.mod.i32.const(sig.opIndex)
+        ctx.mod.i32.const(sig.opIndex),
       );
-      const payload =
-        sig.returnType === binaryen.none
-          ? ctx.mod.ref.null(binaryen.eqref)
-          : boxOutcomeValue({
-              value: sig.externalBoundary
-                ? unpackBoundaryValueFromMsgPack({
-                    value: decodedValue(),
-                    schema: sig.externalBoundary.result,
-                    ctx,
-                    fnCtx: scratch,
-                  })
-                : unpackMsgPackValueForType({
-                    value: decodedValue(),
-                    typeId: sig.returnTypeId,
-                    msgpack,
-                    ctx,
-                    label: sig.label,
-                    serializerOverride: sig.returnSerializerOverride,
-                  }),
-              valueType: sig.returnType,
-              typeId: sig.returnTypeId,
-              serializer: sig.returnSerializerOverride,
-              ctx,
-              fnCtx: scratch,
-            });
-      return ctx.mod.if(
+      return decodeBranch({
         matches,
-        ctx.mod.return(runtime.makeOutcomeValue(payload))
-      );
+        typeId: sig.returnTypeId,
+        schema:
+          sig.externalBoundary?.result ??
+          deriveBoundarySchema({
+            typeId: sig.returnTypeId,
+            ctx,
+            label: sig.label,
+            options: { tagStandaloneVariants: true, portableNames: true },
+          }),
+      });
     });
 
     ctx.mod.addFunction(
@@ -485,21 +661,11 @@ export const createEndRequestRaw = ({
       runtime.outcomeType,
       locals,
       ctx.mod.block(null, [
-        ctx.mod.local.set(
-          decodedLocal,
-          ctx.mod.call(
-            msgpack.decodeValue.wasmName,
-            [
-              ctx.mod.local.get(bufPtrLocal, binaryen.i32),
-              ctx.mod.local.get(resumeLenLocal, binaryen.i32),
-            ],
-            msgPackType
-          )
-        ),
+        ...stream.setup,
         ...siteBranches,
         ...signatureBranches,
         ctx.mod.unreachable(),
-      ])
+      ]),
     );
     ctx.mod.addFunctionExport(name, exportName);
     return name;

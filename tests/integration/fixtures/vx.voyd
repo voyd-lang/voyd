@@ -1,14 +1,13 @@
 
 use std::array::Array
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
 use std::string::type::{ String, new_string }
 use std::vx::all
 
 enum VxMessage
   Save
+  Cancel
 
-fn App() -> MsgPack
+fn App() -> Html<void>
   let features = feature_list()
   <Card>
     <Title>Voyd + VX</Title>
@@ -16,7 +15,7 @@ fn App() -> MsgPack
     <List value={features} />
   </Card>
 
-fn Title({ children: Array<MsgPack> })
+fn Title({ children: Array<Html<void>> }) -> Html<void>
   <h2 style="
     margin: 0 0 8px 0;
     font-size: 20px;
@@ -27,7 +26,7 @@ fn Title({ children: Array<MsgPack> })
     {children}
   </h2>
 
-fn Card({ children: Array<MsgPack> })
+fn Card({ children: Array<Html<void>> }) -> Html<void>
   <div style="
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     margin: 8px;
@@ -40,7 +39,7 @@ fn Card({ children: Array<MsgPack> })
     {children}
   </div>
 
-fn List({ value: Array<String> })
+fn List({ value: Array<String> }) -> Html<void>
   <ul style="margin: 0; padding-left: 16px;">
     {value.map(f => <li key={f} style="line-height: 1.6;">{f}</li>)}
   </ul>
@@ -51,12 +50,13 @@ fn feature_list() -> Array<String>
 pub fn main()
   App()
 
-pub fn event_message_button() -> MsgPack
-  <button on_click={msgpack::make_string("save")}>Save</button>
+pub fn event_message_button() -> Html<VxMessage>
+  let message: VxMessage = VxMessage::Save {}
+  <button on_click={message}>Save</button>
 
-pub fn full_event_options_form() -> MsgPack
-  <form
-    on_submit={on_submit_with(
+pub fn full_event_options_form() -> Html<VxMessage>
+  let message: VxMessage = VxMessage::Save {}
+  let submit: Attr<VxMessage> = on_submit_with(
       options: EventOptions {
         prevent_default: true,
         stop_propagation: false,
@@ -64,20 +64,8 @@ pub fn full_event_options_form() -> MsgPack
         passive: false,
         pointer_capture: false
       },
-      message: VxMessage::Save {}
-    )}
-  >
-    Save
-  </form>
-
-pub fn full_event_options_descriptor() -> MsgPack
-  on_submit_with(
-    options: EventOptions {
-      prevent_default: true,
-      stop_propagation: false,
-      capture: false,
-      passive: false,
-      pointer_capture: false
-    },
-    handler_id: 42
-  )
+      message: message
+    )
+  let attrs: Array<Attr<VxMessage>> = [submit]
+  let children: Array<Html<void>> = [text("Save")]
+  element<VxMessage>(tag: "form", attrs: attrs, children: children)

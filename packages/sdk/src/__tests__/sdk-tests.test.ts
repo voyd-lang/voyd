@@ -14,6 +14,27 @@ const expectCompileSuccess = (
 };
 
 describe("sdk tests collection", { timeout: 120_000 }, () => {
+  it("keeps test codegen aligned when host boundaries are off", async () => {
+    const result = expectCompileSuccess(
+      await createSdk().compile({
+        testsOnly: true,
+        boundaryExports: { mode: "off" },
+        effectsHostBoundary: "off",
+        source: `eff Sample
+  read(resume) -> i32
+
+test "effectful":
+  try open
+    Sample::read()
+  Sample::read(resume):
+    resume(42)
+`,
+      }),
+    );
+
+    expect(result.tests?.cases).toHaveLength(1);
+  });
+
   it("invalidates compile reuse when a companion test file changes", async () => {
     const sdk = createSdk();
     const compile = (description: string) =>

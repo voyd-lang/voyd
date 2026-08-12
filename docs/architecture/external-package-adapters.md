@@ -1,6 +1,6 @@
 # External Package Adapter Boundary
 
-Status: implemented fallback ABI
+Status: implemented host ABI v2
 
 ## Contract
 
@@ -23,9 +23,11 @@ a whole without changing package or adapter source.
 
 The compiler lowers reachable calls to imports in the `voyd.external` core-Wasm
 module and records normalized requirements in `voyd.external_requirements`.
-Synchronous arguments and results currently use the existing boundary schema plus MsgPack
-transport. Transport pointers, buffer sizing, compiler type IDs, and MsgPack
-are not public package API.
+Synchronous arguments and results use external invocation/completion frames
+from host ABI v2. Every argument and result position carries the fingerprint
+from its compiler-derived DTO plan. The build-selected transport encodes the
+frame; transport pointers, buffer sizing, compiler type IDs, and wire bytes are
+not public package API.
 
 External effects lower through the normal Voyd effect runtime. The requirements
 section records their operation ID, signature hash, resume kind, and DTO schema;
@@ -56,7 +58,7 @@ generation live in the SDK and CLI respectively.
 
 ## Component Model migration
 
-The Component Model backend replaces core imports and MsgPack lowering with
+The Component Model backend replaces core imports and selected-provider lowering with
 component imports and Canonical ABI lowering. Generated WIT already describes
 the stable `namespace:package/interface@version` identity and supported DTO
 subset. Voyd package APIs and generated adapter

@@ -319,7 +319,7 @@ describe("integration: effects e2e", () => {
       },
     });
 
-    expect(output).toBe(null);
+    expect(output).toBeUndefined();
     expect(logs).toEqual([14]);
   });
 

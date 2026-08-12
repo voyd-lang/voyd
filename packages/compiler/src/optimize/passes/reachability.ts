@@ -1,5 +1,5 @@
 import type { HirExpression } from "../../semantics/hir/index.js";
-import type { ProgramCodegenView } from "../../semantics/codegen-view/index.js";
+import type { AutoDtoPlan } from "../../semantics/codegen-view/auto-dto-plan.js";
 import type {
   HirExprId,
   ProgramFunctionId,
@@ -10,7 +10,9 @@ import type {
 } from "../../semantics/ids.js";
 import type { CodegenOptions } from "../../codegen/context.js";
 import {
-  BOUNDARY_MSGPACK_CONTRACT_IDS,
+  DTO_DATA_CONTRACT_IDS,
+  HOST_TRANSPORT_PROVIDER_CONTRACT_ID,
+  resolveSelectedHostTransportProvider,
   type CompilerFunctionContractId,
 } from "../../compiler-contracts/index.js";
 import { type ProgramOptimizationPass } from "../pass.js";
@@ -25,18 +27,26 @@ import {
   resolveImportedSymbol,
   moduleLetBySymbol,
   canonicalProgramSymbolIdOf,
+  exprTypeFor,
+  functionTypeSubstitution,
+  resolveCallTypeArgs,
   resolveTargetsForCaller,
 } from "./shared.js";
 
-export const BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS = new Set([
+export const HOST_TRANSPORT_DEPENDENT_INTRINSICS = new Set([
   "__retain_callback",
-  "__boundary_retain_callback",
+  "__host_retain_callback",
   "__render_retain_callback",
-  "__boundary_value_to_msgpack",
-  "__boundary_msgpack_to_value",
 ]);
 
-const SHAPE_REIFICATION_INTRINSICS = new Set(["__boundary_shape_of"]);
+const SHAPE_REIFICATION_INTRINSICS = new Set(["__dto_shape_of"]);
+const DATA_DTO_INTRINSICS = new Set([
+  "__dto_value_to_data",
+  "__dto_write",
+  "__dto_read",
+  "__dto_fingerprint",
+  "__data_to_dto_value",
+]);
 
 export const resolveIntrinsicFunction = ({
   ir,
@@ -49,74 +59,6 @@ export const resolveIntrinsicFunction = ({
   return matched
     ? { moduleId: matched.moduleId, symbol: matched.symbol }
     : undefined;
-};
-
-export const serializerForType = ({
-  ir,
-  typeId,
-}: {
-  ir: ProgramOptimizationIR;
-  typeId: TypeId;
-}): ReturnType<ProgramCodegenView["symbols"]["getSerializer"]> => {
-  const serializers = [
-    ...ir.baseProgram.types
-      .getAliasSymbols(typeId)
-      .map((symbol) => ir.baseProgram.symbols.getSerializer(symbol)),
-    (() => {
-      const owner = ir.baseProgram.types.getNominalOwner(typeId);
-      return typeof owner === "number"
-        ? ir.baseProgram.symbols.getSerializer(owner)
-        : undefined;
-    })(),
-  ].filter((serializer): serializer is NonNullable<typeof serializer> =>
-    Boolean(serializer),
-  );
-  if (serializers.length === 0) {
-    return undefined;
-  }
-  const reference = serializers[0]!;
-  const mismatch = serializers.find(
-    (serializer) =>
-      serializer.formatId !== reference.formatId ||
-      serializer.encode.moduleId !== reference.encode.moduleId ||
-      serializer.encode.symbol !== reference.encode.symbol ||
-      serializer.decode.moduleId !== reference.decode.moduleId ||
-      serializer.decode.symbol !== reference.decode.symbol,
-  );
-  if (mismatch) {
-    throw new Error(`conflicting serializers for type ${typeId}`);
-  }
-  return reference;
-};
-
-export const serializerForTypes = ({
-  ir,
-  typeIds,
-}: {
-  ir: ProgramOptimizationIR;
-  typeIds: readonly TypeId[];
-}): ReturnType<ProgramCodegenView["symbols"]["getSerializer"]> => {
-  const serializers = typeIds
-    .map((typeId) => serializerForType({ ir, typeId }))
-    .filter((serializer): serializer is NonNullable<typeof serializer> =>
-      Boolean(serializer),
-    );
-  if (serializers.length === 0) {
-    return undefined;
-  }
-  const reference = serializers[0]!;
-  const mismatch = serializers.find(
-    (serializer) =>
-      serializer.formatId !== reference.formatId ||
-      serializer.encode.moduleId !== reference.encode.moduleId ||
-      serializer.encode.symbol !== reference.encode.symbol ||
-      serializer.decode.moduleId !== reference.decode.moduleId ||
-      serializer.decode.symbol !== reference.decode.symbol,
-  );
-  if (mismatch) {
-    throw new Error(`conflicting serializers for exported type list`);
-  }
-  return reference;
 };
 
 export const shouldConsiderBoundaryExportForOptimization = ({
@@ -512,24 +454,34 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       enqueueKnownFunctionInstances(ctx.ir.baseProgram.symbols.refOf(symbolId));
     };
 
-    const enqueueMsgPackFunctions = (): void => {
-      Object.values(BOUNDARY_MSGPACK_CONTRACT_IDS).forEach(
-        enqueueCompilerFunctionContract,
+    const enqueueSelectedProviderFunctions = (): void => {
+      if (
+        ctx.ir.baseProgram.symbols.resolveCompilerTraitContract(
+          HOST_TRANSPORT_PROVIDER_CONTRACT_ID,
+        ) === undefined
+      ) {
+        // Compiler-only programs may omit std and fall back to direct exports.
+        // A linked but invalid provider remains a strict resolution error.
+        return;
+      }
+      const provider = resolveSelectedHostTransportProvider(ctx.ir.baseProgram);
+      [
+        ...Object.values(provider.functions),
+        ...provider.readerImplementation.methods.map(
+          ({ implMethod }) => implMethod,
+        ),
+        ...provider.writerImplementation.methods.map(
+          ({ implMethod }) => implMethod,
+        ),
+      ].forEach((symbol) =>
+        enqueueKnownFunctionInstances(ctx.ir.baseProgram.symbols.refOf(symbol)),
       );
     };
 
-    const enqueueSerializersForTypes = (typeIds: readonly TypeId[]): void => {
-      typeIds.forEach((typeId) => {
-        const serializer = serializerForType({
-          ir: ctx.ir,
-          typeId,
-        });
-        if (!serializer) {
-          return;
-        }
-        enqueueKnownFunctionInstances(serializer.encode);
-        enqueueKnownFunctionInstances(serializer.decode);
-      });
+    const enqueueDataDtoFunctions = (): void => {
+      Object.values(DTO_DATA_CONTRACT_IDS).forEach(
+        enqueueCompilerFunctionContract,
+      );
     };
 
     const exportedFunctionTypeLists = ({
@@ -577,28 +529,6 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       });
     };
 
-    const enqueueSerializedExportDependencies = ({
-      moduleId,
-      symbol,
-    }: {
-      moduleId: string;
-      symbol: SymbolId;
-    }): void => {
-      exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
-        const serializer = serializerForTypes({
-          ir: ctx.ir,
-          typeIds,
-        });
-        if (!serializer) {
-          return;
-        }
-        enqueueSerializersForTypes(typeIds);
-        if (serializer.formatId === "msgpack") {
-          enqueueMsgPackFunctions();
-        }
-      });
-    };
-
     const enqueueBoundaryExportDependencies = ({
       moduleId,
       symbol,
@@ -606,10 +536,201 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       moduleId: string;
       symbol: SymbolId;
     }): void => {
-      enqueueMsgPackFunctions();
+      enqueueSelectedProviderFunctions();
       exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
-        enqueueSerializersForTypes(typeIds);
+        typeIds.forEach((typeId) => {
+          try {
+            enqueueCustomDtoPlan(
+              ctx.ir.baseProgram.dtoPlans.get({ typeId, moduleId }),
+            );
+          } catch {
+            // Unsupported types are diagnosed by boundary export codegen.
+          }
+        });
       });
+    };
+
+    const enqueueEffectfulFunctionBoundaryDependencies = ({
+      moduleId,
+      symbol,
+      typeArgs,
+    }: {
+      moduleId: string;
+      symbol: SymbolId;
+      typeArgs: readonly TypeId[];
+    }): void => {
+      if (ctx.ir.options.effectsHostBoundary === "off") {
+        return;
+      }
+      const signature = ctx.ir.baseProgram.functions.getSignature(
+        moduleId,
+        symbol,
+      );
+      if (
+        !signature ||
+        isPureSignature({ effectRow: signature.effectRow, ir: ctx.ir })
+      ) {
+        return;
+      }
+      const typeId = ctx.ir.baseProgram.types.instantiate(
+        signature.scheme,
+        typeArgs,
+      );
+      const descriptor = ctx.ir.baseProgram.types.getTypeDesc(typeId);
+      if (descriptor.kind !== "function") {
+        return;
+      }
+      [
+        ...descriptor.parameters.map((parameter) => parameter.type),
+        descriptor.returnType,
+      ].forEach((boundaryTypeId) => {
+        try {
+          enqueueCustomDtoPlan(
+            ctx.ir.baseProgram.dtoPlans.get({
+              typeId: boundaryTypeId,
+              moduleId,
+            }),
+          );
+        } catch {
+          // Normal boundary diagnostics report unsupported effectful values.
+        }
+      });
+    };
+
+    const enqueueCustomDtoPlan = (plan: AutoDtoPlan): void => {
+      if (plan.kind === "custom") {
+        [plan.writeFunction, plan.readFunction].forEach((functionId) =>
+          enqueueKnownFunctionInstances(
+            ctx.ir.baseProgram.symbols.refOf(functionId),
+          ),
+        );
+        enqueueCustomDtoPlan(plan.representation);
+        return;
+      }
+      if (plan.kind === "array") {
+        enqueueCustomDtoPlan(plan.element);
+        return;
+      }
+      if (plan.kind === "record") {
+        plan.fields.forEach((field) => enqueueCustomDtoPlan(field.schema));
+        return;
+      }
+      if (plan.kind === "union") {
+        plan.variants.forEach((variant) =>
+          variant.fields.forEach((field) => enqueueCustomDtoPlan(field.schema)),
+        );
+      }
+    };
+
+    const callerTypeSubstitution = (
+      callerInstanceId?: ProgramFunctionInstanceId,
+    ) => {
+      if (typeof callerInstanceId !== "number") {
+        return undefined;
+      }
+      const instance =
+        ctx.ir.baseProgram.functions.getInstance(callerInstanceId);
+      const signature = ctx.ir.baseProgram.functions.getSignature(
+        instance.symbolRef.moduleId,
+        instance.symbolRef.symbol,
+      );
+      return signature
+        ? functionTypeSubstitution({
+            signature,
+            typeArgs: instance.typeArgs,
+            program: ctx.ir.baseProgram,
+          })
+        : undefined;
+    };
+
+    const enqueueDtoPlanForType = ({
+      typeId,
+      moduleId,
+    }: {
+      typeId: TypeId;
+      moduleId: string;
+    }): void => {
+      try {
+        enqueueCustomDtoPlan(
+          ctx.ir.baseProgram.dtoPlans.get({ typeId, moduleId }),
+        );
+      } catch {
+        // Codegen reports unsupported DTO boundary types.
+      }
+    };
+
+    const enqueueDtoPlansForIntrinsicCall = ({
+      moduleId,
+      expr,
+      callerInstanceId,
+    }: {
+      moduleId: string;
+      expr: Extract<HirExpression, { exprKind: "call" }>;
+      callerInstanceId?: ProgramFunctionInstanceId;
+    }): void => {
+      const moduleView = ctx.ir.modules.get(moduleId);
+      const callInfo = ctx.ir.calls.get(moduleId)?.get(expr.id);
+      if (!moduleView || !callInfo) {
+        return;
+      }
+      const substitution = callerTypeSubstitution(callerInstanceId);
+      const concreteType = (typeId: TypeId): TypeId =>
+        substitution
+          ? ctx.ir.baseProgram.types.substitute(typeId, substitution)
+          : typeId;
+      const typeIds = new Set<TypeId>(
+        resolveCallTypeArgs({ callInfo, callerInstanceId }).map(concreteType),
+      );
+      [expr.id, ...expr.args.map((arg) => arg.expr)].forEach((exprId) => {
+        const typeId =
+          typeof callerInstanceId === "number"
+            ? (ctx.ir.baseProgram.functions.getInstanceExprType(
+                callerInstanceId,
+                exprId,
+              ) ?? exprTypeFor({ moduleView, exprId }))
+            : exprTypeFor({ moduleView, exprId });
+        if (typeof typeId === "number") {
+          typeIds.add(concreteType(typeId));
+        }
+      });
+      typeIds.forEach((typeId) => enqueueDtoPlanForType({ typeId, moduleId }));
+    };
+
+    const enqueueRetainedCallbackDtoPlans = ({
+      moduleId,
+      handlerExprId,
+      callerInstanceId,
+    }: {
+      moduleId: string;
+      handlerExprId: HirExprId;
+      callerInstanceId?: ProgramFunctionInstanceId;
+    }): void => {
+      const moduleView = ctx.ir.modules.get(moduleId);
+      if (!moduleView) {
+        return;
+      }
+      const rawType =
+        typeof callerInstanceId === "number"
+          ? (ctx.ir.baseProgram.functions.getInstanceExprType(
+              callerInstanceId,
+              handlerExprId,
+            ) ?? exprTypeFor({ moduleView, exprId: handlerExprId }))
+          : exprTypeFor({ moduleView, exprId: handlerExprId });
+      if (typeof rawType !== "number") {
+        return;
+      }
+      const substitution = callerTypeSubstitution(callerInstanceId);
+      const handlerType = substitution
+        ? ctx.ir.baseProgram.types.substitute(rawType, substitution)
+        : rawType;
+      const descriptor = ctx.ir.baseProgram.types.getTypeDesc(handlerType);
+      if (descriptor.kind !== "function") {
+        return;
+      }
+      [
+        ...descriptor.parameters.map((parameter) => parameter.type),
+        descriptor.returnType,
+      ].forEach((typeId) => enqueueDtoPlanForType({ typeId, moduleId }));
     };
 
     const exportedFunctionUsesEffectsHostBoundary = ({
@@ -619,21 +740,14 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       moduleId: string;
       symbol: SymbolId;
     }): boolean => {
-      const resolved = resolveImportedSymbol({
-        moduleId,
-        symbol,
-        ir: ctx.ir,
-      });
+      const resolved = resolveImportedSymbol({ moduleId, symbol, ir: ctx.ir });
       const signature = ctx.ir.baseProgram.functions.getSignature(
         resolved.moduleId,
         resolved.symbol,
       );
       return Boolean(
         signature &&
-        !isPureSignature({
-          effectRow: signature.effectRow,
-          ir: ctx.ir,
-        }),
+        !isPureSignature({ effectRow: signature.effectRow, ir: ctx.ir }),
       );
     };
 
@@ -762,9 +876,25 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
                   ctx.ir.baseProgram.symbols.getIntrinsicName(calleeId);
                 if (
                   intrinsicName &&
-                  BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS.has(intrinsicName)
+                  HOST_TRANSPORT_DEPENDENT_INTRINSICS.has(intrinsicName)
                 ) {
-                  enqueueMsgPackFunctions();
+                  enqueueSelectedProviderFunctions();
+                  const handler = expr.args[0];
+                  if (handler) {
+                    enqueueRetainedCallbackDtoPlans({
+                      moduleId,
+                      handlerExprId: handler.expr,
+                      callerInstanceId,
+                    });
+                  }
+                }
+                if (intrinsicName && DATA_DTO_INTRINSICS.has(intrinsicName)) {
+                  enqueueDataDtoFunctions();
+                  enqueueDtoPlansForIntrinsicCall({
+                    moduleId,
+                    expr,
+                    callerInstanceId,
+                  });
                 }
                 if (
                   intrinsicName &&
@@ -818,10 +948,6 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
           moduleId: rootModule.moduleId,
           symbol: entry.symbol,
         });
-        enqueueSerializedExportDependencies({
-          moduleId: rootModule.moduleId,
-          symbol: entry.symbol,
-        });
         const exportName =
           entry.alias ??
           ctx.ir.baseProgram.symbols.getName(
@@ -840,7 +966,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
             symbol: entry.symbol,
           })
         ) {
-          enqueueMsgPackFunctions();
+          enqueueSelectedProviderFunctions();
         }
         if (
           !ctx.ir.options.testMode &&
@@ -890,6 +1016,11 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
         reachableInstances.add(instanceId);
         processedInstances += 1;
         const instance = ctx.ir.baseProgram.functions.getInstance(instanceId);
+        enqueueEffectfulFunctionBoundaryDependencies({
+          moduleId: instance.symbolRef.moduleId,
+          symbol: instance.symbolRef.symbol,
+          typeArgs: instance.typeArgs,
+        });
         reachableSymbols.add(
           canonicalProgramSymbolIdOf({
             moduleId: instance.symbolRef.moduleId,

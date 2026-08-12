@@ -5,12 +5,6 @@ import type {
   VxRenderFrame,
 } from "./types.js";
 
-type LegacyElement = {
-  name: string;
-  attributes?: Record<string, unknown> | Array<[unknown, unknown]>;
-  children?: unknown[];
-};
-
 export type MarkupNamespace = "html" | "svg";
 
 const voidTags = new Set([
@@ -235,11 +229,9 @@ function normalizeVNodeInNamespace(
       ? applyVNodeMessageMap(child, record.handlerId)
       : child;
   }
-  if (typeof record.name === "string") {
-    return normalizeLegacyElement(record as LegacyElement, namespace);
-  }
-
-  return { kind: "text", value: String(input) };
+  throw new Error(
+    "vx-dom: invalid VX node kind; expected text, fragment, element, or map",
+  );
 }
 
 function normalizeElement(
@@ -267,53 +259,10 @@ function normalizeElement(
   };
 }
 
-function normalizeLegacyElement(
-  input: LegacyElement,
-  parentNamespace: MarkupNamespace,
-): VxElementNode {
-  const attributes = normalizeLegacyAttributes(input.attributes);
-  const tag = input.name || "div";
-  const namespace = elementNamespace(tag, parentNamespace);
-  validateTagName(tag, namespace, "legacy.name");
-  Object.keys(attributes ?? {}).forEach((key) =>
-    attributeNameValidator(namespace)(key, `legacy.attributes.${key}`)
-  );
-  const children = normalizeChildren(input.children, childNamespace(tag, namespace));
-  validateVoidElementChildren(tag, children, "legacy element", namespace);
-  return {
-    kind: "element",
-    tag,
-    key: optionalString(attributes?.key),
-    attrs: attributes,
-    children,
-  };
-}
-
 function normalizeChildren(input: unknown, namespace: MarkupNamespace): VNode[] {
   return Array.isArray(input)
     ? input.map((child) => normalizeVNodeInNamespace(child, namespace))
     : [];
-}
-
-function normalizeLegacyAttributes(
-  input: LegacyElement["attributes"],
-): Record<string, unknown> | undefined {
-  if (Array.isArray(input)) {
-    const attrs = Object.fromEntries(
-      input
-        .filter((entry): entry is [unknown, unknown] => Array.isArray(entry) && entry.length >= 2)
-        .map(([key, value]) => [String(key), value]),
-    );
-    return Object.keys(attrs).length > 0 ? attrs : undefined;
-  }
-  return normalizeRecord(input);
-}
-
-function normalizeRecord(input: unknown): Record<string, unknown> | undefined {
-  const record = toRecord(input);
-  if (!record) return undefined;
-  const entries = Object.entries(record).filter(([, value]) => value !== undefined);
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 function normalizeEvents(input: unknown): EventDescriptor[] | undefined {

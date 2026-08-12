@@ -39,12 +39,14 @@ describe("vx-dom browser renderer", () => {
   it("creates SVG trees in the SVG namespace with case-sensitive attributes", () => {
     const renderer = createVxDomRenderer(container);
 
-    renderer.render(frame({
-      kind: "element",
-      tag: "svg",
-      attrs: { viewBox: "0 0 24 24" },
-      children: [{ kind: "element", tag: "path", attrs: { d: "M1 1h2" } }],
-    }));
+    renderer.render(
+      frame({
+        kind: "element",
+        tag: "svg",
+        attrs: { viewBox: "0 0 24 24" },
+        children: [{ kind: "element", tag: "path", attrs: { d: "M1 1h2" } }],
+      }),
+    );
 
     const svg = container.querySelector("svg")!;
     const path = svg.querySelector("path")!;
@@ -62,18 +64,30 @@ describe("vx-dom browser renderer", () => {
       children: [{ kind: "element", tag: "use", attrs }],
     });
 
-    renderer.render(frame(useNode({
-      "xlink:href": "#first",
-      "xml:lang": "en",
-    })));
+    renderer.render(
+      frame(
+        useNode({
+          "xlink:href": "#first",
+          "xml:lang": "en",
+        }),
+      ),
+    );
     const use = container.querySelector("use")!;
-    expect(use.getAttributeNS("http://www.w3.org/1999/xlink", "href")).toBe("#first");
-    expect(use.getAttributeNS("http://www.w3.org/XML/1998/namespace", "lang")).toBe("en");
+    expect(use.getAttributeNS("http://www.w3.org/1999/xlink", "href")).toBe(
+      "#first",
+    );
+    expect(
+      use.getAttributeNS("http://www.w3.org/XML/1998/namespace", "lang"),
+    ).toBe("en");
 
     renderer.render(frame(useNode({ "xlink:href": "#second" })));
     expect(container.querySelector("use")).toBe(use);
-    expect(use.getAttributeNS("http://www.w3.org/1999/xlink", "href")).toBe("#second");
-    expect(use.hasAttributeNS("http://www.w3.org/XML/1998/namespace", "lang")).toBe(false);
+    expect(use.getAttributeNS("http://www.w3.org/1999/xlink", "href")).toBe(
+      "#second",
+    );
+    expect(
+      use.hasAttributeNS("http://www.w3.org/XML/1998/namespace", "lang"),
+    ).toBe(false);
   });
 
   it("patches text and props without replacing the element", () => {
@@ -157,7 +171,11 @@ describe("vx-dom browser renderer", () => {
     renderer.render(frame(listNode(["c", "a", "b"])));
     const secondRender = Array.from(container.querySelectorAll("li"));
 
-    expect(secondRender.map((node) => node.textContent)).toEqual(["c", "a", "b"]);
+    expect(secondRender.map((node) => node.textContent)).toEqual([
+      "c",
+      "a",
+      "b",
+    ]);
     expect(secondRender[0]).toBe(firstRender[2]);
     expect(secondRender[1]).toBe(firstRender[0]);
     expect(secondRender[2]).toBe(firstRender[1]);
@@ -172,7 +190,11 @@ describe("vx-dom browser renderer", () => {
     renderer.render(frame(keyedFragmentListNode(["c", "a", "b"])));
     const secondRender = Array.from(container.querySelectorAll("li"));
 
-    expect(secondRender.map((node) => node.textContent)).toEqual(["c", "a", "b"]);
+    expect(secondRender.map((node) => node.textContent)).toEqual([
+      "c",
+      "a",
+      "b",
+    ]);
     expect(secondRender[0]).toBe(firstRender[2]);
     expect(secondRender[1]).toBe(firstRender[0]);
     expect(secondRender[2]).toBe(firstRender[1]);
@@ -187,7 +209,12 @@ describe("vx-dom browser renderer", () => {
     renderer.render(frame(keyedMultiFragmentListNode(["b", "a"])));
     const secondRender = Array.from(container.querySelectorAll("li"));
 
-    expect(secondRender.map((node) => node.textContent)).toEqual(["b:0", "b:1", "a:0", "a:1"]);
+    expect(secondRender.map((node) => node.textContent)).toEqual([
+      "b:0",
+      "b:1",
+      "a:0",
+      "a:1",
+    ]);
     expect(secondRender[0]).toBe(firstRender[2]);
     expect(secondRender[1]).toBe(firstRender[3]);
     expect(secondRender[2]).toBe(firstRender[0]);
@@ -222,23 +249,33 @@ describe("vx-dom browser renderer", () => {
     });
 
     renderer.render(frame(buttonNode(1)));
-    container.querySelector("button")!.dispatchEvent(new MouseEvent("click", {
-      bubbles: true,
-      clientX: 12,
-      clientY: 24,
-    }));
+    container.querySelector("button")!.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        clientX: 12,
+        clientY: 24,
+      }),
+    );
 
-    expect(dispatch).toHaveBeenCalledWith(1, expect.objectContaining({
-      kind: "mouse",
-      client_x: 12,
-      client_y: 24,
-    }));
+    expect(dispatch).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        kind: "mouse",
+        client_x: 12,
+        client_y: 24,
+      }),
+    );
 
     renderer.render(frame(buttonNode(2)));
-    container.querySelector("button")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    container
+      .querySelector("button")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     expect(releaseMany).toHaveBeenCalledWith([1]);
-    expect(dispatch).toHaveBeenLastCalledWith(2, expect.objectContaining({ kind: "mouse" }));
+    expect(dispatch).toHaveBeenLastCalledWith(
+      2,
+      expect.objectContaining({ kind: "mouse" }),
+    );
   });
 
   it("does not release caller-owned mapped event handler ids when views are removed", () => {
@@ -275,7 +312,9 @@ describe("vx-dom browser renderer", () => {
       expect.objectContaining({ kind: "mouse" }),
       [9],
     );
-    expect(releaseMany.mock.calls.flatMap(([ids]) => Array.from(ids))).not.toContain(9);
+    expect(
+      releaseMany.mock.calls.flatMap(([ids]) => Array.from(ids)),
+    ).not.toContain(9);
 
     renderer.dispose();
     expect(releaseMany).toHaveBeenLastCalledWith(new Set([3]));
@@ -291,12 +330,14 @@ describe("vx-dom browser renderer", () => {
     });
     const serverButton = container.querySelector("button")!;
 
-    renderer.hydrate(frame({
-      ...buttonNode(7),
-      attrs: { class: "live" },
-      styles: { background: "blue" },
-      children: [{ kind: "text", value: "Client" }],
-    }));
+    renderer.hydrate(
+      frame({
+        ...buttonNode(7),
+        attrs: { class: "live" },
+        styles: { background: "blue" },
+        children: [{ kind: "text", value: "Client" }],
+      }),
+    );
 
     const hydratedButton = container.querySelector("button")!;
     expect(hydratedButton).toBe(serverButton);
@@ -308,7 +349,10 @@ describe("vx-dom browser renderer", () => {
     expect(hydratedButton.textContent).toBe("Client");
 
     hydratedButton.click();
-    expect(dispatch).toHaveBeenCalledWith(7, expect.objectContaining({ kind: "mouse" }));
+    expect(dispatch).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ kind: "mouse" }),
+    );
 
     renderer.dispose();
     expect(container.innerHTML).toBe("");
@@ -321,11 +365,13 @@ describe("vx-dom browser renderer", () => {
     const serverButton = container.querySelector("button");
     const renderer = createVxDomRenderer(container, { onHydrationMismatch });
 
-    renderer.hydrate(frame({
-      ...buttonNode(7),
-      attrs: { class: "live" },
-      styles: { background: "blue" },
-    }));
+    renderer.hydrate(
+      frame({
+        ...buttonNode(7),
+        attrs: { class: "live" },
+        styles: { background: "blue" },
+      }),
+    );
 
     expect(container.querySelector("button")).toBe(serverButton);
     expect(onHydrationMismatch).not.toHaveBeenCalled();
@@ -336,10 +382,12 @@ describe("vx-dom browser renderer", () => {
     container.innerHTML = `<button style="color: red">Save</button>`;
     const renderer = createVxDomRenderer(container, { onHydrationMismatch });
 
-    renderer.hydrate(frame({
-      ...buttonNode(7),
-      attrs: { style: "color: red" },
-    }));
+    renderer.hydrate(
+      frame({
+        ...buttonNode(7),
+        attrs: { style: "color: red" },
+      }),
+    );
 
     expect(container.querySelector("button")?.style.color).toBe("red");
     expect(onHydrationMismatch).not.toHaveBeenCalled();
@@ -350,16 +398,20 @@ describe("vx-dom browser renderer", () => {
     container.innerHTML = `<form><input checked type="checkbox" value="Draft"></form>`;
     const renderer = createVxDomRenderer(container, { onHydrationMismatch });
 
-    renderer.hydrate(frame({
-      kind: "element",
-      tag: "form",
-      children: [{
+    renderer.hydrate(
+      frame({
         kind: "element",
-        tag: "input",
-        attrs: { type: "checkbox" },
-        props: { checked: true, value: "Draft" },
-      }],
-    }));
+        tag: "form",
+        children: [
+          {
+            kind: "element",
+            tag: "input",
+            attrs: { type: "checkbox" },
+            props: { checked: true, value: "Draft" },
+          },
+        ],
+      }),
+    );
 
     const input = container.querySelector("input")!;
     expect(input.getAttribute("value")).toBe("Draft");
@@ -378,13 +430,15 @@ describe("vx-dom browser renderer", () => {
     container.addEventListener("input", bubbledInput);
     const renderer = createVxDomRenderer(container, { handlers: { dispatch } });
 
-    renderer.hydrate(frame({
-      kind: "element",
-      tag: "textarea",
-      props: { value: "Server draft" },
-      events: [{ kind: "event", event: "input", handlerId: 7 }],
-      children: [{ kind: "text", value: "Server draft" }],
-    }));
+    renderer.hydrate(
+      frame({
+        kind: "element",
+        tag: "textarea",
+        props: { value: "Server draft" },
+        events: [{ kind: "event", event: "input", handlerId: 7 }],
+        children: [{ kind: "text", value: "Server draft" }],
+      }),
+    );
 
     expect(textarea.value).toBe("User draft");
     expect(bubbledInput).not.toHaveBeenCalled();
@@ -403,7 +457,9 @@ describe("vx-dom browser renderer", () => {
     const command = new Promise<void>((resolve) => {
       finishCommand = resolve;
     });
-    const dispatch = vi.fn(async () => frame({ kind: "fragment", children: [] }));
+    const dispatch = vi.fn(async () =>
+      frame({ kind: "fragment", children: [] }),
+    );
     const app: VxAppRuntime = {
       init: () => ({
         frame: frame({
@@ -436,13 +492,15 @@ describe("vx-dom browser renderer", () => {
 
     finishCommand?.();
     await mounting;
-    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "event",
-        handlerId: 7,
-        payload: expect.objectContaining({ value: "User draft" }),
-      }),
-    ));
+    await vi.waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "event",
+          handlerId: 7,
+          payload: expect.objectContaining({ value: "User draft" }),
+        }),
+      ),
+    );
   });
 
   it("detaches partial listeners and releases handlers when hydration throws", () => {
@@ -456,14 +514,16 @@ describe("vx-dom browser renderer", () => {
       },
     });
 
-    expect(() => renderer.hydrate({
-      version: 1,
-      root: {
-        kind: "map",
-        handlerId: 9,
-        child: buttonNode(7),
-      },
-    })).toThrow("mismatch callback failed");
+    expect(() =>
+      renderer.hydrate({
+        version: 1,
+        root: {
+          kind: "map",
+          handlerId: 9,
+          child: buttonNode(7),
+        },
+      }),
+    ).toThrow("mismatch callback failed");
     expect(releaseMany).toHaveBeenCalledWith([7]);
     container.querySelector("button")!.click();
     expect(dispatch).not.toHaveBeenCalled();
@@ -475,45 +535,52 @@ describe("vx-dom browser renderer", () => {
     container.innerHTML = `<button style="display: grid">Save</button>`;
     const renderer = createVxDomRenderer(container, { onHydrationMismatch });
 
-    renderer.hydrate(frame({
-      ...buttonNode(7),
-      attrs: { style: "color: red" },
-      styles: { display: "grid" },
-    }));
+    renderer.hydrate(
+      frame({
+        ...buttonNode(7),
+        attrs: { style: "color: red" },
+        styles: { display: "grid" },
+      }),
+    );
 
     const button = container.querySelector("button")!;
     expect(button.style.display).toBe("grid");
     expect(button.style.color).toBe("");
     expect(onHydrationMismatch).not.toHaveBeenCalled();
 
-    renderer.render(frame({
-      ...buttonNode(7),
-      attrs: { style: "color: red" },
-    }));
+    renderer.render(
+      frame({
+        ...buttonNode(7),
+        attrs: { style: "color: red" },
+      }),
+    );
 
     expect(button.style.display).toBe("");
     expect(button.style.color).toBe("red");
-
   });
 
   it("restores live form state after overriding properties are removed", () => {
     const renderer = createVxDomRenderer(container);
 
-    renderer.render(frame({
-      kind: "element",
-      tag: "input",
-      attrs: { checked: true, type: "checkbox", value: "fallback" },
-      props: { checked: false, value: "controlled" },
-    }));
+    renderer.render(
+      frame({
+        kind: "element",
+        tag: "input",
+        attrs: { checked: true, type: "checkbox", value: "fallback" },
+        props: { checked: false, value: "controlled" },
+      }),
+    );
     const input = container.querySelector("input")!;
     expect(input.checked).toBe(false);
     expect(input.value).toBe("controlled");
 
-    renderer.render(frame({
-      kind: "element",
-      tag: "input",
-      attrs: { checked: true, type: "checkbox", value: "fallback" },
-    }));
+    renderer.render(
+      frame({
+        kind: "element",
+        tag: "input",
+        attrs: { checked: true, type: "checkbox", value: "fallback" },
+      }),
+    );
 
     expect(input.checked).toBe(true);
     expect(input.value).toBe("fallback");
@@ -525,11 +592,13 @@ describe("vx-dom browser renderer", () => {
     const paragraph = container.querySelector("p");
     const renderer = createVxDomRenderer(container, { onHydrationMismatch });
 
-    renderer.hydrate(frame({
-      kind: "element",
-      tag: "p",
-      children: [{ kind: "text", value: "A\r\nB" }],
-    }));
+    renderer.hydrate(
+      frame({
+        kind: "element",
+        tag: "p",
+        children: [{ kind: "text", value: "A\r\nB" }],
+      }),
+    );
 
     expect(container.querySelector("p")).toBe(paragraph);
     expect(paragraph?.textContent).toBe("A\r\nB");
@@ -541,20 +610,24 @@ describe("vx-dom browser renderer", () => {
     container.innerHTML = `<section class="stale"><span>Server</span></section>`;
     const renderer = createVxDomRenderer(container, { onHydrationMismatch });
 
-    renderer.hydrate(frame({
-      kind: "element",
-      tag: "main",
-      attrs: { class: "live" },
-      children: [{ kind: "text", value: "Client" }],
-    }));
+    renderer.hydrate(
+      frame({
+        kind: "element",
+        tag: "main",
+        attrs: { class: "live" },
+        children: [{ kind: "text", value: "Client" }],
+      }),
+    );
 
     expect(container.innerHTML).toBe(`<main class="live">Client</main>`);
-    expect(onHydrationMismatch).toHaveBeenCalledWith(expect.objectContaining({
-      path: "root",
-      reason: "tag",
-      expected: "main",
-      actual: "section",
-    }));
+    expect(onHydrationMismatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "root",
+        reason: "tag",
+        expected: "main",
+        actual: "section",
+      }),
+    );
   });
 
   it("reads multiple structured hydration roots by stable id", () => {
@@ -567,14 +640,26 @@ describe("vx-dom browser renderer", () => {
 
     const roots = readVoydHydrationRoots(container);
 
-    expect(roots.map(({ id, selector, entry, model }) => ({
-      id,
-      selector,
-      entry,
-      model,
-    }))).toEqual([
-      { id: "primary", selector: "#first", entry: "/first.js", model: { count: 1 } },
-      { id: "secondary", selector: "#second", entry: "/second.js", model: { count: 2 } },
+    expect(
+      roots.map(({ id, selector, entry, model }) => ({
+        id,
+        selector,
+        entry,
+        model,
+      })),
+    ).toEqual([
+      {
+        id: "primary",
+        selector: "#first",
+        entry: "/first.js",
+        model: { count: 1 },
+      },
+      {
+        id: "secondary",
+        selector: "#second",
+        entry: "/second.js",
+        model: { count: 2 },
+      },
     ]);
     expect(readVoydHydrationRoot("secondary", container).container).toBe(
       container.querySelector("#second"),
@@ -588,7 +673,9 @@ describe("vx-dom browser renderer", () => {
       <script type="application/json" data-voyd-hydration-id="broken" data-voyd-hydration="#missing">not-json</script>
     `;
 
-    expect(readVoydHydrationRoot("valid", container).model).toEqual({ count: 1 });
+    expect(readVoydHydrationRoot("valid", container).model).toEqual({
+      count: 1,
+    });
   });
 
   it("hydrates mapped event handler ids from serialized frames", () => {
@@ -604,12 +691,14 @@ describe("vx-dom browser renderer", () => {
       root: {
         kind: "element",
         tag: "button",
-        events: [{
-          kind: "event",
-          event: "click",
-          message: { type: "child" },
-          mapHandlerIds: [9],
-        }],
+        events: [
+          {
+            kind: "event",
+            event: "click",
+            message: { type: "child" },
+            mapHandlerIds: [9],
+          },
+        ],
         children: [{ kind: "text", value: "Save" }],
       },
     });
@@ -618,26 +707,28 @@ describe("vx-dom browser renderer", () => {
     expect(dispatchMessage).toHaveBeenCalledWith({
       kind: "map",
       handlerId: 9,
-      message: { kind: "msgpack", value: { type: "child" } },
+      message: { kind: "value", value: { type: "child" } },
     });
   });
 
   it("mounts a runtime-owned app and runs message commands through dispatch", async () => {
     let count = 0;
     const dispose = vi.fn();
-    const syncSubscriptions = vi.fn<(
-      next: unknown,
-      context: VxSubscriptionSyncContext,
-    ) => void>();
+    const syncSubscriptions =
+      vi.fn<(next: unknown, context: VxSubscriptionSyncContext) => void>();
     const app: VxAppRuntime = {
       init: () => ({
         frame: counterNode(count),
-        commands: { type: "cmd", kind: "message", value: { type: "increment" } },
+        commands: {
+          type: "cmd",
+          kind: "message",
+          value: { type: "increment" },
+        },
         subscriptions: { type: "sub", kind: "none" },
       }),
       render: () => counterNode(count),
       dispatch: (message) => {
-        if (message.kind === "msgpack" && isIncrement(message.value)) count += 1;
+        if (message.kind === "value" && isIncrement(message.value)) count += 1;
         return {
           frame: counterNode(count),
           commands: { type: "cmd", kind: "none" },
@@ -657,7 +748,7 @@ describe("vx-dom browser renderer", () => {
       expect.objectContaining({ previous: undefined }),
     );
 
-    await mounted.dispatch({ kind: "msgpack", value: { type: "increment" } });
+    await mounted.dispatch({ kind: "value", value: { type: "increment" } });
 
     expect(container.textContent).toBe("Count: 2");
     expect(mounted.getSnapshot()).toEqual({ count: 2 });
@@ -681,11 +772,13 @@ describe("vx-dom browser renderer", () => {
     };
 
     await mountVxApp({ container, app });
-    container.querySelector("button")!.dispatchEvent(new MouseEvent("click", {
-      bubbles: true,
-      clientX: 8,
-      clientY: 13,
-    }));
+    container.querySelector("button")!.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        clientX: 8,
+        clientY: 13,
+      }),
+    );
 
     await nextTurn();
 
@@ -711,41 +804,46 @@ describe("vx-dom browser renderer", () => {
       render: () => counterMessageButtonNode(count),
       dispatch: (message) => {
         seenMessages.push(message);
-        if (message.kind === "msgpack" && isIncrement(message.value)) count += 1;
+        if (message.kind === "value" && isIncrement(message.value)) count += 1;
         return counterMessageButtonNode(count);
       },
     };
 
     await mountVxApp({ container, app });
-    container.querySelector("button")!.dispatchEvent(new MouseEvent("click", {
-      bubbles: true,
-    }));
+    container.querySelector("button")!.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+      }),
+    );
 
     await nextTurn();
 
     expect(container.textContent).toBe("Count: 1");
     expect(seenMessages).toEqual([
-      { kind: "msgpack", value: { type: "increment" } },
+      { kind: "value", value: { type: "increment" } },
     ]);
   });
 
   it("routes mapped static DOM event messages into the runtime", async () => {
     const seenMessages: unknown[] = [];
     const app: VxAppRuntime = {
-      init: () => frame({
-        kind: "map",
-        handlerId: 9,
-        child: {
-          kind: "element",
-          tag: "button",
-          events: [{
-            kind: "event",
-            event: "click",
-            message: { type: "child" },
-          }],
-          children: [{ kind: "text", value: "Child" }],
-        },
-      } as unknown as VNode),
+      init: () =>
+        frame({
+          kind: "map",
+          handlerId: 9,
+          child: {
+            kind: "element",
+            tag: "button",
+            events: [
+              {
+                kind: "event",
+                event: "click",
+                message: { type: "child" },
+              },
+            ],
+            children: [{ kind: "text", value: "Child" }],
+          },
+        } as unknown as VNode),
       render: () => counterNode(seenMessages.length),
       dispatch: (message) => {
         seenMessages.push(message);
@@ -761,7 +859,7 @@ describe("vx-dom browser renderer", () => {
       {
         kind: "map",
         handlerId: 9,
-        message: { kind: "msgpack", value: { type: "child" } },
+        message: { kind: "value", value: { type: "child" } },
       },
     ]);
   });
@@ -780,11 +878,13 @@ describe("vx-dom browser renderer", () => {
             child: {
               kind: "element",
               tag: "button",
-              events: [{
-                kind: "event",
-                event: "click",
-                message: { type: "child" },
-              }],
+              events: [
+                {
+                  kind: "event",
+                  event: "click",
+                  message: { type: "child" },
+                },
+              ],
               children: [{ kind: "text", value: "Child" }],
             },
           },
@@ -808,7 +908,7 @@ describe("vx-dom browser renderer", () => {
         message: {
           kind: "map",
           handlerId: 10,
-          message: { kind: "msgpack", value: { type: "child" } },
+          message: { kind: "value", value: { type: "child" } },
         },
       },
     ]);
@@ -831,7 +931,10 @@ describe("vx-dom browser renderer", () => {
 
     container.querySelector("button")!.click();
 
-    expect(handlerDispatch).toHaveBeenCalledWith(5, expect.objectContaining({ kind: "mouse" }));
+    expect(handlerDispatch).toHaveBeenCalledWith(
+      5,
+      expect.objectContaining({ kind: "mouse" }),
+    );
     expect(runtimeDispatch).not.toHaveBeenCalled();
   });
 
@@ -839,16 +942,17 @@ describe("vx-dom browser renderer", () => {
     const seenMessages: unknown[] = [];
     const handlerDispatch = vi.fn<RetainedDispatch>(() => ({ type: "child" }));
     const app: VxAppRuntime = {
-      init: () => frame({
-        kind: "map",
-        handlerId: 9,
-        child: {
-          kind: "element",
-          tag: "button",
-          events: [{ kind: "event", event: "click", handlerId: 5 }],
-          children: [{ kind: "text", value: "Child" }],
-        },
-      } as unknown as VNode),
+      init: () =>
+        frame({
+          kind: "map",
+          handlerId: 9,
+          child: {
+            kind: "element",
+            tag: "button",
+            events: [{ kind: "event", event: "click", handlerId: 5 }],
+            children: [{ kind: "text", value: "Child" }],
+          },
+        } as unknown as VNode),
       render: () => counterNode(seenMessages.length),
       dispatch: (message) => {
         seenMessages.push(message);
@@ -864,12 +968,15 @@ describe("vx-dom browser renderer", () => {
     container.querySelector("button")!.click();
     await nextTurn();
 
-    expect(handlerDispatch).toHaveBeenCalledWith(5, expect.objectContaining({ kind: "mouse" }));
+    expect(handlerDispatch).toHaveBeenCalledWith(
+      5,
+      expect.objectContaining({ kind: "mouse" }),
+    );
     expect(seenMessages).toEqual([
       {
         kind: "map",
         handlerId: 9,
-        message: { kind: "msgpack", value: { type: "child" } },
+        message: { kind: "value", value: { type: "child" } },
       },
     ]);
   });
@@ -877,18 +984,20 @@ describe("vx-dom browser renderer", () => {
   it("normalizes input events from controlled form fields", async () => {
     const seenMessages: unknown[] = [];
     const app: VxAppRuntime = {
-      init: () => frame({
-        kind: "element",
-        tag: "input",
-        props: { value: "Draft" },
-        events: [{ kind: "event", event: "input", handlerId: 14 }],
-      }),
-      render: () => frame({
-        kind: "element",
-        tag: "input",
-        props: { value: "Draft" },
-        events: [{ kind: "event", event: "input", handlerId: 14 }],
-      }),
+      init: () =>
+        frame({
+          kind: "element",
+          tag: "input",
+          props: { value: "Draft" },
+          events: [{ kind: "event", event: "input", handlerId: 14 }],
+        }),
+      render: () =>
+        frame({
+          kind: "element",
+          tag: "input",
+          props: { value: "Draft" },
+          events: [{ kind: "event", event: "input", handlerId: 14 }],
+        }),
       dispatch: (message) => {
         seenMessages.push(message);
         return frame({
@@ -903,10 +1012,12 @@ describe("vx-dom browser renderer", () => {
     await mountVxApp({ container, app });
     const input = container.querySelector("input")!;
     input.value = "Renamed";
-    input.dispatchEvent(new InputEvent("input", {
-      bubbles: true,
-      inputType: "insertText",
-    }));
+    input.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        inputType: "insertText",
+      }),
+    );
     await nextTurn();
 
     expect(input.value).toBe("Renamed");
@@ -930,46 +1041,56 @@ describe("vx-dom browser renderer", () => {
       handlers: { dispatch },
     });
 
-    renderer.render(frame({
-      kind: "element",
-      tag: "form",
-      events: [{
-        kind: "event",
-        event: "submit",
-        handlerId: 30,
-        options: { preventDefault: true },
-      }],
-      children: [
-        {
-          kind: "element",
-          tag: "input",
-          attrs: { name: "title" },
-          props: { value: "Draft" },
-        },
-        {
-          kind: "element",
-          tag: "input",
-          attrs: { name: "published", type: "checkbox" },
-          props: { checked: true, value: "yes" },
-        },
-      ],
-    }));
+    renderer.render(
+      frame({
+        kind: "element",
+        tag: "form",
+        events: [
+          {
+            kind: "event",
+            event: "submit",
+            handlerId: 30,
+            options: { preventDefault: true },
+          },
+        ],
+        children: [
+          {
+            kind: "element",
+            tag: "input",
+            attrs: { name: "title" },
+            props: { value: "Draft" },
+          },
+          {
+            kind: "element",
+            tag: "input",
+            attrs: { name: "published", type: "checkbox" },
+            props: { checked: true, value: "yes" },
+          },
+        ],
+      }),
+    );
 
     const form = container.querySelector("form")!;
-    const event = new SubmitEvent("submit", { bubbles: true, cancelable: true });
+    const event = new SubmitEvent("submit", {
+      bubbles: true,
+      cancelable: true,
+    });
     const allowed = form.dispatchEvent(event);
 
     expect(allowed).toBe(false);
     expect(event.defaultPrevented).toBe(true);
-    expect(dispatch).toHaveBeenCalledWith(30, expect.objectContaining({
-      kind: "submit",
-      form_data: {
-        published: "yes",
-        title: "Draft",
-      },
-      form_keys: ["title", "published"],
-      form_values: ["Draft", "yes"],
-    }));
+    expect(dispatch).toHaveBeenCalledWith(
+      30,
+      expect.objectContaining({
+        kind: "submit",
+        form_data: {
+          published: "yes",
+          title: "Draft",
+        },
+        form_keys: ["title", "published"],
+        form_values: ["Draft", "yes"],
+      }),
+    );
   });
 
   it("captures pointer drags and releases capture on pointer up", () => {
@@ -1122,12 +1243,14 @@ describe("vx-dom browser renderer", () => {
       dispatch: () => counterNode(0),
     };
 
-    await expect(mountVxApp({
-      container,
-      app: commandApp,
-      runtimeHostMode: "explicit",
-      runtimeHost: { onError },
-    })).rejects.toThrow('no runtime command handler registered for "delay"');
+    await expect(
+      mountVxApp({
+        container,
+        app: commandApp,
+        runtimeHostMode: "explicit",
+        runtimeHost: { onError },
+      }),
+    ).rejects.toThrow('no runtime command handler registered for "delay"');
     expect(onError).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({ phase: "commands" }),
@@ -1143,11 +1266,13 @@ describe("vx-dom browser renderer", () => {
       syncSubscriptions: vi.fn(),
     };
 
-    await expect(mountVxApp({
-      container,
-      app: subscriptionApp,
-      runtimeHostMode: "explicit",
-    })).rejects.toThrow(
+    await expect(
+      mountVxApp({
+        container,
+        app: subscriptionApp,
+        runtimeHostMode: "explicit",
+      }),
+    ).rejects.toThrow(
       'no runtime subscription handler registered for "location_change"',
     );
     expect(subscriptionApp.syncSubscriptions).not.toHaveBeenCalled();
@@ -1163,24 +1288,30 @@ describe("vx-dom browser renderer", () => {
       dispatch: () => counterNode(0),
     };
 
-    await expect(mountVxApp({
-      container,
-      app,
-      runtimeHostMode: "explicit",
-      runtimeHost: { commands: {} },
-    })).rejects.toThrow('no runtime command handler registered for "constructor"');
+    await expect(
+      mountVxApp({
+        container,
+        app,
+        runtimeHostMode: "explicit",
+        runtimeHost: { commands: {} },
+      }),
+    ).rejects.toThrow(
+      'no runtime command handler registered for "constructor"',
+    );
 
     app.init = () => ({
       frame: counterNode(0),
       subscriptions: { type: "sub", kind: "toString", key: "main" },
     });
 
-    await expect(mountVxApp({
-      container,
-      app,
-      runtimeHostMode: "explicit",
-      runtimeHost: { subscriptions: {} },
-    })).rejects.toThrow(
+    await expect(
+      mountVxApp({
+        container,
+        app,
+        runtimeHostMode: "explicit",
+        runtimeHost: { subscriptions: {} },
+      }),
+    ).rejects.toThrow(
       'no runtime subscription handler registered for "toString"',
     );
 
@@ -1190,14 +1321,16 @@ describe("vx-dom browser renderer", () => {
       commands: { type: "cmd", kind: "inherited_command" },
     });
 
-    await expect(mountVxApp({
-      container,
-      app,
-      runtimeHostMode: "explicit",
-      runtimeHost: Object.create({
-        commands: { inherited_command: runCommand },
+    await expect(
+      mountVxApp({
+        container,
+        app,
+        runtimeHostMode: "explicit",
+        runtimeHost: Object.create({
+          commands: { inherited_command: runCommand },
+        }),
       }),
-    })).rejects.toThrow(
+    ).rejects.toThrow(
       'no runtime command handler registered for "inherited_command"',
     );
     expect(runCommand).not.toHaveBeenCalled();
@@ -1208,14 +1341,16 @@ describe("vx-dom browser renderer", () => {
       subscriptions: { type: "sub", kind: "inherited_sub", key: "main" },
     });
 
-    await expect(mountVxApp({
-      container,
-      app,
-      runtimeHostMode: "explicit",
-      runtimeHost: Object.create({
-        subscriptions: { inherited_sub: runSubscription },
+    await expect(
+      mountVxApp({
+        container,
+        app,
+        runtimeHostMode: "explicit",
+        runtimeHost: Object.create({
+          subscriptions: { inherited_sub: runSubscription },
+        }),
       }),
-    })).rejects.toThrow(
+    ).rejects.toThrow(
       'no runtime subscription handler registered for "inherited_sub"',
     );
     expect(runSubscription).not.toHaveBeenCalled();
@@ -1226,12 +1361,14 @@ describe("vx-dom browser renderer", () => {
       commands: { type: "cmd", kind: "missing_handler" },
     });
 
-    await expect(mountVxApp({
-      container,
-      app,
-      runtimeHostMode: "explicit",
-      runtimeHost: Object.create({ onError }),
-    })).rejects.toThrow(
+    await expect(
+      mountVxApp({
+        container,
+        app,
+        runtimeHostMode: "explicit",
+        runtimeHost: Object.create({ onError }),
+      }),
+    ).rejects.toThrow(
       'no runtime command handler registered for "missing_handler"',
     );
     expect(onError).not.toHaveBeenCalled();
@@ -1265,11 +1402,13 @@ describe("vx-dom browser renderer", () => {
 
     await mountVxApp({ container, app, runtimeHostMode: "explicit" });
 
-    expect(seenMessages).toEqual([{
-      kind: "map",
-      handlerId: 12,
-      message: { kind: "msgpack", value: "ready" },
-    }]);
+    expect(seenMessages).toEqual([
+      {
+        kind: "map",
+        handlerId: 12,
+        message: { kind: "value", value: "ready" },
+      },
+    ]);
   });
 
   it("reports command diagnostics for unknown runtime command kinds", async () => {
@@ -1305,19 +1444,23 @@ describe("vx-dom browser renderer", () => {
         frame: frame({
           kind: "element",
           tag: "form",
-          events: [{
-            kind: "event",
-            event: "submit",
-            handlerId: 30,
-            options: { preventDefault: true },
-          }],
+          events: [
+            {
+              kind: "event",
+              event: "submit",
+              handlerId: 30,
+              options: { preventDefault: true },
+            },
+          ],
           attrs: { class: "hydrating" },
-          children: [{
-            kind: "element",
-            tag: "button",
-            attrs: { type: "submit", disabled: true },
-            children: [{ kind: "text", value: "Starting" }],
-          }],
+          children: [
+            {
+              kind: "element",
+              tag: "button",
+              attrs: { type: "submit", disabled: true },
+              children: [{ kind: "text", value: "Starting" }],
+            },
+          ],
         }),
         subscriptions: { type: "sub", kind: "timer", key: "main" },
         commands: { type: "cmd", kind: "fail" },
@@ -1327,22 +1470,27 @@ describe("vx-dom browser renderer", () => {
       dispose: disposeApp,
     };
 
-    await expect(hydrateVxApp({
-      container,
-      app,
-      runtimeHost: {
-        commands: {
-          fail: (_command, context) => {
-            commandSignal = context.signal;
-            throw new Error("initial command failed");
+    await expect(
+      hydrateVxApp({
+        container,
+        app,
+        runtimeHost: {
+          commands: {
+            fail: (_command, context) => {
+              commandSignal = context.signal;
+              throw new Error("initial command failed");
+            },
           },
+          subscriptions: { timer: () => disposeSubscription },
         },
-        subscriptions: { timer: () => disposeSubscription },
-      },
-    })).rejects.toThrow("initial command failed");
+      }),
+    ).rejects.toThrow("initial command failed");
     await nextTurn();
 
-    const submit = new SubmitEvent("submit", { bubbles: true, cancelable: true });
+    const submit = new SubmitEvent("submit", {
+      bubbles: true,
+      cancelable: true,
+    });
     expect(container.querySelector("form")).toBe(serverForm);
     expect(serverForm.className).toBe("");
     expect(serverForm.querySelector("button")?.disabled).toBe(false);
@@ -1391,11 +1539,13 @@ describe("vx-dom browser renderer", () => {
       dispatch: () => counterNode(0),
     };
 
-    await expect(mountVxApp({
-      container,
-      app,
-      runtimeHost: { onError },
-    })).rejects.toThrow("delay command missing value");
+    await expect(
+      mountVxApp({
+        container,
+        app,
+        runtimeHost: { onError },
+      }),
+    ).rejects.toThrow("delay command missing value");
     expect(onError).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({ phase: "commands" }),
@@ -1430,7 +1580,7 @@ describe("vx-dom browser renderer", () => {
       {
         kind: "map",
         handlerId: 44,
-        message: { kind: "msgpack", value: { type: "child" } },
+        message: { kind: "value", value: { type: "child" } },
       },
     ]);
   });
@@ -1445,7 +1595,9 @@ describe("vx-dom browser renderer", () => {
     };
 
     const mounted = await mountVxApp({ container, app });
-    container.querySelector("button")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    container
+      .querySelector("button")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
     await nextTurn();
 
@@ -1496,7 +1648,7 @@ describe("vx-dom browser renderer", () => {
       }),
       render: () => counterNode(count),
       dispatch: (message) => {
-        if (message.kind === "msgpack" && isIncrement(message.value)) count += 1;
+        if (message.kind === "value" && isIncrement(message.value)) count += 1;
         return counterNode(count);
       },
     };
@@ -1518,9 +1670,11 @@ describe("vx-dom browser renderer", () => {
       | undefined;
     const observeTask = vi.fn(
       () =>
-        new Promise<{ kind: "value"; value: { type: "increment" } }>((resolve) => {
-          resolveTask = resolve;
-        }),
+        new Promise<{ kind: "value"; value: { type: "increment" } }>(
+          (resolve) => {
+            resolveTask = resolve;
+          },
+        ),
     );
     const commands = { type: "cmd", kind: "task", taskId: 7 };
     Object.defineProperty(commands, Symbol.for("voyd.taskObserver"), {
@@ -1534,7 +1688,7 @@ describe("vx-dom browser renderer", () => {
       }),
       render: () => counterNode(count),
       dispatch: (message) => {
-        if (message.kind === "msgpack" && isIncrement(message.value)) count += 1;
+        if (message.kind === "value" && isIncrement(message.value)) count += 1;
         return counterNode(count);
       },
     };
@@ -1557,9 +1711,11 @@ describe("vx-dom browser renderer", () => {
       | undefined;
     const observeTask = vi.fn(
       () =>
-        new Promise<{ kind: "value"; value: { type: "increment" } }>((resolve) => {
-          resolveTask = resolve;
-        }),
+        new Promise<{ kind: "value"; value: { type: "increment" } }>(
+          (resolve) => {
+            resolveTask = resolve;
+          },
+        ),
     );
     const commands = {
       type: "cmd",
@@ -1596,7 +1752,7 @@ describe("vx-dom browser renderer", () => {
     expect(seenMessages).toContainEqual({
       kind: "map",
       handlerId: 88,
-      message: { kind: "msgpack", value: { type: "increment" } },
+      message: { kind: "value", value: { type: "increment" } },
     });
     expect(release).toHaveBeenCalledWith(88);
   });
@@ -1639,7 +1795,12 @@ describe("vx-dom browser renderer", () => {
 
   it("releases owned task command handlers when disposed before task completion", async () => {
     const release = vi.fn<(id: number) => void>();
-    const observeTask = vi.fn(() => new Promise<{ kind: "value"; value: { type: "increment" } }>(() => undefined));
+    const observeTask = vi.fn(
+      () =>
+        new Promise<{ kind: "value"; value: { type: "increment" } }>(
+          () => undefined,
+        ),
+    );
     const commands = {
       type: "cmd",
       kind: "task",
@@ -1786,12 +1947,15 @@ describe("vx-dom browser renderer", () => {
   it("settles failed DOM event dispatches after reporting through onError", async () => {
     const onError = vi.fn();
     const app: VxAppRuntime = {
-      init: () => frame({
-        kind: "element",
-        tag: "button",
-        events: [{ kind: "event", event: "click", message: { type: "fail" } }],
-        children: [{ kind: "text", value: "Fail" }],
-      }),
+      init: () =>
+        frame({
+          kind: "element",
+          tag: "button",
+          events: [
+            { kind: "event", event: "click", message: { type: "fail" } },
+          ],
+          children: [{ kind: "text", value: "Fail" }],
+        }),
       render: () => counterNode(0),
       dispatch: () => {
         throw new Error("event step failed");
@@ -1837,8 +2001,12 @@ describe("vx-dom browser renderer", () => {
   });
 
   it("runs ref DOM commands with the default browser runtime host", async () => {
-    const focus = vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => undefined);
-    const select = vi.spyOn(HTMLInputElement.prototype, "select").mockImplementation(() => undefined);
+    const focus = vi
+      .spyOn(HTMLElement.prototype, "focus")
+      .mockImplementation(() => undefined);
+    const select = vi
+      .spyOn(HTMLInputElement.prototype, "select")
+      .mockImplementation(() => undefined);
     const scrollIntoView = vi.fn();
     const previousScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
@@ -1862,12 +2030,13 @@ describe("vx-dom browser renderer", () => {
             ],
           },
         }),
-        render: () => frame({
-          kind: "element",
-          tag: "input",
-          attrs: { "data-vx-ref": "editor" },
-          props: { value: "Draft" },
-        }),
+        render: () =>
+          frame({
+            kind: "element",
+            tag: "input",
+            attrs: { "data-vx-ref": "editor" },
+            props: { value: "Draft" },
+          }),
         dispatch: () => frame({ kind: "text", value: "" }),
       };
 
@@ -1889,23 +2058,44 @@ describe("vx-dom browser renderer", () => {
       configurable: true,
       value: { readText, writeText },
     });
-    Object.defineProperty(window, "open", { configurable: true, value: vi.fn() });
-    Object.defineProperty(window, "scrollBy", { configurable: true, value: vi.fn() });
-    Object.defineProperty(window, "scrollTo", { configurable: true, value: vi.fn() });
+    Object.defineProperty(window, "open", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(window, "scrollBy", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(window, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
     localStorage.clear();
     sessionStorage.clear();
     const originalPushState = history.pushState.bind(history);
     const originalReplaceState = history.replaceState.bind(history);
-    const pushState = vi.spyOn(history, "pushState")
-      .mockImplementation((data, title, url) => originalPushState(data, title, url));
-    const replaceState = vi.spyOn(history, "replaceState")
-      .mockImplementation((data, title, url) => originalReplaceState(data, title, url));
+    const pushState = vi
+      .spyOn(history, "pushState")
+      .mockImplementation((data, title, url) =>
+        originalPushState(data, title, url),
+      );
+    const replaceState = vi
+      .spyOn(history, "replaceState")
+      .mockImplementation((data, title, url) =>
+        originalReplaceState(data, title, url),
+      );
     const back = vi.spyOn(history, "back").mockImplementation(() => undefined);
-    const forward = vi.spyOn(history, "forward").mockImplementation(() => undefined);
+    const forward = vi
+      .spyOn(history, "forward")
+      .mockImplementation(() => undefined);
     const app: VxAppRuntime = {
       init: () => ({
         frame: counterNode(0),
-        subscriptions: { type: "sub", kind: "location_change", key: "location" },
+        subscriptions: {
+          type: "sub",
+          kind: "location_change",
+          key: "location",
+        },
         commands: {
           type: "cmd",
           kind: "batch",
@@ -1918,13 +2108,25 @@ describe("vx-dom browser renderer", () => {
             { type: "cmd", kind: "set_hash", value: "section" },
             { type: "cmd", kind: "navigate_back" },
             { type: "cmd", kind: "navigate_forward" },
-            { type: "cmd", kind: "open_url", value: { url: "/external", target: "_self" } },
+            {
+              type: "cmd",
+              kind: "open_url",
+              value: { url: "/external", target: "_self" },
+            },
             { type: "cmd", kind: "scroll_window_to", value: { x: 10, y: 20 } },
             { type: "cmd", kind: "scroll_window_by", value: { x: 1, y: 2 } },
-            { type: "cmd", kind: "local_storage_set", value: { key: "draft", value: "yes" } },
+            {
+              type: "cmd",
+              kind: "local_storage_set",
+              value: { key: "draft", value: "yes" },
+            },
             { type: "cmd", kind: "local_storage_remove", value: "draft" },
             { type: "cmd", kind: "local_storage_clear" },
-            { type: "cmd", kind: "session_storage_set", value: { key: "draft", value: "yes" } },
+            {
+              type: "cmd",
+              kind: "session_storage_set",
+              value: { key: "draft", value: "yes" },
+            },
             { type: "cmd", kind: "session_storage_remove", value: "draft" },
             { type: "cmd", kind: "session_storage_clear" },
           ],
@@ -1945,39 +2147,47 @@ describe("vx-dom browser renderer", () => {
     expect(seenMessages).toContainEqual({
       kind: "map",
       handlerId: 77,
-      message: { kind: "msgpack", value: "Clipboard text" },
+      message: { kind: "value", value: "Clipboard text" },
     });
-    const locationMessages = seenMessages.filter((message) =>
-      isRecord(message) &&
-      message.kind === "subscription" &&
-      message.subscriptionKind === "location_change"
+    const locationMessages = seenMessages.filter(
+      (message) =>
+        isRecord(message) &&
+        message.kind === "subscription" &&
+        message.subscriptionKind === "location_change",
     );
-    expect(locationMessages[0]).toEqual(expect.objectContaining({
-      payload: expect.objectContaining({
-        pathname: "/draft",
+    expect(locationMessages[0]).toEqual(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          pathname: "/draft",
+        }),
       }),
-    }));
-    expect(seenMessages).toContainEqual(expect.objectContaining({
-      kind: "subscription",
-      subscriptionKind: "location_change",
-      payload: expect.objectContaining({
-        pathname: "/draft",
+    );
+    expect(seenMessages).toContainEqual(
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "location_change",
+        payload: expect.objectContaining({
+          pathname: "/draft",
+        }),
       }),
-    }));
-    expect(seenMessages).toContainEqual(expect.objectContaining({
-      kind: "subscription",
-      subscriptionKind: "location_change",
-      payload: expect.objectContaining({
-        pathname: "/draft",
-        search: "?edited=1",
+    );
+    expect(seenMessages).toContainEqual(
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "location_change",
+        payload: expect.objectContaining({
+          pathname: "/draft",
+          search: "?edited=1",
+        }),
       }),
-    }));
-    const finalLocationMessages = locationMessages.filter((message) =>
-      isRecord(message) &&
-      isRecord(message.payload) &&
-      message.payload.pathname === "/draft" &&
-      message.payload.search === "?edited=1" &&
-      message.payload.hash === "#section"
+    );
+    const finalLocationMessages = locationMessages.filter(
+      (message) =>
+        isRecord(message) &&
+        isRecord(message.payload) &&
+        message.payload.pathname === "/draft" &&
+        message.payload.search === "?edited=1" &&
+        message.payload.hash === "#section",
     );
     expect(finalLocationMessages).toHaveLength(1);
     expect(document.title).toBe("VX Draft");
@@ -2049,128 +2259,135 @@ describe("vx-dom browser renderer", () => {
 
     const executor = createBrowserVxRuntimeHost().commands?.canvas_render;
     expect(executor).toBeTypeOf("function");
-    await executor?.({
-      type: "cmd",
-      kind: "canvas_render",
-      value: {
-        version: 2,
-        selector: "#scene",
-        width: 640,
-        height: 360,
-        clear: true,
-        background: "#050711",
-        draws: [
-          { kind: "save" },
-          { kind: "translate", x: 50, y: 60 },
-          { kind: "rotate", radians: 0.25 },
-          { kind: "scale", x: 1.5, y: 0.75 },
-          { kind: "transform", a: 1, b: 0, c: 0.1, d: 1, e: 2, f: 3 },
-          { kind: "lineDash", pattern: [4, 2], offset: 1 },
-          { kind: "composite", operation: "lighter" },
-          {
-            kind: "path",
-            segments: [
-              { kind: "moveTo", point: { x: 0, y: 0 } },
-              { kind: "lineTo", point: { x: 12, y: 0 } },
-              {
-                kind: "quadraticCurveTo",
-                control: { x: 18, y: 6 },
-                to: { x: 12, y: 12 },
-              },
-              {
-                kind: "bezierCurveTo",
-                control1: { x: 8, y: 16 },
-                control2: { x: 4, y: 16 },
-                to: { x: 0, y: 12 },
-              },
-              {
-                kind: "arc",
-                center: { x: 6, y: 6 },
-                radius: 3,
-                startAngle: 0,
-                endAngle: 1.5,
-                counterClockwise: false,
-              },
-              {
-                kind: "arcTo",
-                control1: { x: 2, y: 3 },
-                control2: { x: 4, y: 5 },
-                radius: 2,
-              },
-              {
-                kind: "ellipse",
-                center: { x: 6, y: 7 },
-                radiusX: 4,
-                radiusY: 2,
-                rotation: 0.2,
-                startAngle: 0,
-                endAngle: 3,
-                counterClockwise: true,
-              },
-              { kind: "rect", origin: { x: 1, y: 1 }, width: 8, height: 5 },
-              { kind: "closePath" },
-            ],
-            fill: "#224466",
-            stroke: "#88ccff",
-            strokeWidth: 2,
-            fillRule: "evenodd",
-          },
-          { kind: "restore" },
-          {
-            kind: "line",
-            from: { x: 1, y: 2 },
-            to: { x: 3, y: 4 },
-            color: "#ffffff",
-            width: 2,
-            alpha: 0.8,
-          },
-          {
-            kind: "polyline",
-            points: [{ x: 5, y: 6 }, { x: 7, y: 8 }, { x: 9, y: 10 }],
-            color: "#6699ff",
-            width: 1,
-            closed: true,
-            fill: "#112244",
-          },
-          {
-            kind: "circle",
-            center: { x: 20, y: 21 },
-            radius: 12,
-            stroke: "#ffcc88",
-            strokeWidth: 2,
-            glowColor: "#ff8800",
-            glowBlur: 8,
-            radialGradient: {
-              innerColor: "#ffffff",
-              outerColor: "#ff880000",
-              innerRadius: 1,
-              outerRadius: 12,
+    await executor?.(
+      {
+        type: "cmd",
+        kind: "canvas_render",
+        value: {
+          version: 2,
+          selector: "#scene",
+          width: 640,
+          height: 360,
+          clear: true,
+          background: "#050711",
+          draws: [
+            { kind: "save" },
+            { kind: "translate", x: 50, y: 60 },
+            { kind: "rotate", radians: 0.25 },
+            { kind: "scale", x: 1.5, y: 0.75 },
+            { kind: "transform", a: 1, b: 0, c: 0.1, d: 1, e: 2, f: 3 },
+            { kind: "lineDash", pattern: [4, 2], offset: 1 },
+            { kind: "composite", operation: "lighter" },
+            {
+              kind: "path",
+              segments: [
+                { kind: "moveTo", point: { x: 0, y: 0 } },
+                { kind: "lineTo", point: { x: 12, y: 0 } },
+                {
+                  kind: "quadraticCurveTo",
+                  control: { x: 18, y: 6 },
+                  to: { x: 12, y: 12 },
+                },
+                {
+                  kind: "bezierCurveTo",
+                  control1: { x: 8, y: 16 },
+                  control2: { x: 4, y: 16 },
+                  to: { x: 0, y: 12 },
+                },
+                {
+                  kind: "arc",
+                  center: { x: 6, y: 6 },
+                  radius: 3,
+                  startAngle: 0,
+                  endAngle: 1.5,
+                  counterClockwise: false,
+                },
+                {
+                  kind: "arcTo",
+                  control1: { x: 2, y: 3 },
+                  control2: { x: 4, y: 5 },
+                  radius: 2,
+                },
+                {
+                  kind: "ellipse",
+                  center: { x: 6, y: 7 },
+                  radiusX: 4,
+                  radiusY: 2,
+                  rotation: 0.2,
+                  startAngle: 0,
+                  endAngle: 3,
+                  counterClockwise: true,
+                },
+                { kind: "rect", origin: { x: 1, y: 1 }, width: 8, height: 5 },
+                { kind: "closePath" },
+              ],
+              fill: "#224466",
+              stroke: "#88ccff",
+              strokeWidth: 2,
+              fillRule: "evenodd",
             },
-          },
-          {
-            kind: "ellipse",
-            center: { x: 30, y: 31 },
-            radiusX: 8,
-            radiusY: 4,
-            rotation: 0.5,
-            fill: "#334455",
-          },
-          {
-            kind: "text",
-            position: { x: 40, y: 41 },
-            value: "Voyd",
-            color: "#ffffff",
-            font: "600 14px sans-serif",
-            align: "center",
-            baseline: "middle",
-            maxWidth: 120,
-          },
-        ],
+            { kind: "restore" },
+            {
+              kind: "line",
+              from: { x: 1, y: 2 },
+              to: { x: 3, y: 4 },
+              color: "#ffffff",
+              width: 2,
+              alpha: 0.8,
+            },
+            {
+              kind: "polyline",
+              points: [
+                { x: 5, y: 6 },
+                { x: 7, y: 8 },
+                { x: 9, y: 10 },
+              ],
+              color: "#6699ff",
+              width: 1,
+              closed: true,
+              fill: "#112244",
+            },
+            {
+              kind: "circle",
+              center: { x: 20, y: 21 },
+              radius: 12,
+              stroke: "#ffcc88",
+              strokeWidth: 2,
+              glowColor: "#ff8800",
+              glowBlur: 8,
+              radialGradient: {
+                innerColor: "#ffffff",
+                outerColor: "#ff880000",
+                innerRadius: 1,
+                outerRadius: 12,
+              },
+            },
+            {
+              kind: "ellipse",
+              center: { x: 30, y: 31 },
+              radiusX: 8,
+              radiusY: 4,
+              rotation: 0.5,
+              fill: "#334455",
+            },
+            {
+              kind: "text",
+              position: { x: 40, y: 41 },
+              value: "Voyd",
+              color: "#ffffff",
+              font: "600 14px sans-serif",
+              align: "center",
+              baseline: "middle",
+              maxWidth: 120,
+            },
+          ],
+        },
       },
-    }, {
-      dispatch: vi.fn(async () => undefined),
-      signal: new AbortController().signal,
-    });
+      {
+        dispatch: vi.fn(async () => undefined),
+        signal: new AbortController().signal,
+      },
+    );
 
     expect(canvas.style.width).toBe("640px");
     expect(canvas.style.height).toBe("360px");
@@ -2195,53 +2412,42 @@ describe("vx-dom browser renderer", () => {
     expect(context.rect).toHaveBeenCalledWith(1, 1, 8, 5);
     expect(context.ellipse).toHaveBeenCalledWith(6, 7, 4, 2, 0.2, 0, 3, true);
     expect(context.arc).toHaveBeenCalledWith(20, 21, 12, 0, Math.PI * 2);
-    expect(context.createRadialGradient).toHaveBeenCalledWith(20, 21, 1, 20, 21, 12);
+    expect(context.createRadialGradient).toHaveBeenCalledWith(
+      20,
+      21,
+      1,
+      20,
+      21,
+      12,
+    );
     expect(addColorStop).toHaveBeenNthCalledWith(1, 0, "#ffffff");
     expect(addColorStop).toHaveBeenNthCalledWith(2, 1, "#ff880000");
-    expect(context.ellipse).toHaveBeenCalledWith(30, 31, 8, 4, 0.5, 0, Math.PI * 2);
+    expect(context.ellipse).toHaveBeenCalledWith(
+      30,
+      31,
+      8,
+      4,
+      0.5,
+      0,
+      Math.PI * 2,
+    );
     expect(context.fillText).toHaveBeenCalledWith("Voyd", 40, 41, 120);
   });
 
-  it("continues to render legacy version 1 canvas frames", () => {
-    const canvas = document.createElement("canvas");
-    canvas.id = "scene";
-    container.appendChild(canvas);
-    const context = {
-      beginPath: vi.fn(),
-      clearRect: vi.fn(),
-      lineTo: vi.fn(),
-      moveTo: vi.fn(),
-      restore: vi.fn(),
-      save: vi.fn(),
-      setLineDash: vi.fn(),
-      setTransform: vi.fn(),
-      stroke: vi.fn(),
-    } as unknown as CanvasRenderingContext2D;
-    Object.defineProperty(canvas, "getContext", {
-      configurable: true,
-      value: vi.fn(() => context),
-    });
-
+  it("rejects invalid canvas render targets before drawing", () => {
     const executor = createBrowserVxRuntimeHost().commands?.canvas_render;
+    expect(executor).toBeTypeOf("function");
     expect(() =>
       executor?.(
         {
           type: "cmd",
           kind: "canvas_render",
           value: {
-            version: 1,
-            selector: "#scene",
-            width: 100,
-            height: 50,
-            draws: [
-              {
-                kind: "line",
-                from: { x: 1, y: 2 },
-                to: { x: 3, y: 4 },
-                color: "#ffffff",
-                width: 1,
-              },
-            ],
+            version: 2,
+            selector: "#missing-canvas",
+            width: 640,
+            height: 360,
+            draws: [],
           },
         },
         {
@@ -2249,27 +2455,7 @@ describe("vx-dom browser renderer", () => {
           signal: new AbortController().signal,
         },
       ),
-    ).not.toThrow();
-    expect(context.stroke).toHaveBeenCalledOnce();
-  });
-
-  it("rejects invalid canvas render targets before drawing", () => {
-    const executor = createBrowserVxRuntimeHost().commands?.canvas_render;
-    expect(executor).toBeTypeOf("function");
-    expect(() => executor?.({
-      type: "cmd",
-      kind: "canvas_render",
-      value: {
-        version: 1,
-        selector: "#missing-canvas",
-        width: 640,
-        height: 360,
-        draws: [],
-      },
-    }, {
-      dispatch: vi.fn(async () => undefined),
-      signal: new AbortController().signal,
-    })).toThrow('canvas_render could not find canvas "#missing-canvas"');
+    ).toThrow('canvas_render could not find canvas "#missing-canvas"');
   });
 
   it("rejects unsupported and malformed canvas frames before mutating a canvas", () => {
@@ -2345,7 +2531,7 @@ describe("vx-dom browser renderer", () => {
         },
         runtimeContext,
       ),
-    ).toThrow('draws[0] kind "path" requires frame version 2');
+    ).toThrow("canvas_render unsupported frame version 1");
 
     expect(() =>
       executor?.(
@@ -2428,7 +2614,7 @@ describe("vx-dom browser renderer", () => {
       kind: "map",
       handlerId: 73,
       message: {
-        kind: "msgpack",
+        kind: "value",
         value: {
           width: 42,
           actual_bounding_box_left: 1,
@@ -2509,7 +2695,7 @@ describe("vx-dom browser renderer", () => {
       kind: "map",
       handlerId: 73,
       message: {
-        kind: "msgpack",
+        kind: "value",
         value: {
           width: 42,
           actual_bounding_box_left: 1,
@@ -2527,8 +2713,16 @@ describe("vx-dom browser renderer", () => {
     const app: VxAppRuntime = {
       init: () => ({
         frame: counterNode(0),
-        subscriptions: { type: "sub", kind: "location_change", key: "location" },
-        commands: { type: "cmd", kind: "message", value: { type: "remove-location" } },
+        subscriptions: {
+          type: "sub",
+          kind: "location_change",
+          key: "location",
+        },
+        commands: {
+          type: "cmd",
+          kind: "message",
+          value: { type: "remove-location" },
+        },
       }),
       render: () => counterNode(seenMessages.length),
       dispatch: (message) => {
@@ -2544,7 +2738,7 @@ describe("vx-dom browser renderer", () => {
     await nextTurn();
 
     expect(seenMessages).toEqual([
-      { kind: "msgpack", value: { type: "remove-location" } },
+      { kind: "value", value: { type: "remove-location" } },
     ]);
   });
 
@@ -2561,7 +2755,8 @@ describe("vx-dom browser renderer", () => {
       render: () => counterNode(seenMessages.length),
       dispatch: (message) => {
         seenMessages.push(message);
-        const shouldReadClipboard = isRecord(message) &&
+        const shouldReadClipboard =
+          isRecord(message) &&
           message.kind === "debug" &&
           message.name === "read";
         return {
@@ -2584,10 +2779,12 @@ describe("vx-dom browser renderer", () => {
     const mounted = await mountVxApp({ container, app });
     const dispatch = mounted.dispatch({ kind: "debug", name: "read" });
 
-    await expect(Promise.race([
-      dispatch.then(() => "resolved"),
-      new Promise((resolve) => setTimeout(() => resolve("timeout"), 50)),
-    ])).resolves.toBe("resolved");
+    await expect(
+      Promise.race([
+        dispatch.then(() => "resolved"),
+        new Promise((resolve) => setTimeout(() => resolve("timeout"), 50)),
+      ]),
+    ).resolves.toBe("resolved");
     expect(readText).toHaveBeenCalledOnce();
 
     await nextTurn();
@@ -2595,7 +2792,7 @@ describe("vx-dom browser renderer", () => {
     expect(seenMessages).toContainEqual({
       kind: "map",
       handlerId: 77,
-      message: { kind: "msgpack", value: "Clipboard text" },
+      message: { kind: "value", value: "Clipboard text" },
     });
     expect(release).toHaveBeenCalledWith(77);
   });
@@ -2642,7 +2839,7 @@ describe("vx-dom browser renderer", () => {
       message: {
         kind: "map",
         handlerId: 77,
-        message: { kind: "msgpack", value: "Clipboard text" },
+        message: { kind: "value", value: "Clipboard text" },
       },
     });
     expect(release).toHaveBeenCalledWith(77);
@@ -2676,7 +2873,7 @@ describe("vx-dom browser renderer", () => {
     expect(seenMessages).toContainEqual({
       kind: "map",
       handlerId: 77,
-      message: { kind: "msgpack", value: "Clipboard text" },
+      message: { kind: "value", value: "Clipboard text" },
     });
     expect(release).not.toHaveBeenCalled();
   });
@@ -2720,7 +2917,7 @@ describe("vx-dom browser renderer", () => {
     expect(seenMessages).toContainEqual({
       kind: "map",
       handlerId: 44,
-      message: { kind: "msgpack", value: { type: "increment" } },
+      message: { kind: "value", value: { type: "increment" } },
     });
     expect(release).toHaveBeenCalledWith(44);
   });
@@ -2729,9 +2926,11 @@ describe("vx-dom browser renderer", () => {
     const release = vi.fn<(id: number) => void>();
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
-      value: { readText: vi.fn(async () => {
-        throw new Error("clipboard denied");
-      }) },
+      value: {
+        readText: vi.fn(async () => {
+          throw new Error("clipboard denied");
+        }),
+      },
     });
     const app: VxAppRuntime = {
       retainedCallbacks: { release },
@@ -2748,7 +2947,9 @@ describe("vx-dom browser renderer", () => {
       dispatch: () => counterNode(0),
     };
 
-    await expect(mountVxApp({ container, app })).rejects.toThrow("clipboard denied");
+    await expect(mountVxApp({ container, app })).rejects.toThrow(
+      "clipboard denied",
+    );
     await nextTurn();
 
     expect(release).toHaveBeenCalledWith(77);
@@ -2784,12 +2985,13 @@ describe("vx-dom browser renderer", () => {
     let tick: (() => Promise<void>) | undefined;
     const dispose = vi.fn();
     const runSubscription = vi.fn((_subscription, { dispatch }) => {
-      tick = () => dispatch({
-        kind: "subscription",
-        subscriptionKind: "timer",
-        key: "main",
-        payload: { type: "tick" },
-      });
+      tick = () =>
+        dispatch({
+          kind: "subscription",
+          subscriptionKind: "timer",
+          key: "main",
+          payload: { type: "tick" },
+        });
       return dispose;
     });
     const app: VxAppRuntime = {
@@ -2799,11 +3001,15 @@ describe("vx-dom browser renderer", () => {
       }),
       render: () => counterNode(count),
       dispatch: (message) => {
-        if (message.kind === "subscription" && message.subscriptionKind === "timer") {
+        if (
+          message.kind === "subscription" &&
+          message.subscriptionKind === "timer"
+        ) {
           const payload = message.payload as { type?: unknown };
           if (payload.type === "tick") count += 1;
         }
-        if (message.kind === "debug" && message.name === "stop") subscribed = false;
+        if (message.kind === "debug" && message.name === "stop")
+          subscribed = false;
         return {
           frame: counterNode(count),
           subscriptions: subscribed
@@ -2833,20 +3039,31 @@ describe("vx-dom browser renderer", () => {
     let interval = 10;
     const firstDispose = vi.fn();
     const secondDispose = vi.fn();
-    const runSubscription = vi.fn()
+    const runSubscription = vi
+      .fn()
       .mockReturnValueOnce(firstDispose)
       .mockReturnValueOnce(secondDispose);
     const app: VxAppRuntime = {
       init: () => ({
         frame: counterNode(0),
-        subscriptions: { type: "sub", kind: "timer", key: "main", ms: interval },
+        subscriptions: {
+          type: "sub",
+          kind: "timer",
+          key: "main",
+          ms: interval,
+        },
       }),
       render: () => counterNode(interval),
       dispatch: () => {
         interval = 20;
         return {
           frame: counterNode(interval),
-          subscriptions: { type: "sub", kind: "timer", key: "main", ms: interval },
+          subscriptions: {
+            type: "sub",
+            kind: "timer",
+            key: "main",
+            ms: interval,
+          },
         };
       },
     };
@@ -2878,12 +3095,14 @@ describe("vx-dom browser renderer", () => {
       dispatch: () => counterNode(0),
     };
 
-    await expect(mountVxApp({
-      container,
-      app,
-      runtimeHost: { subscriptions: { timer: () => undefined } },
-      onError,
-    })).rejects.toThrow('subscription "timer" requires a stable key');
+    await expect(
+      mountVxApp({
+        container,
+        app,
+        runtimeHost: { subscriptions: { timer: () => undefined } },
+        onError,
+      }),
+    ).rejects.toThrow('subscription "timer" requires a stable key');
     expect(onError).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({ phase: "subscriptions" }),
@@ -2910,10 +3129,12 @@ describe("vx-dom browser renderer", () => {
     const seenMessages: unknown[] = [];
     let subscribed = true;
     const dispose = vi.fn();
-    const runSubscription = vi.fn<VxSubscriptionRunner>((subscription, _context) => {
-      void subscription;
-      return dispose;
-    });
+    const runSubscription = vi.fn<VxSubscriptionRunner>(
+      (subscription, _context) => {
+        void subscription;
+        return dispose;
+      },
+    );
     const mappedSubscription = {
       type: "sub",
       kind: "map",
@@ -2936,14 +3157,15 @@ describe("vx-dom browser renderer", () => {
       render: () => counterNode(seenMessages.length),
       dispatch: (message) => {
         seenMessages.push(message);
-        if (message.kind === "debug" && message.name === "stop") subscribed = false;
+        if (message.kind === "debug" && message.name === "stop")
+          subscribed = false;
         return {
           frame: counterNode(seenMessages.length),
           subscriptions: subscribed
             ? [
-              { type: "sub", kind: "timer", key: "shared" },
-              mappedSubscription,
-            ]
+                { type: "sub", kind: "timer", key: "shared" },
+                mappedSubscription,
+              ]
             : { type: "sub", kind: "none" },
         };
       },
@@ -2980,7 +3202,9 @@ describe("vx-dom browser renderer", () => {
   it("updates stable mapped subscription handlers without reinstalling listeners", async () => {
     const seenMessages: unknown[] = [];
     let nextHandlerId = 1;
-    let dispatchSubscription: ((message: VxRuntimeMessage) => Promise<void>) | undefined;
+    let dispatchSubscription:
+      | ((message: VxRuntimeMessage) => Promise<void>)
+      | undefined;
     const dispose = vi.fn();
     const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
     const mappedSubscription = () => {
@@ -2994,10 +3218,12 @@ describe("vx-dom browser renderer", () => {
         child: { type: "sub", kind: "timer", key: "main" },
       };
     };
-    const runSubscription = vi.fn<VxSubscriptionRunner>((_subscription, context) => {
-      dispatchSubscription = context.dispatch;
-      return dispose;
-    });
+    const runSubscription = vi.fn<VxSubscriptionRunner>(
+      (_subscription, context) => {
+        dispatchSubscription = context.dispatch;
+        return dispose;
+      },
+    );
     const app: VxAppRuntime = {
       retainedCallbacks: { releaseMany },
       init: () => ({
@@ -3049,7 +3275,9 @@ describe("vx-dom browser renderer", () => {
   it("delays releasing refreshed subscription handlers until queued messages drain", async () => {
     const seenMessages: unknown[] = [];
     let nextHandlerId = 1;
-    let dispatchSubscription: ((message: VxRuntimeMessage) => Promise<void>) | undefined;
+    let dispatchSubscription:
+      | ((message: VxRuntimeMessage) => Promise<void>)
+      | undefined;
     let resolveQueuedTick: (() => void) | undefined;
     const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
     const mappedSubscription = () => {
@@ -3063,9 +3291,11 @@ describe("vx-dom browser renderer", () => {
         child: { type: "sub", kind: "timer", key: "main" },
       };
     };
-    const runSubscription = vi.fn<VxSubscriptionRunner>((_subscription, context) => {
-      dispatchSubscription = context.dispatch;
-    });
+    const runSubscription = vi.fn<VxSubscriptionRunner>(
+      (_subscription, context) => {
+        dispatchSubscription = context.dispatch;
+      },
+    );
     const app: VxAppRuntime = {
       retainedCallbacks: { releaseMany },
       init: () => ({
@@ -3196,14 +3426,18 @@ describe("vx-dom browser renderer", () => {
     mounted.dispose();
     await nextTurn();
 
-    const releasedIds = releaseMany.mock.calls.flatMap(([ids]) => Array.from(ids));
+    const releasedIds = releaseMany.mock.calls.flatMap(([ids]) =>
+      Array.from(ids),
+    );
     expect(releasedIds).toEqual([]);
   });
 
   it("does not release outer mapped subscription handlers", async () => {
     const seenMessages: unknown[] = [];
     let nextHandlerId = 1;
-    let dispatchSubscription: ((message: VxRuntimeMessage) => Promise<void>) | undefined;
+    let dispatchSubscription:
+      | ((message: VxRuntimeMessage) => Promise<void>)
+      | undefined;
     const dispose = vi.fn();
     const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
     const mappedSubscription = () => {
@@ -3222,10 +3456,12 @@ describe("vx-dom browser renderer", () => {
         },
       };
     };
-    const runSubscription = vi.fn<VxSubscriptionRunner>((_subscription, context) => {
-      dispatchSubscription = context.dispatch;
-      return dispose;
-    });
+    const runSubscription = vi.fn<VxSubscriptionRunner>(
+      (_subscription, context) => {
+        dispatchSubscription = context.dispatch;
+        return dispose;
+      },
+    );
     const app: VxAppRuntime = {
       retainedCallbacks: { releaseMany },
       init: () => ({
@@ -3265,7 +3501,9 @@ describe("vx-dom browser renderer", () => {
     mounted.dispose();
     await nextTurn();
 
-    const releasedIds = releaseMany.mock.calls.flatMap(([ids]) => Array.from(ids));
+    const releasedIds = releaseMany.mock.calls.flatMap(([ids]) =>
+      Array.from(ids),
+    );
     expect(releasedIds).not.toContain(99);
     expect(releasedIds).toEqual([1, 2, 3]);
   });
@@ -3286,7 +3524,7 @@ describe("vx-dom browser renderer", () => {
       }),
       render: () => counterNode(count),
       dispatch: (message) => {
-        if (message.kind === "msgpack" && isIncrement(message.value)) count += 1;
+        if (message.kind === "value" && isIncrement(message.value)) count += 1;
         return {
           frame: counterNode(count),
           subscriptions: {
@@ -3329,7 +3567,7 @@ describe("vx-dom browser renderer", () => {
       }),
       render: () => counterNode(count),
       dispatch: (message) => {
-        if (message.kind === "msgpack" && isIncrement(message.value)) count += 1;
+        if (message.kind === "value" && isIncrement(message.value)) count += 1;
         return {
           frame: counterNode(count),
           subscriptions: {
@@ -3374,11 +3612,13 @@ describe("vx-dom browser renderer", () => {
     await nextTurn();
     expect(container.textContent).toBe("Count: 0");
 
-    window.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "s",
-      code: "KeyS",
-      ctrlKey: true,
-    }));
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "s",
+        code: "KeyS",
+        ctrlKey: true,
+      }),
+    );
     await nextTurn();
 
     expect(container.textContent).toBe("Count: 1");
@@ -3467,25 +3707,29 @@ describe("vx-dom browser renderer", () => {
     };
 
     await mountVxApp({ container, app });
-    window.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "s",
-      code: "KeyS",
-      ctrlKey: true,
-    }));
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "s",
+        code: "KeyS",
+        ctrlKey: true,
+      }),
+    );
     await nextTurn();
 
     expect(container.textContent).toBe("Count: 1");
-    expect(seenMessages[0]).toEqual(expect.objectContaining({
-      kind: "subscription",
-      subscriptionKind: "keyboard",
-      key: "s",
-      payload: expect.objectContaining({
-        kind: "keyboard",
+    expect(seenMessages[0]).toEqual(
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "keyboard",
         key: "s",
-        code: "KeyS",
-        ctrl_key: true,
+        payload: expect.objectContaining({
+          kind: "keyboard",
+          key: "s",
+          code: "KeyS",
+          ctrl_key: true,
+        }),
       }),
-    }));
+    );
     expect(Object.hasOwn(seenMessages[0] as object, "value")).toBe(false);
   });
 
@@ -3515,10 +3759,12 @@ describe("vx-dom browser renderer", () => {
     };
 
     await mountVxApp({ container, app });
-    window.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "s",
-      code: "KeyS",
-    }));
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "s",
+        code: "KeyS",
+      }),
+    );
     await nextTurn();
 
     expect(seenMessages[0]).toEqual({
@@ -3556,14 +3802,26 @@ describe("vx-dom browser renderer", () => {
         return counterNode(seenMessages.length);
       },
     };
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
-    Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 800,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 600,
+    });
 
     const mounted = await mountVxApp({ container, app });
     await nextTurn();
 
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
-    Object.defineProperty(window, "innerHeight", { configurable: true, value: 768 });
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1024,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 768,
+    });
     window.dispatchEvent(new Event("resize"));
     await nextTurn();
 
@@ -3606,7 +3864,10 @@ describe("vx-dom browser renderer", () => {
         broadcastInstances.push(this);
       }
 
-      addEventListener(event: string, listener: (event: MessageEvent) => void): void {
+      addEventListener(
+        event: string,
+        listener: (event: MessageEvent) => void,
+      ): void {
         if (event === "message") this.listener = listener;
       }
 
@@ -3653,7 +3914,12 @@ describe("vx-dom browser renderer", () => {
         subscriptions: [
           { type: "sub", kind: "location_change", key: "location" },
           { type: "sub", kind: "window_focus", key: "focus" },
-          { type: "sub", kind: "window_blur", key: "blur", value: { type: "blur" } },
+          {
+            type: "sub",
+            kind: "window_blur",
+            key: "blur",
+            value: { type: "blur" },
+          },
           { type: "sub", kind: "animation_frame", key: "frame" },
           {
             type: "sub",
@@ -3662,7 +3928,12 @@ describe("vx-dom browser renderer", () => {
             query: "(prefers-reduced-motion: reduce)",
           },
           { type: "sub", kind: "storage", key: "storage" },
-          { type: "sub", kind: "broadcast_channel", key: "updates", name: "updates" },
+          {
+            type: "sub",
+            kind: "broadcast_channel",
+            key: "updates",
+            name: "updates",
+          },
         ],
       }),
       render: () => counterNode(0),
@@ -3682,82 +3953,88 @@ describe("vx-dom browser renderer", () => {
     animationFrame?.(123);
     mediaMatches = true;
     mediaListener?.();
-    window.dispatchEvent(new StorageEvent("storage", {
-      key: "draft",
-      oldValue: "no",
-      newValue: "yes",
-      storageArea: localStorage,
-      url: location.href,
-    }));
-    window.dispatchEvent(new StorageEvent("storage", {
-      storageArea: localStorage,
-      url: location.href,
-    }));
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "draft",
+        oldValue: "no",
+        newValue: "yes",
+        storageArea: localStorage,
+        url: location.href,
+      }),
+    );
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        storageArea: localStorage,
+        url: location.href,
+      }),
+    );
     broadcastInstances[0]?.emit("hello");
     await nextTurn();
 
-    expect(seenMessages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        kind: "subscription",
-        subscriptionKind: "location_change",
-        payload: expect.objectContaining({
-          kind: "location",
-          pathname: "/next",
-          search: "?x=1",
-          hash: "#top",
+    expect(seenMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "subscription",
+          subscriptionKind: "location_change",
+          payload: expect.objectContaining({
+            kind: "location",
+            pathname: "/next",
+            search: "?x=1",
+            hash: "#top",
+          }),
         }),
-      }),
-      expect.objectContaining({
-        kind: "subscription",
-        subscriptionKind: "window_focus",
-        payload: { kind: "event", event: "focus" },
-      }),
-      expect.objectContaining({
-        kind: "subscription",
-        subscriptionKind: "window_blur",
-        value: { type: "blur" },
-        payload: { kind: "event", event: "blur" },
-      }),
-      expect.objectContaining({
-        kind: "subscription",
-        subscriptionKind: "animation_frame",
-        payload: { kind: "animation_frame", timestamp: 123 },
-      }),
-      expect.objectContaining({
-        kind: "subscription",
-        subscriptionKind: "media_query",
-        payload: {
-          kind: "media_query",
-          query: "(prefers-reduced-motion: reduce)",
-          matches: true,
-        },
-      }),
-      expect.objectContaining({
-        kind: "subscription",
-        subscriptionKind: "storage",
-        payload: expect.objectContaining({
-          kind: "storage",
-          storage: "local",
-          key: "draft",
-          old_value: "no",
-          new_value: "yes",
+        expect.objectContaining({
+          kind: "subscription",
+          subscriptionKind: "window_focus",
+          payload: { kind: "event", event: "focus" },
         }),
-      }),
-      expect.objectContaining({
-        kind: "subscription",
-        subscriptionKind: "storage",
-        payload: {
-          kind: "storage",
-          storage: "local",
-          url: location.href,
-        },
-      }),
-      expect.objectContaining({
-        kind: "subscription",
-        subscriptionKind: "broadcast_channel",
-        payload: "hello",
-      }),
-    ]));
+        expect.objectContaining({
+          kind: "subscription",
+          subscriptionKind: "window_blur",
+          value: { type: "blur" },
+          payload: { kind: "event", event: "blur" },
+        }),
+        expect.objectContaining({
+          kind: "subscription",
+          subscriptionKind: "animation_frame",
+          payload: { kind: "animation_frame", timestamp: 123 },
+        }),
+        expect.objectContaining({
+          kind: "subscription",
+          subscriptionKind: "media_query",
+          payload: {
+            kind: "media_query",
+            query: "(prefers-reduced-motion: reduce)",
+            matches: true,
+          },
+        }),
+        expect.objectContaining({
+          kind: "subscription",
+          subscriptionKind: "storage",
+          payload: expect.objectContaining({
+            kind: "storage",
+            storage: "local",
+            key: "draft",
+            old_value: "no",
+            new_value: "yes",
+          }),
+        }),
+        expect.objectContaining({
+          kind: "subscription",
+          subscriptionKind: "storage",
+          payload: {
+            kind: "storage",
+            storage: "local",
+            url: location.href,
+          },
+        }),
+        expect.objectContaining({
+          kind: "subscription",
+          subscriptionKind: "broadcast_channel",
+          payload: "hello",
+        }),
+      ]),
+    );
 
     mounted.dispose();
     await nextTurn();
@@ -3799,13 +4076,16 @@ describe("vx-dom browser renderer", () => {
         if (message.kind === "debug" && message.name === "fail") {
           throw new Error("step failed");
         }
-        if (message.kind === "debug" && message.name === "increment") count += 1;
+        if (message.kind === "debug" && message.name === "increment")
+          count += 1;
         return counterNode(count);
       },
     };
     const mounted = await mountVxApp({ container, app, onError });
 
-    await expect(mounted.dispatch({ kind: "debug", name: "fail" })).rejects.toThrow("step failed");
+    await expect(
+      mounted.dispatch({ kind: "debug", name: "fail" }),
+    ).rejects.toThrow("step failed");
     await mounted.dispatch({ kind: "debug", name: "increment" });
 
     expect(container.textContent).toBe("Count: 1");
@@ -3870,11 +4150,13 @@ function keyedFragmentListNode(keys: string[]): VxElementNode {
     children: keys.map((key) => ({
       kind: "fragment",
       key,
-      children: [{
-        kind: "element",
-        tag: "li",
-        children: [{ kind: "text", value: key }],
-      }],
+      children: [
+        {
+          kind: "element",
+          tag: "li",
+          children: [{ kind: "text", value: key }],
+        },
+      ],
     })),
   };
 }
@@ -3944,18 +4226,24 @@ function counterMessageButtonNode(count: number): VxRenderFrame {
   return frame({
     kind: "element",
     tag: "button",
-    events: [{
-      kind: "event",
-      event: "click",
-      message: { type: "increment" },
-    }],
+    events: [
+      {
+        kind: "event",
+        event: "click",
+        message: { type: "increment" },
+      },
+    ],
     children: [{ kind: "text", value: `Count: ${count}` }],
   });
 }
 
 function isIncrement(input: unknown): input is { type: "increment" } {
-  return typeof input === "object" && input !== null && "type" in input
-    && input.type === "increment";
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    "type" in input &&
+    input.type === "increment"
+  );
 }
 
 function nextTurn(): Promise<void> {

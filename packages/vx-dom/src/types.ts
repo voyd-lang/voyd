@@ -3,10 +3,7 @@ export type VxRenderFrame = {
   root: VNode;
 };
 
-export type VNode =
-  | VxTextNode
-  | VxFragmentNode
-  | VxElementNode;
+export type VNode = VxTextNode | VxFragmentNode | VxElementNode;
 
 export type VxTextNode = {
   kind: "text";
@@ -103,7 +100,10 @@ export type GenericEventPayload = {
 };
 
 export type RetainedEventHandlerRegistry = {
-  dispatch(id: number, payload: NormalizedEventPayload): Promise<unknown> | unknown;
+  dispatch(
+    id: number,
+    payload: NormalizedEventPayload,
+  ): Promise<unknown> | unknown;
   dispatchMapped?: (
     id: number,
     payload: NormalizedEventPayload,
@@ -114,14 +114,8 @@ export type RetainedEventHandlerRegistry = {
   releaseMany?: (ids: Iterable<number>) => void;
 };
 
-export type CallOptions =
-  | { instance: WebAssembly.Instance; memory?: undefined }
-  | { instance?: undefined; memory: WebAssembly.Memory };
-
-export type VoydComponentFn = () => number;
-
 export type VxMessage =
-  | { kind: "msgpack"; value: unknown }
+  | { kind: "value"; value: unknown }
   | { kind: "debug"; name: string; payload?: unknown };
 
 export type VxRuntimeEventMessage = {

@@ -1,12 +1,7 @@
-use std::dict::Dict
-use std::error::panic
-use std::msgpack::MsgPack
-use std::msgpack::MsgPackError
-use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::test::assertions::all
 
-test "trace with fields emits a msgpack payload":
+test "trace with fields emits a typed event":
   let fields = make_fields()
 
   let ~seen = Array<i32>::init()
@@ -16,17 +11,15 @@ test "trace with fields emits a msgpack payload":
     trace("hello", fields)
   Log::emit(tail, payload):
     seen.push(1)
-    match(msgpack::unpack_map(payload))
-      Ok<Dict<String, MsgPack>> { value: payload_map }:
-        payload_sizes.push(payload_map.entries().len())
-      Err<MsgPackError>:
-        panic("invalid msgpack map".as_slice())
+    assert(payload.level.equals("trace"), eq: true)
+    assert(payload.message.equals("hello"), eq: true)
+    payload_sizes.push(payload.fields.len())
     tail()
 
   assert(seen.len(), eq: 1)
   match(payload_sizes.get(0))
     Some<i32> { value: payload_size }:
-      assert(payload_size >= 3, eq: true)
+      assert(payload_size, eq: 1)
     None:
       assert(false, eq: true)
 
@@ -36,16 +29,13 @@ test "trace accepts string slices without rebuilding call-site strings":
   try
     trace("hello".as_slice())
   Log::emit(tail, payload):
-    match(msgpack::unpack_map(payload))
-      Ok<Dict<String, MsgPack>> { value: payload_map }:
-        seen.push(payload_map.entries().len())
-      Err<MsgPackError>:
-        panic("invalid msgpack map".as_slice())
+    assert(payload.message.equals("hello"), eq: true)
+    seen.push(payload.fields.len())
     tail()
 
   match(seen.get(0))
     Some<i32> { value }:
-      assert(value >= 3, eq: true)
+      assert(value, eq: 0)
     None:
       assert(false)
 

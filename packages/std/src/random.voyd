@@ -7,9 +7,6 @@ use std::bytes::{ ByteBuffer, Bytes }
 use std::encoding::errors::DecodeError
 use std::encoding::hex
 use std::math::{ MathError, mod_euclid }
-use std::msgpack::MsgPack
-use std::msgpack::MsgPackError
-use std::msgpack::self as msgpack
 use std::number::cast::{ to_f32, to_f64, to_i32_wrapping, to_i64 }
 use std::optional::types::all
 use std::range::Range
@@ -115,11 +112,8 @@ pub eff Random
   /// The transport representation is `i64`, but callers should treat the bits
   /// as unsigned payload.
   next_u64(tail) -> i64
-  /// Returns an array of random byte values with length `len`.
-  ///
-  /// Host values are expected to be i32 entries; callers should normalize each
-  /// element into the `[0, 255]` range before treating them as bytes.
-  fill_bytes(tail, len: i32) -> MsgPack
+  /// Returns exactly `len` random bytes.
+  fill_bytes(tail, len: i32) -> Bytes
 
 /// Raw 64-bit bits interpreted as unsigned payload.
 pub obj U64Bits {
@@ -238,36 +232,13 @@ pub fn secure_bytes(len: i32): Random -> Result<Bytes, RandomError>
   if len == 0:
     return Ok<Bytes> { value: ByteBuffer::init().as_bytes() }
 
-  match(msgpack::unpack_array(Random::fill_bytes(len)))
-    Err<MsgPackError>:
-      random_error(
-        random_error_code_invalid_payload(),
-        "random host returned a non-array byte payload"
-      )
-    Ok<Array<MsgPack>> { value }:
-      if value.len() != len:
-        return random_error(
-          random_error_code_invalid_payload(),
-          "random host returned a truncated byte payload"
-        )
-      let ~bytes = ByteBuffer::with_capacity(len)
-      var index = 0
-      while index < len:
-        match(msgpack::unpack_i32(value.at(index)))
-          Err<MsgPackError>:
-            return random_error(
-              random_error_code_invalid_payload(),
-              "random host byte payload contains a non-integer value"
-            )
-          Ok<i32> { value: byte }:
-            if byte < 0 or byte > 255:
-              return random_error(
-                random_error_code_invalid_payload(),
-                "random host byte payload contains a value outside 0...255"
-              )
-            bytes.push(byte)
-        index = index + 1
-      Ok<Bytes> { value: bytes.as_bytes() }
+  let bytes = Random::fill_bytes(len)
+  if bytes.len() != len:
+    return random_error(
+      random_error_code_invalid_payload(),
+      "random host returned the wrong byte count"
+    )
+  Ok<Bytes> { value: bytes }
 
 /// Fills a byte buffer with cryptographically secure random bytes.
 /// `len` controls the number of bytes appended to `buf`.
@@ -278,37 +249,19 @@ pub fn fill_bytes(buf: ByteBuffer, len: i32): Random -> ByteBuffer
   if len <= 0:
     return buf
 
-  let payload = Random::fill_bytes(len)
-  let decoded = decode_random_byte_payload(payload)
+  let decoded = Random::fill_bytes(len)
   let ~out = ByteBuffer::with_capacity(buf.len() + len)
   out.extend(buf.as_bytes())
 
   var index = 0
   while index < len:
     if index < decoded.len():
-      match(decoded.get(index))
-        Some<MsgPack> { value }:
-          match(msgpack::unpack_i32(value))
-            Ok<i32> { value }:
-              out.push(mod_euclid_i32_or_zero(value, 256))
-            Err<MsgPackError>:
-              let next = to_i32_wrapping(next_i64())
-              out.push(mod_euclid_i32_or_zero(next, 256))
-        None:
-          let next = to_i32_wrapping(next_i64())
-          out.push(mod_euclid_i32_or_zero(next, 256))
+      out.push(decoded.at(index))
     else:
       let next = to_i32_wrapping(next_i64())
       out.push(mod_euclid_i32_or_zero(next, 256))
     index = index + 1
   out
-
-fn decode_random_byte_payload(payload: MsgPack): () -> Array<MsgPack>
-  match(msgpack::unpack_array(payload))
-    Ok<Array<MsgPack>> { value }:
-      value
-    Err<MsgPackError>:
-      Array<MsgPack>::init()
 
 fn parse_uuid(source: StringSlice): () -> Result<Uuid, UuidParseError>
   if source.byte_len() != 36:

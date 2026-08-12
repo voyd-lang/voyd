@@ -14,10 +14,10 @@ const fixturePath = resolve(
   "__fixtures__",
   "effects-export.voyd"
 );
-const msgpackFixturePath = resolve(
+const dtoFixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
-  "effects-msgpack.voyd"
+  "effects-dto.voyd"
 );
 const openRowNoPerformFixturePath = resolve(
   import.meta.dirname,
@@ -39,7 +39,7 @@ const compileFixture = async (fixture: string) => {
 };
 
 const buildModule = () => compileFixture(fixturePath);
-const buildMsgpackModule = () => compileFixture(msgpackFixturePath);
+const buildDtoModule = () => compileFixture(dtoFixturePath);
 
 describe("effectful exports & host boundary", () => {
   it("allows unused generic external effect declarations in ordinary builds", async () => {
@@ -58,7 +58,7 @@ describe("effectful exports & host boundary", () => {
     expect(result.wasm).toBeInstanceOf(Uint8Array);
   });
 
-  it("retains MsgPack host-boundary contracts in optimized builds without typed boundary exports", async () => {
+  it("retains selected host-provider contracts in optimized builds without typed boundary exports", async () => {
     const result = await compileProgram({
       entryPath: fixturePath,
       roots: {
@@ -69,7 +69,7 @@ describe("effectful exports & host boundary", () => {
       codegenOptions: {
         optimizationLevel: "release",
         boundaryExports: false,
-        effectsHostBoundary: "msgpack",
+        effectsHostBoundary: "selected",
         validate: true,
       },
     });
@@ -151,15 +151,15 @@ describe("effectful exports & host boundary", () => {
     ).resolves.toMatchObject({ value: 7 });
   });
 
-  it("round-trips msgpack values for effect handlers", async () => {
-    const { module } = await buildMsgpackModule();
+  it("round-trips typed DTO values for effect handlers", async () => {
+    const { module } = await buildDtoModule();
     const parsed = parseEffectTable(module);
     const roundtrip = parsed.ops.find((op) => op.label.endsWith(".roundtrip"));
     if (!roundtrip) {
       throw new Error("missing Exchange roundtrip op");
     }
-    const expectedArgs = [1, "hi", [2, 3]];
-    const expectedResponse = [true, "ok", [9, 10]];
+    const expectedArgs = { code: 1, label: "hi", nested: [2, 3] };
+    const expectedResponse = { code: 2, label: "ok", nested: [9, 10] };
     const result = await runEffectfulExport({
       wasm: module,
       entryName: "main_effectful",
@@ -171,5 +171,52 @@ describe("effectful exports & host boundary", () => {
       },
     });
     expect(result.value).toEqual(expectedResponse);
+  });
+
+  it("accepts typed DTO arguments on effectful exports", async () => {
+    const { module } = await buildDtoModule();
+    const parsed = parseEffectTable(module);
+    const roundtrip = parsed.ops.find((op) => op.label.endsWith(".roundtrip"));
+    if (!roundtrip) {
+      throw new Error("missing Exchange roundtrip op");
+    }
+    const input = { code: 7, label: "input", nested: [8, 9] };
+    const output = { code: 10, label: "output", nested: [11] };
+    const result = await runEffectfulExport({
+      wasm: module,
+      entryName: "from_host",
+      args: [input],
+      handlers: {
+        [`${roundtrip.opIndex}`]: (_req, value: unknown) => {
+          expect(value).toEqual(input);
+          return output;
+        },
+      },
+    });
+    expect(result.value).toEqual(output);
+  });
+
+  it("normalizes union DTOs for effect adapters and effectful results", async () => {
+    const { module } = await buildDtoModule();
+    const parsed = parseEffectTable(module);
+    const decide = parsed.ops.find((op) => op.label.endsWith(".decide"));
+    if (!decide) throw new Error("missing Exchange decide op");
+    const input = {
+      tag: "Accepted",
+      value: { code: 1, label: "ok", nested: [2] },
+    };
+    const output = { tag: "Rejected", reason: "no" };
+    const result = await runEffectfulExport({
+      wasm: module,
+      entryName: "decide_from_host",
+      args: [input],
+      handlers: {
+        [`${decide.opIndex}`]: (_req, value: unknown) => {
+          expect(value).toEqual(input);
+          return output;
+        },
+      },
+    });
+    expect(result.value).toEqual(output);
   });
 });

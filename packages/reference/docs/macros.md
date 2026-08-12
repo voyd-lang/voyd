@@ -184,9 +184,8 @@ syntax emitted by the previous macro, so a macro in a stack may receive an
 expansions; exceeding the limit is a compile-time diagnostic at the attribute
 invocation.
 
-Compiler attributes (`@boundary`, `@compiler_contract`, `@effect`,
-`@external`, `@intrinsic`, `@intrinsic_type`, `@operation`, `@serializer`, and
-`@type`) are reserved.
+Compiler attributes (`@compiler_contract`, `@compiler_impl`, `@effect`, `@external`,
+`@intrinsic`, `@intrinsic_type`, `@operation`, and `@type`) are reserved.
 They cannot be declared as user attribute macros. When compiler and user
 attributes are stacked, all user expansion runs first and compiler attributes
 are then attached to the first emitted declaration. Put the preserved target

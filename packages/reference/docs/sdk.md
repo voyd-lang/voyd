@@ -174,9 +174,10 @@ const result = await sdk.compile({
 });
 ```
 
-Raw Wasm exports remain available through `host.instance.exports`. Existing
-raw MsgPack interop still works; MsgPack is an internal codec detail for typed
-boundary exports, not a stable WIT/component-model replacement.
+Raw Wasm exports remain available through `host.instance.exports`. Typed SDK
+calls use the module's negotiated host transport and ABI-v2 frames. The
+transport is not an application MessagePack or JSON API, and its bytes are not
+a supported interop surface.
 
 Raw Wasm GC objects and closures are opaque boundary handles. A host may retain
 them and pass the same reference back to Voyd exports, but inspecting their

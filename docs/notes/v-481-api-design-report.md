@@ -61,13 +61,13 @@ if (outcome.kind === "failed") {
 `outcome` settles to `value`, `failed`, or `cancelled`; callers do not need a
 separate failure path for task-result encoding or decoding errors.
 
-## V-484 — Compiler-derived MessagePack boundary codecs
+## V-484 — Compiler-derived MessagePack codecs
 
-`std::msgpack::pack_boundary_value<T>` and `unpack_boundary_value<T>` are the
-typed MessagePack codec surface. The compiler derives codecs for closed
-boundary-compatible primitives, records, arrays, optional fields, and named
-enum or union variants with payloads. No per-type generated symbol is added to
-the source API.
+This design was superseded by V-499. `std::msgpack::encode<T>` and `decode<T>`
+are the typed MessagePack codec surface; generic host boundaries use the
+module-selected transport automatically. The compiler derives codecs for
+closed DTO primitives, records, arrays, optional fields, and named enum or
+union variants with payloads.
 
 Record keys use the exact declared source spelling. MessagePack maps are
 semantically unordered, so key order is not part of the wire contract; encoding
@@ -111,12 +111,11 @@ at the HTTP adapter boundary without weakening the codec contract.
 ### Example
 
 ```voyd
-use std::msgpack::{ pack_boundary_value, unpack_boundary_value }
+use std::msgpack::{ encode, decode }
 
 obj Profile { displayName: String, nickname?: String }
 
-let encoded = pack_boundary_value(Profile { displayName: "Ada" })
-let decoded = unpack_boundary_value<Profile>(encoded)
+let encoded = encode(Profile { displayName: "Ada" })
 ```
 
 ## V-485 — Strict typed JSON decoding

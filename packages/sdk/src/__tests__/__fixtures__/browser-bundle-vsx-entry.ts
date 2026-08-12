@@ -1,14 +1,14 @@
-import { compile } from "@voyd-lang/sdk/browser";
+import { createSdk } from "@voyd-lang/sdk/browser";
 import { createVoydHost } from "@voyd-lang/js-host";
+import { createVoydVxAppRuntime } from "@voyd-lang/vx-dom";
 
 type SmokeRunner = () => Promise<number>;
 
 const source = `use std::array::Array
-use std::msgpack::MsgPack
 use std::string::type::{ String, new_string }
 use std::vx::all
 
-fn App()
+fn App() -> Html<void>
   let features = feature_list()
   <Card>
     <Title>Voyd + VX</Title>
@@ -16,7 +16,7 @@ fn App()
     <List value={features} />
   </Card>
 
-fn Title({ children: Array<MsgPack> })
+fn Title({ children: Array<Html<void>> }) -> Html<void>
   <h2 style="
     margin: 0 0 8px 0;
     font-size: 20px;
@@ -27,7 +27,7 @@ fn Title({ children: Array<MsgPack> })
     {children}
   </h2>
 
-fn Card({ children: Array<MsgPack> })
+fn Card({ children: Array<Html<void>> }) -> Html<void>
   <div style="
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     margin: 8px;
@@ -40,41 +40,42 @@ fn Card({ children: Array<MsgPack> })
     {children}
   </div>
 
-fn List({ value: Array<String> })
+fn List({ value: Array<String> }) -> Html<void>
   <ul style="margin: 0; padding-left: 16px;">
-    {value.map(f => <li style="line-height: 1.6;">{f}</li>)}
+    {value.map((f: String) -> Html<void> => <li style="line-height: 1.6;">{f}</li>)}
   </ul>
 
 fn feature_list() -> Array<String>
   ["WASM speed", "Tiny runtime", "Clean syntax"]
 
 
-pub fn main()
+pub fn main() -> Html<void>
   App()
 `;
 
-const toBytes = (
-  result: Uint8Array | { binary?: Uint8Array; output?: Uint8Array }
-): Uint8Array =>
-  result instanceof Uint8Array
-    ? result
-    : result.output ?? result.binary ?? new Uint8Array();
-
 export const runBrowserVsxBundleSmoke: SmokeRunner = async () => {
-  const result = await compile(source);
+  const result = await createSdk().compile({ source });
   if (!result.success) {
-    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+    throw new Error(JSON.stringify(result.diagnostics, null, 2));
   }
-  const wasm = toBytes(result.module.emitBinary());
+  const wasm = result.wasm;
   const host = await createVoydHost({ wasm, bufferSize: 256 * 1024 });
-  const tree = await host.run<any>("main");
+  const tree = (await createVoydVxAppRuntime({
+    host,
+    app: false,
+    initialModel: {},
+    exports: { view: "main" },
+    viewReceivesModel: false,
+  }).render()) as Record<string, unknown>;
   if (
     !tree ||
     typeof tree !== "object" ||
     tree.kind !== "element" ||
     typeof tree.tag !== "string"
   ) {
-    throw new Error("expected main() to return a VX element node");
+    throw new Error(
+      `expected main() to return a VX element node, got ${JSON.stringify(tree)}`,
+    );
   }
   return wasm.length;
 };

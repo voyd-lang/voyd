@@ -2,12 +2,11 @@
 //!
 //! `std::fs` provides read/write/existence/removal/listing helpers that operate on
 //! `std::path::Path` and return typed `Result` values where host I/O can fail.
-//! All effect payloads are MessagePack-encoded DTOs.
+//! Effect payloads use automatic DTO conversion.
 
 use std::array::Array
-use std::bytes::{ ByteBuffer, Bytes }
+use std::bytes::Bytes
 use std::error::{
-  HostError,
   IoAlreadyExists,
   IoConflict,
   IoError,
@@ -16,10 +15,6 @@ use std::error::{
   IoOther,
   IoPermissionDenied
 }
-use std::host_dto::HostDto
-use std::msgpack::MsgPack
-use std::msgpack::MsgPackError
-use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::path::Path
 use std::result::types::all
@@ -27,96 +22,137 @@ use std::string::type::{ String, StringSlice, new_string }
 
 /// Host file-system effect used by `std::fs`.
 ///
-/// Operations in this effect proxy host file APIs using MessagePack payloads
-/// and return DTOs decoded by helper functions in this module.
+pub obj FsResult<T> {
+  api ok: bool,
+  api value: T,
+  api error_kind: String,
+  api error_code: i32,
+  api error_message: String
+}
+
+pub obj FsWriteBytesRequest {
+  api path: String,
+  api bytes: Bytes
+}
+
+pub obj FsWriteStringRequest {
+  api path: String,
+  api value: String
+}
+
+pub obj FsWriteRequest {
+  api path: String,
+  api kind: String,
+  api bytes?: Bytes,
+  api value?: String
+}
+
+pub obj FsRenameRequest {
+  api from: String,
+  api to: String
+}
+
+/// Operations in this effect proxy host file APIs using automatic DTO values.
 @effect(id: "voyd.std.fs")
 pub eff Fs
   /// Reads file contents from `path` and returns raw byte data or an I/O error DTO.
-  read_bytes(tail, path: MsgPack) -> MsgPack
+  read_bytes(tail, path: String) -> FsResult<Bytes>
   /// Reads UTF-8 text contents from `path` and returns string data or an I/O error DTO.
-  read_string(tail, path: MsgPack) -> MsgPack
+  read_string(tail, path: String) -> FsResult<String>
   /// Writes raw byte data to a file.
-  ///
-  /// `payload` contains `{ path, bytes }`.
-  write_bytes(tail, payload: MsgPack) -> MsgPack
+  write_bytes(tail, request: FsWriteBytesRequest) -> FsResult<Unit>
   /// Writes UTF-8 text to a file.
-  ///
-  /// `payload` contains `{ path, value }`.
-  write_string(tail, payload: MsgPack) -> MsgPack
+  write_string(tail, request: FsWriteStringRequest) -> FsResult<Unit>
   /// Returns the host-reported existence check for `path`.
-  exists(tail, path: MsgPack) -> bool
+  exists(tail, path: String) -> bool
   /// Lists child paths in the directory at `path`, or returns an I/O error DTO.
-  list_dir(tail, path: MsgPack) -> MsgPack
+  list_dir(tail, path: String) -> FsResult<Array<String>>
   /// Removes the file or empty directory at `path`, or returns an I/O error DTO.
-  remove(tail, path: MsgPack) -> MsgPack
+  remove(tail, path: String) -> FsResult<Unit>
   /// Creates `path` and any missing parent directories, or returns an I/O error DTO.
-  create_dir_all(tail, path: MsgPack) -> MsgPack
+  create_dir_all(tail, path: String) -> FsResult<Unit>
   /// Renames a file or directory.
-  ///
-  /// `payload` contains `{ from, to }`.
-  rename(tail, payload: MsgPack) -> MsgPack
+  rename(tail, request: FsRenameRequest) -> FsResult<Unit>
   /// Atomically replaces a file after fully writing a same-directory temporary.
-  ///
-  /// `payload` contains `{ path, kind, value|bytes }`.
-  write_atomic(tail, payload: MsgPack) -> MsgPack
+  write_atomic(tail, request: FsWriteRequest) -> FsResult<Unit>
   /// Creates and writes a file only when its path does not already exist.
-  ///
-  /// `payload` contains `{ path, kind, value|bytes }`.
-  create_exclusive(tail, payload: MsgPack) -> MsgPack
+  create_exclusive(tail, request: FsWriteRequest) -> FsResult<Unit>
 
 /// Reads a file as raw bytes.
 ///
 /// Example:
 /// `let bytes = fs::read_bytes(Path::new("./image.bin".as_slice()))`
 pub fn read_bytes(path: Path): Fs -> Result<Bytes, IoError>
-  decode_read_bytes_result(Fs::read_bytes(encode_path(path)))
+  decode_result(Fs::read_bytes(path.as_string()))
 
 /// Reads text from a file.
 ///
 /// This expects host-side UTF-8 text decoding.
 pub fn read_string(path: Path): Fs -> Result<String, IoError>
-  decode_read_string_result(Fs::read_string(encode_path(path)))
+  decode_result(Fs::read_string(path.as_string()))
 
 /// Writes bytes to a file.
 ///
 /// Example:
 /// `let write_result = fs::write_bytes(file_path, payload)`
 pub fn write_bytes(path: Path, bytes: Bytes): Fs -> Result<Unit, IoError>
-  let payload = encode_write_bytes_payload(path, bytes)
-  decode_unit_result(Fs::write_bytes(payload))
+  decode_result(Fs::write_bytes(FsWriteBytesRequest {
+    path: path.as_string(),
+    bytes: bytes
+  }))
 
 /// Writes text to a file.
 ///
 /// Example:
 /// `let write_result = fs::write_string(file_path, "hello".as_slice())`
 pub fn write_string(path: Path, value: String): Fs -> Result<Unit, IoError>
-  let payload = encode_write_string_payload(path, value)
-  decode_unit_result(Fs::write_string(payload))
+  decode_result(Fs::write_string(FsWriteStringRequest {
+    path: path.as_string(),
+    value: value
+  }))
 
 /// Writes text to a file.
 pub fn write_string(path: Path, value: StringSlice): Fs -> Result<Unit, IoError>
-  let payload = encode_write_string_payload(path, value.to_string())
-  decode_unit_result(Fs::write_string(payload))
+  write_string(path, value.to_string())
 
 /// Returns true when the path exists in the file system.
 pub fn exists(path: Path): Fs -> bool
-  Fs::exists(encode_path(path))
+  Fs::exists(path.as_string())
 
 /// Removes a file or empty directory.
 pub fn remove(path: Path): Fs -> Result<Unit, IoError>
-  decode_unit_result(Fs::remove(encode_path(path)))
+  decode_result(Fs::remove(path.as_string()))
 
 /// Lists child paths in a directory.
 ///
 /// Each returned `Path` is decoded from host-provided string entries.
 pub fn list_dir(path: Path): Fs -> Result<Array<Path>, IoError>
-  decode_list_dir_result(Fs::list_dir(encode_path(path)))
+  let result = Fs::list_dir(path.as_string())
+  if not result.ok:
+    return Err<IoError> {
+      error: IoError {
+        kind: decode_io_error_kind(result.error_kind),
+        code: result.error_code,
+        message: result.error_message
+      }
+    }
+
+  let value = result.value
+  if value.is_empty():
+    return Ok<Array<Path>> { value: Array<Path>::init() }
+
+  let ~paths = Array<Path>::with_capacity(value.len())
+  var index = 0
+  while index < value.len():
+    paths.push(Path { raw: value.at(index) })
+    index = index + 1
+  Ok<Array<Path>> { value: paths }
 
 /// Creates a directory and all missing parent directories.
 ///
 /// Existing directories are accepted as success.
 pub fn create_dir_all(path: Path): Fs -> Result<Unit, IoError>
-  decode_unit_result(Fs::create_dir_all(encode_path(path)))
+  decode_result(Fs::create_dir_all(path.as_string()))
 
 /// Renames a file or directory from `source` to `destination`.
 ///
@@ -124,7 +160,10 @@ pub fn create_dir_all(path: Path): Fs -> Result<Unit, IoError>
 /// destination can be used for atomic replacement when both paths share a
 /// filesystem.
 pub fn rename(source: Path, { to destination: Path }): Fs -> Result<Unit, IoError>
-  decode_unit_result(Fs::rename(encode_rename_payload(source, destination)))
+  decode_result(Fs::rename(FsRenameRequest {
+    from: source.as_string(),
+    to: destination.as_string()
+  }))
 
 /// Atomically writes bytes, replacing the destination only after the complete
 /// value has been written to a temporary file in the same directory.
@@ -133,12 +172,20 @@ pub fn rename(source: Path, { to destination: Path }): Fs -> Result<Unit, IoErro
 /// file or the new complete file. Host and operating-system durability after a
 /// process or machine crash is outside this contract.
 pub fn write_atomic(path: Path, bytes: Bytes): Fs -> Result<Unit, IoError>
-  decode_unit_result(Fs::write_atomic(encode_write_bytes_payload(path, bytes)))
+  decode_result(Fs::write_atomic(FsWriteRequest {
+    path: path.as_string(),
+    kind: "bytes",
+    bytes: Some<Bytes> { value: bytes }
+  }))
 
 /// Atomically writes owned UTF-8 text. See the bytes overload for replacement
 /// and durability guarantees.
 pub fn write_atomic(path: Path, value: String): Fs -> Result<Unit, IoError>
-  decode_unit_result(Fs::write_atomic(encode_write_string_payload(path, value)))
+  decode_result(Fs::write_atomic(FsWriteRequest {
+    path: path.as_string(),
+    kind: "string",
+    value: Some<String> { value: value }
+  }))
 
 /// Atomically writes borrowed UTF-8 text.
 pub fn write_atomic(path: Path, value: StringSlice): Fs -> Result<Unit, IoError>
@@ -147,203 +194,45 @@ pub fn write_atomic(path: Path, value: StringSlice): Fs -> Result<Unit, IoError>
 /// Creates and writes a new file atomically with respect to competing creators.
 /// Returns `IoAlreadyExists` when another writer owns the destination.
 pub fn create_exclusive(path: Path, bytes: Bytes): Fs -> Result<Unit, IoError>
-  decode_unit_result(Fs::create_exclusive(encode_write_bytes_payload(path, bytes)))
+  decode_result(Fs::create_exclusive(FsWriteRequest {
+    path: path.as_string(),
+    kind: "bytes",
+    bytes: Some<Bytes> { value: bytes }
+  }))
 
 /// Creates and writes a new UTF-8 text file atomically with respect to competing
 /// creators.
 pub fn create_exclusive(path: Path, value: String): Fs -> Result<Unit, IoError>
-  decode_unit_result(Fs::create_exclusive(encode_write_string_payload(path, value)))
+  decode_result(Fs::create_exclusive(FsWriteRequest {
+    path: path.as_string(),
+    kind: "string",
+    value: Some<String> { value: value }
+  }))
 
 /// Creates and writes a borrowed UTF-8 text file atomically with respect to
 /// competing creators.
 pub fn create_exclusive(path: Path, value: StringSlice): Fs -> Result<Unit, IoError>
   create_exclusive(path, value.to_string())
 
-fn encode_path(path: Path): () -> MsgPack
-  msgpack::make_string(path.as_string())
-
-fn encode_write_bytes_payload(path: Path, bytes: Bytes): () -> MsgPack
-  HostDto::init()
-    .set("path", encode_path(path))
-    .set("kind", msgpack::make_string("bytes"))
-    .set("bytes", encode_byte_array(bytes))
-    .pack()
-
-fn encode_write_string_payload(path: Path, value: String): () -> MsgPack
-  HostDto::init()
-    .set("path", encode_path(path))
-    .set("kind", msgpack::make_string("string"))
-    .set("value", msgpack::make_string(value))
-    .pack()
-
-fn encode_rename_payload(source: Path, destination: Path): () -> MsgPack
-  HostDto::init()
-    .set("from", encode_path(source))
-    .set("to", encode_path(destination))
-    .pack()
-
-fn encode_byte_array(bytes: Bytes): () -> MsgPack
-  let source = bytes.to_array()
-  let ~encoded = Array<MsgPack>::with_capacity(bytes.len())
-  var index = 0
-  while index < source.len():
-    match(source.get(index))
-      Some<i32> { value }:
-        encoded.push(msgpack::make_i32(value))
-      None:
-        void
-    index = index + 1
-  msgpack::make_array(encoded)
-
-fn decode_read_bytes_result(payload: MsgPack): () -> Result<Bytes, IoError>
-  match(HostDto::unpack(payload))
-    Err<HostError> { error }:
-      Err<IoError> { error: host_error_to_io_error(error) }
-    Ok<HostDto> { value: decoded }:
-      match(decoded.read_bool("ok"))
-        Err<HostError> { error }:
-          Err<IoError> { error: host_error_to_io_error(error) }
-        Ok<bool> { value }:
-          if value == false:
-            decode_io_error_result<Bytes>(decoded)
-          else:
-            match(decoded.read_msgpack("value"))
-              Err<HostError> { error }:
-                Err<IoError> { error: host_error_to_io_error(error) }
-              Ok<MsgPack> { value }:
-                decode_bytes(value)
-
-fn decode_read_string_result(payload: MsgPack): () -> Result<String, IoError>
-  match(HostDto::unpack(payload))
-    Err<HostError> { error }:
-      Err<IoError> { error: host_error_to_io_error(error) }
-    Ok<HostDto> { value: decoded }:
-      match(decoded.read_bool("ok"))
-        Err<HostError> { error }:
-          Err<IoError> { error: host_error_to_io_error(error) }
-        Ok<bool> { value }:
-          if value == false:
-            decode_io_error_result<String>(decoded)
-          else:
-            match(decoded.read_string("value"))
-              Err<HostError> { error }:
-                Err<IoError> { error: host_error_to_io_error(error) }
-              Ok<String> { value }:
-                Ok<String> { value: value }
-
-fn decode_unit_result(payload: MsgPack): () -> Result<Unit, IoError>
-  match(HostDto::unpack(payload))
-    Err<HostError> { error }:
-      Err<IoError> { error: host_error_to_io_error(error) }
-    Ok<HostDto> { value: decoded }:
-      match(decoded.read_bool("ok"))
-        Err<HostError> { error }:
-          Err<IoError> { error: host_error_to_io_error(error) }
-        Ok<bool> { value }:
-          if value:
-            Ok<Unit> { value: Unit {} }
-          else:
-            decode_io_error_result<Unit>(decoded)
-
-fn decode_list_dir_result(payload: MsgPack): () -> Result<Array<Path>, IoError>
-  match(HostDto::unpack(payload))
-    Err<HostError> { error }:
-      Err<IoError> { error: host_error_to_io_error(error) }
-    Ok<HostDto> { value: decoded }:
-      match(decoded.read_bool("ok"))
-        Err<HostError> { error }:
-          Err<IoError> { error: host_error_to_io_error(error) }
-        Ok<bool> { value }:
-          if value == false:
-            decode_io_error_result<Array<Path>>(decoded)
-          else:
-            match(decoded.read_msgpack("value"))
-              Err<HostError> { error }:
-                Err<IoError> { error: host_error_to_io_error(error) }
-              Ok<MsgPack> { value }:
-                decode_path_array(value)
-
-fn decode_io_error_result<T>(payload: HostDto): () -> Result<T, IoError>
-  match(payload.read_i32("code"))
-    Err<HostError> { error }:
-      Err<IoError> { error: host_error_to_io_error(error) }
-    Ok<i32> { value: code }:
-      match(payload.read_string("message"))
-        Err<HostError> { error }:
-          Err<IoError> { error: host_error_to_io_error(error) }
-        Ok<String> { value: message }:
-          Err<IoError> {
-            error: IoError {
-              kind: decode_io_error_kind(payload),
-              code: code,
-              message: message
-            }
-          }
-
-fn decode_io_error_kind(payload: HostDto): () -> IoErrorKind
-  match(payload.read_string("kind"))
-    Err<HostError>:
-      IoOther {}
-    Ok<String> { value }:
-      if value.equals("not-found"):
-        return IoNotFound {}
-      if value.equals("already-exists"):
-        return IoAlreadyExists {}
-      if value.equals("permission-denied"):
-        return IoPermissionDenied {}
-      if value.equals("conflict"):
-        return IoConflict {}
-      IoOther {}
-
-fn decode_bytes(payload: MsgPack): () -> Result<Bytes, IoError>
-  match(msgpack::unpack_array(payload))
-    Err<MsgPackError> { error }:
-      Err<IoError> { error: msgpack_error_to_io_error(error) }
-    Ok<Array<MsgPack>> { value: source }:
-      let ~buffer = ByteBuffer::with_capacity(source.len())
-      var index = 0
-      while index < source.len():
-        match(source.get(index))
-          Some<MsgPack> { value }:
-            match(msgpack::unpack_i32(value))
-              Ok<i32> { value }:
-                buffer.push(normalize_byte(value))
-              Err<MsgPackError> { error }:
-                return Err<IoError> { error: msgpack_error_to_io_error(error) }
-          None:
-            void
-        index = index + 1
-      Ok<Bytes> { value: buffer.as_bytes() }
-
-fn decode_path_array(payload: MsgPack): () -> Result<Array<Path>, IoError>
-  match(msgpack::unpack_array(payload))
-    Err<MsgPackError> { error }:
-      Err<IoError> { error: msgpack_error_to_io_error(error) }
-    Ok<Array<MsgPack>> { value: source }:
-      let ~out = Array<Path>::with_capacity(source.len())
-      var index = 0
-      while index < source.len():
-        match(source.get(index))
-          Some<MsgPack> { value }:
-            match(msgpack::unpack_string(value))
-              Ok<String> { value }:
-                out.push(Path { raw: value })
-              Err<MsgPackError> { error }:
-                return Err<IoError> { error: msgpack_error_to_io_error(error) }
-          None:
-            void
-        index = index + 1
-      Ok<Array<Path>> { value: out }
-
-fn normalize_byte(value: i32): () -> i32
-  let remainder = value % 256
-  if remainder < 0:
-    remainder + 256
+fn decode_result<T>(result: FsResult<T>): () -> Result<T, IoError>
+  if result.ok:
+    Ok<T> { value: result.value }
   else:
-    remainder
+    Err<IoError> {
+      error: IoError {
+        kind: decode_io_error_kind(result.error_kind),
+        code: result.error_code,
+        message: result.error_message
+      }
+    }
 
-fn host_error_to_io_error(error: HostError): () -> IoError
-  IoError { kind: IoOther {}, code: error.code, message: error.message }
-
-fn msgpack_error_to_io_error(error: MsgPackError): () -> IoError
-  IoError { kind: IoOther {}, code: error.code, message: error.message }
+fn decode_io_error_kind(value: String): () -> IoErrorKind
+  if value.equals("not-found"):
+    return IoNotFound {}
+  if value.equals("already-exists"):
+    return IoAlreadyExists {}
+  if value.equals("permission-denied"):
+    return IoPermissionDenied {}
+  if value.equals("conflict"):
+    return IoConflict {}
+  IoOther {}

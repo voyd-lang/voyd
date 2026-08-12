@@ -4,13 +4,8 @@
 //! terminal detection. Single-argument helpers default to stdout; pass
 //! `StdErr {}` when you need to target stderr explicitly.
 
-use std::array::Array
-use std::bytes::{ Bytes }
-use std::error::{ HostError, IoError, IoOther }
-use std::host_dto::HostDto
-use std::msgpack::MsgPack
-use std::msgpack::MsgPackError
-use std::msgpack::self as msgpack
+use std::bytes::Bytes
+use std::error::{ IoError, IoOther }
 use std::number::to_string
 use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
@@ -20,28 +15,40 @@ pub obj StdErr {}
 
 pub type OutputTarget = StdOut | StdErr
 
+pub obj OutputWriteRequest {
+  api value: String,
+  api target: String
+}
+
+pub obj OutputWriteBytesRequest {
+  api bytes: Bytes,
+  api target: String
+}
+
+pub obj OutputTargetRequest {
+  api target: String
+}
+
+pub obj OutputResult {
+  api ok: bool,
+  api code: i32,
+  api message: String
+}
+
 /// Host output effect used by `std::output`.
 ///
-/// Operations in this effect forward writes/flushes to host-managed stdout and
-/// stderr streams using MessagePack DTO payloads.
+/// Operations in this effect forward automatic DTO values to host-managed
+/// stdout and stderr streams.
 @effect(id: "voyd.std.output")
 pub eff Output
   /// Writes UTF-8 text to the selected output stream.
-  ///
-  /// `payload` contains `{ value, target }`, where `target` is `"stdout"` or `"stderr"`.
-  write_op(tail, payload: MsgPack) -> MsgPack
+  write_op(tail, request: OutputWriteRequest) -> OutputResult
   /// Writes raw bytes to the selected output stream.
-  ///
-  /// `payload` contains `{ bytes, target }`.
-  write_bytes_op(tail, payload: MsgPack) -> MsgPack
+  write_bytes_op(tail, request: OutputWriteBytesRequest) -> OutputResult
   /// Flushes buffered data for the selected output stream.
-  ///
-  /// `payload` contains `{ target }`.
-  flush_op(tail, payload: MsgPack) -> MsgPack
+  flush_op(tail, request: OutputTargetRequest) -> OutputResult
   /// Returns whether the selected stream is a terminal.
-  ///
-  /// `payload` contains `{ target }`.
-  is_tty_op(tail, payload: MsgPack) -> bool
+  is_tty_op(tail, request: OutputTargetRequest) -> bool
 
 /// Shorthand for `write(value, StdOut {})`.
 pub fn write(value: StringSlice): Output -> Result<Unit, IoError>
@@ -140,74 +147,35 @@ pub fn is_tty(): Output -> bool
 pub fn is_tty(target: OutputTarget): Output -> bool
   Output::is_tty_op(encode_target_payload(target))
 
-fn encode_write_payload(value: String, target: OutputTarget): () -> MsgPack
-  HostDto::init()
-    .set("value", msgpack::make_string(value))
-    .set("target", encode_output_target(target))
-    .pack()
+fn encode_write_payload(value: String, target: OutputTarget): () -> OutputWriteRequest
+  OutputWriteRequest { value: value, target: encode_output_target(target) }
 
 fn line_string(value: StringSlice): () -> String
   let ~line_bytes = value.to_string().to_utf8()
   line_bytes.push(10)
   new_string(line_bytes.to_fixed_array())
 
-fn encode_write_bytes_payload(bytes: Bytes, target: OutputTarget): () -> MsgPack
-  HostDto::init()
-    .set("bytes", encode_bytes(bytes))
-    .set("target", encode_output_target(target))
-    .pack()
+fn encode_write_bytes_payload(bytes: Bytes, target: OutputTarget): () -> OutputWriteBytesRequest
+  OutputWriteBytesRequest { bytes: bytes, target: encode_output_target(target) }
 
-fn encode_target_payload(target: OutputTarget): () -> MsgPack
-  HostDto::init()
-    .set("target", encode_output_target(target))
-    .pack()
+fn encode_target_payload(target: OutputTarget): () -> OutputTargetRequest
+  OutputTargetRequest { target: encode_output_target(target) }
 
-fn encode_output_target(target: OutputTarget): () -> MsgPack
+fn encode_output_target(target: OutputTarget): () -> String
   target.match(active)
     StdOut:
-      msgpack::make_string("stdout")
+      "stdout"
     StdErr:
-      msgpack::make_string("stderr")
+      "stderr"
 
-fn encode_bytes(bytes: Bytes): () -> MsgPack
-  let source = bytes.to_array()
-  let ~encoded = Array<MsgPack>::with_capacity(source.len())
-  var index = 0
-  while index < source.len():
-    match(source.get(index))
-      Some<i32> { value }:
-        encoded.push(msgpack::make_i32(value))
-      None:
-        void
-    index = index + 1
-  msgpack::make_array(encoded)
-
-fn decode_write_result(payload: MsgPack): () -> Result<Unit, IoError>
-  match(HostDto::unpack(payload))
-    Err<HostError> { error }:
-      Err<IoError> { error: host_error_to_io_error(error) }
-    Ok<HostDto> { value: decoded }:
-      match(decoded.read_bool("ok"))
-        Err<HostError> { error }:
-          Err<IoError> { error: host_error_to_io_error(error) }
-        Ok<bool> { value }:
-          if value:
-            Ok<Unit> { value: Unit {} }
-          else:
-            decode_io_error_result(decoded)
-
-fn decode_io_error_result(payload: HostDto): () -> Result<Unit, IoError>
-  match(payload.read_i32("code"))
-    Err<HostError> { error }:
-      Err<IoError> { error: host_error_to_io_error(error) }
-    Ok<i32> { value: code }:
-      match(payload.read_string("message"))
-        Err<HostError> { error }:
-          Err<IoError> { error: host_error_to_io_error(error) }
-        Ok<String> { value: message }:
-          Err<IoError> {
-            error: IoError { kind: IoOther {}, code: code, message: message }
-          }
-
-fn host_error_to_io_error(error: HostError): () -> IoError
-  IoError { kind: IoOther {}, code: error.code, message: error.message }
+fn decode_write_result(result: OutputResult): () -> Result<Unit, IoError>
+  if result.ok:
+    Ok<Unit> { value: Unit {} }
+  else:
+    Err<IoError> {
+      error: IoError {
+        kind: IoOther {},
+        code: result.code,
+        message: result.message
+      }
+    }

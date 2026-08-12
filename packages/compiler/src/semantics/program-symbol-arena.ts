@@ -1,14 +1,14 @@
 import type { ProgramSymbolId, SymbolId } from "./ids.js";
-import type {
-  BoundaryMetadata,
-  IntrinsicFunctionFlags,
-  SerializerMetadata,
-} from "./symbol-index.js";
+import type { IntrinsicFunctionFlags } from "./symbol-index.js";
+import type { CompilerImplementationDeclaration } from "./symbol-index.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import type {
   CompilerFunctionContractId,
   CompilerFunctionContractSpec,
+  CompilerTraitContractId,
+  CompilerTraitMethodRole,
+  CompilerTraitContractSpec,
   StdIntrinsicTypeContractId,
   StdIntrinsicTypeContractProvider,
 } from "../compiler-contracts/index.js";
@@ -27,6 +27,19 @@ export type ProgramSymbolArena = {
   getDocumentation(id: ProgramSymbolId): string | undefined;
   getPackageId(id: ProgramSymbolId): string;
   getIntrinsicType(id: ProgramSymbolId): string | undefined;
+  resolveIntrinsicType(id: string): ProgramSymbolId | undefined;
+  getCompilerImplementation(
+    id: ProgramSymbolId,
+  ): CompilerImplementationDeclaration | undefined;
+  getCompilerTraitContract(
+    id: ProgramSymbolId,
+  ): CompilerTraitContractSpec | undefined;
+  resolveCompilerTraitContract(
+    id: CompilerTraitContractId,
+  ): ProgramSymbolId | undefined;
+  getCompilerTraitMethodRole(
+    id: ProgramSymbolId,
+  ): CompilerTraitMethodRole | undefined;
   getStdIntrinsicTypeContract(
     id: ProgramSymbolId,
   ): StdIntrinsicTypeContractProvider | undefined;
@@ -41,8 +54,6 @@ export type ProgramSymbolArena = {
   resolveCompilerFunctionContract(
     id: CompilerFunctionContractId,
   ): ProgramSymbolId | undefined;
-  getSerializer(id: ProgramSymbolId): SerializerMetadata | undefined;
-  getBoundary(id: ProgramSymbolId): BoundaryMetadata | undefined;
   isModuleScoped(id: ProgramSymbolId): boolean;
 };
 
@@ -73,6 +84,19 @@ export const buildProgramSymbolArena = (
   const documentationById: (string | undefined)[] = [];
   const packageIdsById: string[] = [];
   const intrinsicTypesById: (string | undefined)[] = [];
+  const idsByIntrinsicType = new Map<string, ProgramSymbolId[]>();
+  const compilerImplementationsById: (
+    | CompilerImplementationDeclaration
+    | undefined
+  )[] = [];
+  const compilerTraitContractsById: (CompilerTraitContractSpec | undefined)[] =
+    [];
+  const idsByCompilerTraitContract = new Map<
+    CompilerTraitContractId,
+    ProgramSymbolId
+  >();
+  const compilerTraitMethodRolesById: (CompilerTraitMethodRole | undefined)[] =
+    [];
   const stdIntrinsicTypeContractsById: (
     | StdIntrinsicTypeContractProvider
     | undefined
@@ -91,8 +115,6 @@ export const buildProgramSymbolArena = (
     CompilerFunctionContractId,
     ProgramSymbolId
   >();
-  const serializerById: (SerializerMetadata | undefined)[] = [];
-  const boundaryById: (BoundaryMetadata | undefined)[] = [];
   const moduleScopedById: boolean[] = [];
 
   let nextId = 0;
@@ -120,6 +142,34 @@ export const buildProgramSymbolArena = (
         mod.binding.decls.getTypeAlias(symbol)?.documentation;
       packageIdsById[id] = mod.binding.packageId;
       intrinsicTypesById[id] = mod.symbols.getIntrinsicType(symbol);
+      const intrinsicType = mod.symbols.getIntrinsicType(symbol);
+      if (
+        intrinsicType &&
+        mod.symbols.resolveIntrinsicType(intrinsicType) === symbol
+      ) {
+        const ids = idsByIntrinsicType.get(intrinsicType) ?? [];
+        ids.push(id);
+        idsByIntrinsicType.set(intrinsicType, ids);
+      }
+      compilerImplementationsById[id] =
+        mod.symbols.getCompilerImplementation(symbol);
+      const compilerTraitContract =
+        mod.symbols.getCompilerTraitContract(symbol);
+      compilerTraitContractsById[id] = compilerTraitContract;
+      if (compilerTraitContract) {
+        const existing = idsByCompilerTraitContract.get(
+          compilerTraitContract.id,
+        );
+        if (existing !== undefined) {
+          const first = refsById[existing]!;
+          throw new Error(
+            `duplicate compiler trait contract '${compilerTraitContract.id}': ${first.moduleId}::${first.symbol} and ${mod.moduleId}::${symbol}`,
+          );
+        }
+        idsByCompilerTraitContract.set(compilerTraitContract.id, id);
+      }
+      compilerTraitMethodRolesById[id] =
+        mod.symbols.getCompilerTraitMethodRole(symbol);
       const stdIntrinsicTypeContract =
         mod.symbols.getStdIntrinsicTypeContract(symbol);
       stdIntrinsicTypeContractsById[id] = stdIntrinsicTypeContract;
@@ -152,8 +202,6 @@ export const buildProgramSymbolArena = (
         }
         idsByCompilerFunctionContract.set(compilerFunctionContract.id, id);
       }
-      serializerById[id] = mod.symbols.getSerializer(symbol);
-      boundaryById[id] = mod.symbols.getBoundary(symbol);
       moduleScopedById[id] = mod.symbols.isModuleScoped(symbol);
     });
   });
@@ -198,6 +246,15 @@ export const buildProgramSymbolArena = (
     getDocumentation: (id) => documentationById[id],
     getPackageId,
     getIntrinsicType: (id) => intrinsicTypesById[id],
+    resolveIntrinsicType: (id) => {
+      const ids = idsByIntrinsicType.get(id) ?? [];
+      if (ids.length > 1) throw new Error(`duplicate intrinsic type '${id}'`);
+      return ids[0];
+    },
+    getCompilerImplementation: (id) => compilerImplementationsById[id],
+    getCompilerTraitContract: (id) => compilerTraitContractsById[id],
+    resolveCompilerTraitContract: (id) => idsByCompilerTraitContract.get(id),
+    getCompilerTraitMethodRole: (id) => compilerTraitMethodRolesById[id],
     getStdIntrinsicTypeContract: (id) => stdIntrinsicTypeContractsById[id],
     resolveStdIntrinsicTypeContract: (id) =>
       idsByStdIntrinsicTypeContract.get(id),
@@ -210,8 +267,6 @@ export const buildProgramSymbolArena = (
     getCompilerFunctionContract: (id) => compilerFunctionContractsById[id],
     resolveCompilerFunctionContract: (id) =>
       idsByCompilerFunctionContract.get(id),
-    getSerializer: (id) => serializerById[id],
-    getBoundary: (id) => boundaryById[id],
     isModuleScoped: (id) => moduleScopedById[id] === true,
   };
 };

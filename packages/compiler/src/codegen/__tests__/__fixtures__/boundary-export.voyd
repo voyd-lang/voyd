@@ -1,5 +1,8 @@
 use std::array::Array
+use std::bytes::Bytes
+use std::data::{ CustomDto, CustomDtoError }
 use std::enums::{ enum }
+use std::result::types::all
 use std::string::type::String
 
 obj Point {
@@ -11,6 +14,25 @@ enum LookupResult
   Found { value: String }
   Missing
 
+obj UserId { value: i32 }
+obj UserIdDto { id: i32 }
+obj UserProfile { user: UserId }
+
+impl CustomDto<UserId, UserIdDto> for UserId
+  fn write(value: UserId) -> UserIdDto
+    UserIdDto { id: value.value }
+
+  fn read(value: UserIdDto) -> Result<UserId, CustomDtoError>
+    if value.id > 0:
+      Ok<UserId> { value: UserId { value: value.id } }
+    else:
+      Err<CustomDtoError> {
+        error: CustomDtoError {
+          code: "user_id.non_positive",
+          message: "user id must be positive"
+        }
+      }
+
 pub fn primitive() -> i32
   42
 
@@ -21,6 +43,15 @@ pub fn echo_i64(value: i64) -> i64
   value
 
 pub fn echo_f32(value: f32) -> f32
+  value
+
+pub fn echo_bytes(value: Bytes) -> Bytes
+  value
+
+pub fn echo_user_id(value: UserId) -> UserId
+  value
+
+pub fn echo_user_profile(value: UserProfile) -> UserProfile
   value
 
 pub fn translate(point: Point, dx: i32, dy: i32) -> Point

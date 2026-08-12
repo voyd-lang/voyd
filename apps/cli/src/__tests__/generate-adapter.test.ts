@@ -11,9 +11,9 @@ const repoRoot = path.resolve(import.meta.dirname, "../../../..");
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((dir) =>
-      rm(dir, { recursive: true, force: true }),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((dir) => rm(dir, { recursive: true, force: true })),
   );
 });
 
@@ -28,10 +28,14 @@ describe("adapter generation", () => {
     const helper = await readFile(path.join(outDir, "voyd-adapter.ts"), "utf8");
     const wit = await readFile(path.join(outDir, "interface.wit"), "utf8");
     expect(helper).not.toContain("typeId");
-    expect(helper).toContain('readonly "render_static": (this: VoydPackageAdapterInvocationContext, arg0: string) => {');
+    expect(helper).toContain(
+      'readonly "render_static": (this: VoydPackageAdapterInvocationContext, arg0: string) => {',
+    );
     expect(wit).toContain("package voyd:markdown@1.0.0;");
     expect(wit).toMatch(/record type-[0-9a-f]{16}/);
-    expect(wit).toMatch(/render-static: func\(arg0: string\) -> type-[0-9a-f]{16}/);
+    expect(wit).toMatch(
+      /render-static: func\(arg0: string\) -> type-[0-9a-f]{16}/,
+    );
   });
 
   it("generates static imports for reachable application adapters", async () => {
@@ -50,10 +54,14 @@ describe("adapter generation", () => {
   it("generates Promise-aware bindings for external effects", async () => {
     const sourceDir = await temporaryDirectory();
     const outDir = path.join(sourceDir, "generated");
-    await writeFile(path.join(sourceDir, "remote.voyd"), `@external(id: "example:remote/data@1")
+    await writeFile(
+      path.join(sourceDir, "remote.voyd"),
+      `@external(id: "example:remote/data@1")
 pub eff Remote
   load(tail, id: i32) -> i32
-`, "utf8");
+`,
+      "utf8",
+    );
 
     await generatePackageAdapter({ index: sourceDir, outDir });
 
@@ -67,20 +75,28 @@ pub eff Remote
   it("emits structural contracts without compiler-local schema IDs", async () => {
     const sourceDir = await temporaryDirectory();
     const outDir = path.join(sourceDir, "generated");
-    await writeFile(path.join(sourceDir, "left.voyd"), `
+    await writeFile(
+      path.join(sourceDir, "left.voyd"),
+      `
 pub type Left = { value: i32 }
 
 @external(id: "example:shapes/values@1")
 pub fn left() -> Left
   left()
-`, "utf8");
-    await writeFile(path.join(sourceDir, "right.voyd"), `use std::string::type::String
+`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(sourceDir, "right.voyd"),
+      `use std::string::type::String
 pub type Right = { label: String }
 
 @external(id: "example:shapes/values@1")
 pub fn right() -> Right
   right()
-`, "utf8");
+`,
+      "utf8",
+    );
 
     await generatePackageAdapter({ index: sourceDir, outDir });
     const contract = JSON.parse(
@@ -93,10 +109,44 @@ pub fn right() -> Right
     expect(JSON.stringify(contract)).not.toContain("typeId");
   });
 
+  it("uses custom DTO representations in generated adapter contracts", async () => {
+    const sourceDir = await temporaryDirectory();
+    const outDir = path.join(sourceDir, "generated");
+    await writeFile(
+      path.join(sourceDir, "custom.voyd"),
+      `use std::data::{ CustomDto, CustomDtoError }
+use std::result::types::all
+
+obj AccountId { value: i32 }
+obj AccountIdDto { value: i32 }
+
+impl CustomDto<AccountId, AccountIdDto> for AccountId
+  fn write(value: AccountId) -> AccountIdDto
+    AccountIdDto { value: value.value }
+
+  fn read(value: AccountIdDto) -> Result<AccountId, CustomDtoError>
+    Ok<AccountId> { value: AccountId { value: value.value } }
+
+@external(id: "example:custom/account@1")
+pub fn lookup(id: AccountId) -> AccountId
+  lookup(id)
+`,
+      "utf8",
+    );
+
+    await generatePackageAdapter({ index: sourceDir, outDir });
+    const contract = await readFile(path.join(outDir, "contract.json"), "utf8");
+    const helper = await readFile(path.join(outDir, "voyd-adapter.ts"), "utf8");
+    expect(contract).not.toContain('"kind": "custom"');
+    expect(helper).toContain('{ "value": number }');
+  });
+
   it("rejects recursive DTOs that cannot become Component Model values", async () => {
     const sourceDir = await temporaryDirectory();
     const outDir = path.join(sourceDir, "generated");
-    await writeFile(path.join(sourceDir, "tree.voyd"), `pub obj Node {
+    await writeFile(
+      path.join(sourceDir, "tree.voyd"),
+      `pub obj Node {
   api value: i32,
   api next?: Node
 }
@@ -104,20 +154,27 @@ pub fn right() -> Right
 @external(id: "example:tree/model@1")
 pub fn root() -> Node
   root()
-`, "utf8");
+`,
+      "utf8",
+    );
 
-    await expect(generatePackageAdapter({ index: sourceDir, outDir }))
-      .rejects.toMatchObject({
-        diagnostics: [expect.objectContaining({
+    await expect(
+      generatePackageAdapter({ index: sourceDir, outDir }),
+    ).rejects.toMatchObject({
+      diagnostics: [
+        expect.objectContaining({
           message: expect.stringMatching(/recursive.*Component Model/),
-        })],
-      });
+        }),
+      ],
+    });
   });
 
   it("preserves variant discriminators and payload field names", async () => {
     const sourceDir = await temporaryDirectory();
     const outDir = path.join(sourceDir, "generated");
-    await writeFile(path.join(sourceDir, "variants.voyd"), `use std::optional::all
+    await writeFile(
+      path.join(sourceDir, "variants.voyd"),
+      `use std::optional::all
 
 @external(id: "example:variants/options@1")
 pub fn read(value: Option<i32>) -> Option<i32>
@@ -126,20 +183,26 @@ pub fn read(value: Option<i32>) -> Option<i32>
 @external(id: "example:variants/options@1")
 pub fn read_some(value: Some<i32>) -> Some<i32>
   read_some(value)
-`, "utf8");
+`,
+      "utf8",
+    );
 
     await generatePackageAdapter({ index: sourceDir, outDir });
     const helper = await readFile(path.join(outDir, "voyd-adapter.ts"), "utf8");
     const wit = await readFile(path.join(outDir, "interface.wit"), "utf8");
     expect(helper).toContain('tag: "Some"');
-    expect(wit).toMatch(/record type-[0-9a-f]{16}-some-payload \{\n\s+value: s32,/);
+    expect(wit).toMatch(
+      /record type-[0-9a-f]{16}-some-payload \{\n\s+value: s32,/,
+    );
     expect(wit).toMatch(/record type-[0-9a-f]{16} \{\n\s+tag: string,/);
   });
 
   it("rejects variant payload fields named tag", async () => {
     const sourceDir = await temporaryDirectory();
     const outDir = path.join(sourceDir, "generated");
-    await writeFile(path.join(sourceDir, "tag-collision.voyd"), `use std::enums::{ enum }
+    await writeFile(
+      path.join(sourceDir, "tag-collision.voyd"),
+      `use std::enums::{ enum }
 use std::string::type::String
 
 enum TaggedResult
@@ -149,25 +212,36 @@ enum TaggedResult
 @external(id: "example:variants/tagged@1")
 pub fn read(value: TaggedResult) -> TaggedResult
   read(value)
-`, "utf8");
+`,
+      "utf8",
+    );
 
-    await expect(generatePackageAdapter({ index: sourceDir, outDir }))
-      .rejects.toMatchObject({
-        diagnostics: [expect.objectContaining({
-          message: expect.stringMatching(/payload fields named "tag".*discriminator/i),
-        })],
-      });
+    await expect(
+      generatePackageAdapter({ index: sourceDir, outDir }),
+    ).rejects.toMatchObject({
+      diagnostics: [
+        expect.objectContaining({
+          message: expect.stringMatching(
+            /payload fields named "tag".*discriminator/i,
+          ),
+        }),
+      ],
+    });
   });
 
   it("escapes WIT reserved field identifiers", async () => {
     const sourceDir = await temporaryDirectory();
     const outDir = path.join(sourceDir, "generated");
-    await writeFile(path.join(sourceDir, "keywords.voyd"), `pub type Keyword = { type: i32 }
+    await writeFile(
+      path.join(sourceDir, "keywords.voyd"),
+      `pub type Keyword = { type: i32 }
 
 @external(id: "example:keywords/fields@1")
 pub fn read(value: Keyword) -> i32
   read(value)
-`, "utf8");
+`,
+      "utf8",
+    );
 
     await generatePackageAdapter({ index: sourceDir, outDir });
     const wit = await readFile(path.join(outDir, "interface.wit"), "utf8");
@@ -177,7 +251,9 @@ pub fn read(value: Keyword) -> i32
   it("uses unescaped keyword fragments in generated WIT payload names", async () => {
     const sourceDir = await temporaryDirectory();
     const outDir = path.join(sourceDir, "generated");
-    await writeFile(path.join(sourceDir, "keyword-variant.voyd"), `use std::enums::{ enum }
+    await writeFile(
+      path.join(sourceDir, "keyword-variant.voyd"),
+      `use std::enums::{ enum }
 
 enum KeywordVariant
   Type { value: i32 }
@@ -186,7 +262,9 @@ enum KeywordVariant
 @external(id: "example:keywords/variants@1")
 pub fn read(value: KeywordVariant) -> KeywordVariant
   read(value)
-`, "utf8");
+`,
+      "utf8",
+    );
 
     await generatePackageAdapter({ index: sourceDir, outDir });
     const wit = await readFile(path.join(outDir, "interface.wit"), "utf8");
@@ -197,17 +275,22 @@ pub fn read(value: KeywordVariant) -> KeywordVariant
   it("rejects distinct API names that normalize to the same WIT name", async () => {
     const sourceDir = await temporaryDirectory();
     const outDir = path.join(sourceDir, "generated");
-    await writeFile(path.join(sourceDir, "collisions.voyd"), `@external(id: "example:names/functions@1")
+    await writeFile(
+      path.join(sourceDir, "collisions.voyd"),
+      `@external(id: "example:names/functions@1")
 pub fn Read() -> i32
   Read()
 
 @external(id: "example:names/functions@1")
 pub fn read() -> i32
   read()
-`, "utf8");
+`,
+      "utf8",
+    );
 
-    await expect(generatePackageAdapter({ index: sourceDir, outDir }))
-      .rejects.toThrow(/WIT name collision.*Read.*read/);
+    await expect(
+      generatePackageAdapter({ index: sourceDir, outDir }),
+    ).rejects.toThrow(/WIT name collision.*Read.*read/);
   });
 });
 

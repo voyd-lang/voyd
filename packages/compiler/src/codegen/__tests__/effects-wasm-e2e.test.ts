@@ -1,9 +1,11 @@
 import { resolve } from "node:path";
+import { decode, encode } from "@msgpack/msgpack";
 import { describe, expect, it } from "vitest";
 import { createVoydHost } from "@voyd-lang/js-host";
 import { createEffectsImports } from "./support/wasm-imports.js";
 import { compileEffectFixture } from "./support/effects-harness.js";
 import { wasmBufferSource } from "./support/wasm-utils.js";
+import { hostExportId } from "../exports/export-abi.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -195,19 +197,43 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
     const mainEffectful = instance.exports.main_effectful as CallableFunction;
     const effectStatus = instance.exports.effect_status as CallableFunction;
     const effectCont = instance.exports.effect_cont as CallableFunction;
+    const effectLen = instance.exports.effect_len as CallableFunction;
     const resumeEffectful = instance.exports.resume_effectful as CallableFunction;
 
     const bufferPtr = 64;
     const bufferCap = 1024;
-    const first = mainEffectful(bufferPtr, bufferCap);
+    const invocation = encode([2, 0, hostExportId("main"), []], {
+      useBigInt64: true,
+    }) as Uint8Array;
+    new Uint8Array(memory.buffer, bufferPtr, invocation.length).set(invocation);
+    const first = mainEffectful(
+      bufferPtr,
+      invocation.length,
+      bufferPtr,
+      bufferCap,
+    );
     expect(effectStatus(first)).toBe(1);
     const continuation = effectCont(first);
-    new Uint8Array(memory.buffer, bufferPtr, 1)[0] = 2;
-    const resumed = resumeEffectful(continuation, bufferPtr, 1, bufferCap);
+    const requestLength = effectLen(first) as number;
+    const requestFrame = decode(
+      new Uint8Array(memory.buffer, bufferPtr, requestLength),
+      { useBigInt64: true },
+    ) as unknown[];
+    const response = encode(
+      [2, 3, requestFrame[2], [0, [requestFrame[8], 2]]],
+      { useBigInt64: true },
+    ) as Uint8Array;
+    new Uint8Array(memory.buffer, bufferPtr, response.length).set(response);
+    const resumed = resumeEffectful(
+      continuation,
+      bufferPtr,
+      response.length,
+      bufferCap,
+    );
     expect(effectStatus(resumed)).toBe(1);
 
     expect(() =>
-      resumeEffectful(continuation, bufferPtr, 1, bufferCap)
+      resumeEffectful(continuation, bufferPtr, response.length, bufferCap)
     ).toThrow(/unreachable|runtime/i);
   });
 });

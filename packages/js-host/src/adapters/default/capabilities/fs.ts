@@ -1,11 +1,8 @@
 import {
-  fsSuccessPayload,
   globalRecord,
-  hostError,
   isRecord,
   isNodeCompatibleRuntime,
   joinListDirChildPath,
-  normalizeByte,
   readField,
   toNumberOrUndefined,
   toPath,
@@ -74,22 +71,47 @@ const fsErrorKind = (error: unknown): FsErrorKind => {
   return "other";
 };
 
-const fsHostError = (error: unknown): Record<string, unknown> =>
-  hostError(fsErrorMessage(error), fsErrorCode(error), fsErrorKind(error));
+const fsSuccess = <T>(value: T): Record<string, unknown> => ({
+  ok: true,
+  value,
+  error_kind: "other",
+  error_code: 0,
+  error_message: "",
+});
+
+const fsHostError = <T>(
+  error: unknown,
+  value: T,
+): Record<string, unknown> => ({
+  ok: false,
+  value,
+  error_kind: fsErrorKind(error),
+  error_code: fsErrorCode(error),
+  error_message: fsErrorMessage(error),
+});
+
+const UNIT_VALUE = Object.freeze({});
+
+const bytesFromPayload = (payload: unknown): Uint8Array => {
+  const value = readField(payload, "bytes");
+  if (!(value instanceof Uint8Array)) {
+    throw new Error("expected filesystem bytes payload to be Uint8Array");
+  }
+  return value;
+};
+
+const stringFromPayload = (payload: unknown): string =>
+  toStringOrUndefined(readField(payload, "value")) ?? "";
 
 const writeContentFromPayload = (payload: unknown): FsWriteContent => {
   const kind = toStringOrUndefined(readField(payload, "kind"));
-  if (kind === "string") {
-    return toStringOrUndefined(readField(payload, "value")) ?? "";
-  }
   if (kind === "bytes") {
-    const bytesValue = readField(payload, "bytes");
-    const rawBytes = Array.isArray(bytesValue) ? bytesValue : [];
-    return Uint8Array.from(rawBytes.map(normalizeByte));
+    return bytesFromPayload(payload);
   }
-  throw new Error(
-    "expected filesystem write payload kind to be string or bytes"
-  );
+  if (kind === "string") {
+    return stringFromPayload(payload);
+  }
+  throw new Error("expected filesystem write payload kind to be string or bytes");
 };
 
 const runtimeProcessId = (): number => {
@@ -265,20 +287,17 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
             : await denoReadFile!(resolvedPath);
           if (bytes.byteLength > effectBufferSize) {
             return tail(
-              hostError(
-                `Default fs adapter read_bytes response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or read a smaller payload.`
+              fsHostError(
+                new Error(
+                  `Default fs adapter read_bytes response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or read a smaller payload.`
+                ),
+                new Uint8Array(),
               )
             );
           }
-          return tail(
-            fsSuccessPayload({
-              opName: "read_bytes",
-              value: Array.from(bytes.values()),
-              effectBufferSize,
-            })
-          );
+          return tail(fsSuccess(Uint8Array.from(bytes)));
         } catch (error) {
-          return tail(fsHostError(error));
+          return tail(fsHostError(error, new Uint8Array()));
         }
       },
     });
@@ -294,15 +313,19 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           const value = hasNodeFs
             ? new TextDecoder().decode(await nodeFs!.readFile(resolvedPath))
             : await denoReadTextFile!(resolvedPath);
-          return tail(
-            fsSuccessPayload({
-              opName: "read_string",
-              value,
-              effectBufferSize,
-            })
-          );
+          if (new TextEncoder().encode(value).byteLength > effectBufferSize) {
+            return tail(
+              fsHostError(
+                new Error(
+                  `Default fs adapter read_string response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or read a smaller payload.`
+                ),
+                "",
+              ),
+            );
+          }
+          return tail(fsSuccess(value));
         } catch (error) {
-          return tail(fsHostError(error));
+          return tail(fsHostError(error, ""));
         }
       },
     });
@@ -315,17 +338,15 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
       handler: async ({ tail }, payload) => {
         try {
           const pathValue = toPath(readField(payload, "path"));
-          const bytesValue = readField(payload, "bytes");
-          const rawBytes = Array.isArray(bytesValue) ? bytesValue : [];
-          const bytes = Uint8Array.from(rawBytes.map(normalizeByte));
+          const bytes = bytesFromPayload(payload);
           if (hasNodeFs) {
             await nodeFs!.writeFile(pathValue, bytes);
           } else {
             await denoWriteFile!(pathValue, bytes);
           }
-          return tail({ ok: true });
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -344,9 +365,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           } else {
             await denoWriteTextFile!(pathValue, value);
           }
-          return tail({ ok: true });
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -389,9 +410,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           } else {
             await denoRemove!(resolvedPath);
           }
-          return tail({ ok: true });
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -413,20 +434,29 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
               names.push(entry.name);
             }
           }
-          return tail(
-            fsSuccessPayload({
-              opName: "list_dir",
-              value: names.map((name) =>
-                joinListDirChildPath({
-                  directoryPath: resolvedPath,
-                  childName: name,
-                })
-              ),
-              effectBufferSize,
-            })
+          const value = names.map((name) =>
+            joinListDirChildPath({
+              directoryPath: resolvedPath,
+              childName: name,
+            }),
           );
+          const encodedBytes = value.reduce(
+            (total, child) => total + new TextEncoder().encode(child).byteLength,
+            0,
+          );
+          if (encodedBytes > effectBufferSize) {
+            return tail(
+              fsHostError(
+                new Error(
+                  `Default fs adapter list_dir response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or list a smaller directory.`,
+                ),
+                [],
+              ),
+            );
+          }
+          return tail(fsSuccess(value));
         } catch (error) {
-          return tail(fsHostError(error));
+          return tail(fsHostError(error, []));
         }
       },
     });
@@ -444,9 +474,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           } else {
             await denoMkdir!(resolvedPath, { recursive: true });
           }
-          return tail({ ok: true });
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -465,9 +495,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           } else {
             await denoRename!(fromPath, toPathValue);
           }
-          return tail({ ok: true });
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -481,9 +511,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
         try {
           const destination = toPath(readField(payload, "path"));
           await writeAtomic(destination, writeContentFromPayload(payload));
-          return tail({ ok: true });
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -497,9 +527,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
         try {
           const destination = toPath(readField(payload, "path"));
           await writeExclusive(destination, writeContentFromPayload(payload));
-          return tail({ ok: true });
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });

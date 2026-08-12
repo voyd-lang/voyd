@@ -558,7 +558,7 @@ test "literal braces remain literal path text":
 
 test "raw JSON inputs remain opaque":
   let raw_json_app = app(openapi: { title: "Raw JSON", version: "1" })
-    .post("/raw-json", body: json_body(), handler: raw_json_input_reply)
+    .post<JsonValue, JsonBody>("/raw-json", body: json_body(), handler: raw_json_input_reply)
   let raw_json = openapi_string(raw_json_app)
   require_contains(raw_json, "\"application/json\"".as_slice(), "raw JSON media type was omitted")
   require_contains(raw_json, "\"default\"".as_slice(), "raw JSON response was fabricated")

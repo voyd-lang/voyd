@@ -5,9 +5,6 @@ use std::array::Array
 use std::http::{ Body, Headers, IncomingRequest, Method, Response }
 use std::http::server::self as server
 use std::http::wire::self as wire
-use std::host_dto::HostDto
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
 use std::shared_cell::SharedCell
@@ -158,27 +155,18 @@ fn capture_sse(capture: SharedCell<StreamCapture>) -> Response
       let _ = sender.send(SseEvent::data("x".as_slice().to_string().repeat(17000)))
   server::ResponseStream::begin_stream(resume, payload):
     let _ = wire::decode_response(payload)
-    resume(msgpack::make_null())
+    resume(Unit {})
   server::ResponseWriter::write_chunk(tail, payload):
-    match(wire::decode_body(payload))
-      Ok<Body> { value }:
-        match(value.as_text())
-          Ok<String> { value }:
-            capture.with_mut((~current) =>
-              current.body = current.body.concat(value.as_slice())
-            )
-          Err:
-            void
+    match(Body::bytes(payload).as_text())
+      Ok<String> { value }:
+        capture.with_mut((~current) =>
+          current.body = current.body.concat(value.as_slice())
+        )
       Err:
         void
-    tail(test_host_ok())
-  server::ResponseStream::finish_stream(_resume, _payload):
+    tail(wire::encode_result(Ok<Unit> { value: Unit {} }, Unit {}))
+  server::ResponseStream::finish_stream(_resume):
     Response::ok().with(
       header: "content-type".as_slice(),
       value: "text/event-stream; charset=utf-8".as_slice()
     )
-
-fn test_host_ok() -> MsgPack
-  HostDto::init()
-    .set("ok", msgpack::make_bool(true))
-    .pack()

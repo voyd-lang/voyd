@@ -18,13 +18,11 @@ import { walkHirExpression } from "../hir-walk.js";
 import type { ContinuationSite } from "./effect-lowering/types.js";
 import { performSiteArgTypes } from "./perform-site.js";
 import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
-import type { SerializerMetadata } from "../../semantics/symbol-index.js";
 import {
-  findSerializerForDeclaredType,
-  findSerializerForType,
-  serializerKeyFor,
-} from "../serializer.js";
-import { deriveBoundarySchema, type BoundarySchema } from "../boundary/schema.js";
+  deriveBoundarySchema,
+  withDtoFingerprint,
+  type BoundarySchema,
+} from "../boundary/schema.js";
 
 const encoder = new TextEncoder();
 const FNV_OFFSET = 14695981039346656037n;
@@ -52,6 +50,10 @@ export type EffectOpEntry = {
   effectName: string;
   opName: string;
   operationId?: string;
+  boundary?: {
+    params: readonly BoundarySchema[];
+    result: BoundarySchema;
+  };
   external?: {
     params: readonly BoundarySchema[];
     result: BoundarySchema;
@@ -61,6 +63,7 @@ export type EffectOpEntry = {
 
 export type EffectRegistry = {
   entries: readonly EffectOpEntry[];
+  usedOpIndexes: ReadonlySet<number>;
   effectIdsByModule: ReadonlyMap<string, readonly EffectIdInfo[]>;
   getEntry: (key: EffectOpKey) => EffectOpEntry | undefined;
   getOpIndex: (key: EffectOpKey) => number | undefined;
@@ -103,6 +106,46 @@ const mergeExternalMetadata = ({
   }
 };
 
+const boundaryMetadataFor = ({
+  ctx,
+  label,
+  params,
+  result,
+}: {
+  ctx: CodegenContext;
+  label: string;
+  params: readonly TypeId[];
+  result: TypeId;
+}): EffectOpEntry["boundary"] => {
+  if (
+    ![...params, result].every((typeId) =>
+      ctx.program.dtoPlans.isEligible({ typeId, moduleId: ctx.moduleId }),
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    params: params.map((typeId, index) =>
+      withDtoFingerprint(
+        deriveBoundarySchema({
+          typeId,
+          ctx,
+          label: `${label} arg${index}`,
+          options: { tagStandaloneVariants: true },
+        }),
+      ),
+    ),
+    result: withDtoFingerprint(
+      deriveBoundarySchema({
+        typeId: result,
+        ctx,
+        label: `${label} result`,
+        options: { tagStandaloneVariants: true },
+      }),
+    ),
+  };
+};
+
 const toEffectOpKey = (
   effectId: EffectIdHash,
   opId: number,
@@ -143,38 +186,41 @@ type SignatureTypeKeyState = {
   ctx: CodegenContext;
   active: Map<TypeId, number>;
   binders: Map<TypeParamId, number>;
-  serializerOverride?: SerializerMetadata;
 };
 
 const signatureTypeKeyFor = ({
   typeId,
   ctx,
-  serializerOverride,
 }: {
   typeId: TypeId;
   ctx: CodegenContext;
-  serializerOverride?: SerializerMetadata;
-}): string =>
-  signatureTypeKeyForInternal({
+}): string => {
+  const fingerprint = ctx.program.dtoPlans.isEligible({
+    typeId,
+    moduleId: ctx.moduleId,
+  })
+    ? ctx.program.dtoPlans.get({ typeId, moduleId: ctx.moduleId }).fingerprint
+    : undefined;
+  if (fingerprint) {
+    return `dto:${fingerprint}`;
+  }
+  return signatureTypeKeyForInternal({
     typeId,
     ctx,
     active: new Map<TypeId, number>(),
     binders: new Map<TypeParamId, number>(),
-    serializerOverride,
   });
+};
 
 const signatureTypeKeyForInternal = ({
   typeId,
   ctx,
   active,
   binders,
-  serializerOverride,
 }: SignatureTypeKeyState): string => {
   const activeIndex = active.get(typeId);
   if (typeof activeIndex === "number") {
-    const serializer = serializerOverride ?? findSerializerForType(typeId, ctx);
-    const suffix = serializer ? `#${serializerKeyFor(serializer)}` : "";
-    return `recursive:${activeIndex}${suffix}`;
+    return `recursive:${activeIndex}`;
   }
   active.set(typeId, active.size);
   try {
@@ -193,15 +239,15 @@ const signatureTypeKeyForInternal = ({
           ctx,
           active,
           binders: nextBinders,
-          serializerOverride,
         })}`;
         break;
       }
       case "type-param-ref": {
         const binderIndex = binders.get(desc.param);
-        baseKey = typeof binderIndex === "number"
-          ? `recparam:${binderIndex}`
-          : `typeparam:${desc.param}`;
+        baseKey =
+          typeof binderIndex === "number"
+            ? `recparam:${binderIndex}`
+            : `typeparam:${desc.param}`;
         break;
       }
       case "nominal-object":
@@ -319,8 +365,7 @@ const signatureTypeKeyForInternal = ({
         baseKey = `${(desc as { kind: string }).kind}:${typeId}`;
         break;
     }
-    const serializer = serializerOverride ?? findSerializerForType(typeId, ctx);
-    return serializer ? `${baseKey}#${serializerKeyFor(serializer)}` : baseKey;
+    return baseKey;
   } finally {
     active.delete(typeId);
   }
@@ -330,26 +375,20 @@ export const signatureHashFor = ({
   params,
   returnType,
   ctx,
-  paramSerializerOverrides,
-  returnSerializerOverride,
 }: {
   params: readonly TypeId[];
   returnType: TypeId;
   ctx: CodegenContext;
-  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
-  returnSerializerOverride?: SerializerMetadata;
 }): number => {
-  const paramKeys = params.map((param, index) =>
+  const paramKeys = params.map((param) =>
     signatureTypeKeyFor({
       typeId: param,
       ctx,
-      serializerOverride: paramSerializerOverrides?.[index],
     }),
   );
   const returnKey = signatureTypeKeyFor({
     typeId: returnType,
     ctx,
-    serializerOverride: returnSerializerOverride,
   });
   return murmurHash3(`(${paramKeys.join(",")})->${returnKey}`);
 };
@@ -365,8 +404,6 @@ export const resolvePerformSignature = ({
 }): {
   params: readonly TypeId[];
   returnType: TypeId;
-  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
-  returnSerializerOverride?: SerializerMetadata;
 } => {
   const signature = ctx.program.functions.getSignature(
     ctx.moduleId,
@@ -400,13 +437,6 @@ export const resolvePerformSignature = ({
         returnType: signature.returnType,
         fallbackReturnType: signature.returnType,
       }),
-      paramSerializerOverrides: signature.parameters.map((param) =>
-        param.declaredSerializer ??
-        findSerializerForDeclaredType(param.declaredType, ctx),
-      ),
-      returnSerializerOverride:
-        signature.declaredReturnSerializer ??
-        findSerializerForDeclaredType(signature.declaredReturnType, ctx),
     };
   }
   const signatureParams =
@@ -428,13 +458,6 @@ export const resolvePerformSignature = ({
       returnType: exprType,
       fallbackReturnType: signature?.returnType,
     }),
-    paramSerializerOverrides: signature?.parameters.map((param) =>
-      param.declaredSerializer ??
-      findSerializerForDeclaredType(param.declaredType, ctx),
-    ),
-    returnSerializerOverride:
-      signature?.declaredReturnSerializer ??
-      findSerializerForDeclaredType(signature?.declaredReturnType, ctx),
   };
 };
 
@@ -501,9 +524,7 @@ const registryEffectAndOpNames = ({
 }: {
   ctx: CodegenContext;
   sourceModuleId: string;
-  effectMeta:
-    | CodegenContext["module"]["meta"]["effects"][number]
-    | undefined;
+  effectMeta: CodegenContext["module"]["meta"]["effects"][number] | undefined;
   localEffectIndex: number;
   opIndex: number;
 }): { effectName: string; opName: string } => {
@@ -559,7 +580,10 @@ export const buildEffectRegistry = (
         owner === undefined ||
         !reachableFunctionSymbols ||
         reachableFunctionSymbols.has(
-          ctx.program.symbols.canonicalIdOf(ctx.moduleId, owner) as ProgramSymbolId,
+          ctx.program.symbols.canonicalIdOf(
+            ctx.moduleId,
+            owner,
+          ) as ProgramSymbolId,
         );
       const info = ctx.module.effectsInfo.operations.get(site.effectSymbol);
       if (!info) {
@@ -568,7 +592,9 @@ export const buildEffectRegistry = (
       const sourceModuleId = info.sourceModuleId ?? ctx.moduleId;
       const sourceModule = ctx.program.modules.get(sourceModuleId);
       if (!sourceModule) {
-        throw new Error(`missing source module for effect op ${site.effectSymbol}`);
+        throw new Error(
+          `missing source module for effect op ${site.effectSymbol}`,
+        );
       }
       const effectIds = effectIdsByModule.get(sourceModuleId);
       if (!effectIds) {
@@ -591,7 +617,8 @@ export const buildEffectRegistry = (
       const label = `${sourceModuleId}::${effectName}.${opName}`;
       const resumeKind =
         info.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
-      const instances = owner !== undefined ? (instancesBySymbol.get(owner) ?? []) : [];
+      const instances =
+        owner !== undefined ? (instancesBySymbol.get(owner) ?? []) : [];
       const instanceList = instances.length > 0 ? instances : [undefined];
 
       instanceList.forEach((instanceId) => {
@@ -604,32 +631,25 @@ export const buildEffectRegistry = (
           params: signature.params,
           returnType: signature.returnType,
           ctx,
-          paramSerializerOverrides: signature.paramSerializerOverrides,
-          returnSerializerOverride: signature.returnSerializerOverride,
         });
         const key = toEffectOpKey(effectId.hash, info.opIndex, signatureHash);
-        const external = effectMeta?.external
-          ? {
-              params: signature.params.map((typeId, index) =>
-                deriveBoundarySchema({
-                  typeId,
-                  ctx,
-                  label: `${effectId.id}::${opName} arg${index}`,
-                  options: { tagStandaloneVariants: true },
-                }),
-              ),
-              result: deriveBoundarySchema({
-                typeId: signature.returnType,
-                ctx,
-                label: `${effectId.id}::${opName} result`,
-                options: { tagStandaloneVariants: true },
-              }),
-              ...(!siteReachable ? { declaredOnly: true } : {}),
-            }
-          : undefined;
+        const boundary = boundaryMetadataFor({
+          ctx,
+          label: `${effectId.id}::${opName}`,
+          params: signature.params,
+          result: signature.returnType,
+        });
+        const external =
+          effectMeta?.external && boundary
+            ? {
+                ...boundary,
+                ...(!siteReachable ? { declaredOnly: true } : {}),
+              }
+            : undefined;
         const existing = entriesByKey.get(key);
         if (existing) {
           mergeExternalMetadata({ entry: existing, candidate: external });
+          existing.boundary ??= boundary;
           return;
         }
         entriesByKey.set(key, {
@@ -642,6 +662,7 @@ export const buildEffectRegistry = (
           effectName,
           opName,
           operationId: effectMeta?.operations[info.opIndex]?.operationId,
+          ...(boundary ? { boundary } : {}),
           ...(external ? { external } : {}),
         });
       });
@@ -699,12 +720,16 @@ export const buildEffectRegistry = (
             returnType: signature.returnType,
             ctx,
           });
-          const key = toEffectOpKey(
-            effectId.hash,
-            info.opIndex,
-            signatureHash,
-          );
+          const key = toEffectOpKey(effectId.hash, info.opIndex, signatureHash);
+          const boundary = boundaryMetadataFor({
+            ctx,
+            label: `${effectId.id}::${opName}`,
+            params: signature.params,
+            result: signature.returnType,
+          });
           if (entriesByKey.has(key)) {
+            const existing = entriesByKey.get(key)!;
+            existing.boundary ??= boundary;
             return;
           }
           entriesByKey.set(key, {
@@ -717,6 +742,7 @@ export const buildEffectRegistry = (
             effectName,
             opName,
             operationId: effectMeta?.operations[info.opIndex]?.operationId,
+            ...(boundary ? { boundary } : {}),
           });
         });
       });
@@ -732,7 +758,8 @@ export const buildEffectRegistry = (
       ctx.module.meta.effects.forEach((effect, localEffectIndex) => {
         if (!effect.external) return;
         const effectId = effectIds[localEffectIndex];
-        if (!effectId) throw new Error(`missing external effect id for ${effect.name}`);
+        if (!effectId)
+          throw new Error(`missing external effect id for ${effect.name}`);
         effect.operations.forEach((op, opId) => {
           const { effectName, opName } = registryEffectAndOpNames({
             ctx,
@@ -741,54 +768,65 @@ export const buildEffectRegistry = (
             localEffectIndex,
             opIndex: opId,
           });
-          const signature = ctx.program.functions.getSignature(ctx.moduleId, op.symbol);
-          if (!signature) throw new Error(`missing external effect signature for ${effect.name}.${op.name}`);
+          const signature = ctx.program.functions.getSignature(
+            ctx.moduleId,
+            op.symbol,
+          );
+          if (!signature)
+            throw new Error(
+              `missing external effect signature for ${effect.name}.${op.name}`,
+            );
           if (signature.typeParams.length > 0) {
-            throw new Error(`generic external effect operations are not supported: ${effect.name}.${op.name}`);
+            throw new Error(
+              `generic external effect operations are not supported: ${effect.name}.${op.name}`,
+            );
           }
           const params = signature.parameters.map((param) => param.typeId);
           const signatureHash = signatureHashFor({
             params,
             returnType: signature.returnType,
             ctx,
-            paramSerializerOverrides: signature.parameters.map((param) =>
-              param.declaredSerializer ?? findSerializerForDeclaredType(param.declaredType, ctx),
-            ),
-            returnSerializerOverride:
-              signature.declaredReturnSerializer ??
-              findSerializerForDeclaredType(signature.declaredReturnType, ctx),
           });
           const key = toEffectOpKey(effectId.hash, opId, signatureHash);
           const external = {
-            params: params.map((typeId, index) => deriveBoundarySchema({
-              typeId,
-              ctx,
-              label: `${effectId.id}::${opName} arg${index}`,
-              options: { tagStandaloneVariants: true },
-            })),
-            result: deriveBoundarySchema({
-              typeId: signature.returnType,
-              ctx,
-              label: `${effectId.id}::${opName} result`,
-              options: { tagStandaloneVariants: true },
-            }),
+            params: params.map((typeId, index) =>
+              withDtoFingerprint(
+                deriveBoundarySchema({
+                  typeId,
+                  ctx,
+                  label: `${effectId.id}::${opName} arg${index}`,
+                  options: { tagStandaloneVariants: true },
+                }),
+              ),
+            ),
+            result: withDtoFingerprint(
+              deriveBoundarySchema({
+                typeId: signature.returnType,
+                ctx,
+                label: `${effectId.id}::${opName} result`,
+                options: { tagStandaloneVariants: true },
+              }),
+            ),
             declaredOnly: true,
           };
           const existing = entriesByKey.get(key);
           if (existing) {
             existing.external ??= external;
+            existing.boundary ??= external;
             return;
           }
           entriesByKey.set(key, {
             opIndex: -1,
             effectId,
             opId,
-            resumeKind: op.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume,
+            resumeKind:
+              op.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume,
             signatureHash,
             label: `${ctx.moduleId}::${effectName}.${opName}`,
             effectName,
             opName,
             operationId: op.operationId,
+            boundary: external,
             external,
           });
         });
@@ -822,12 +860,21 @@ export const buildEffectRegistry = (
     );
     byKey.set(key, entry);
   });
+  const usedOpIndexes = new Set<number>();
+  const markUsed = (key: EffectOpKey): EffectOpEntry | undefined => {
+    const entry = byKey.get(key);
+    if (entry) {
+      usedOpIndexes.add(entry.opIndex);
+    }
+    return entry;
+  };
 
   return {
     entries,
+    usedOpIndexes,
     effectIdsByModule,
-    getEntry: (key) => byKey.get(key),
-    getOpIndex: (key) => byKey.get(key)?.opIndex,
+    getEntry: markUsed,
+    getOpIndex: (key) => markUsed(key)?.opIndex,
     getEffectId: (moduleId, localEffectIndex) =>
       effectIdsByModule.get(moduleId)?.[localEffectIndex],
     keyFor: (effectId, opId, signatureHash) =>
@@ -877,8 +924,6 @@ export const getEffectOpInstanceInfo = ({
     params: signature.params,
     returnType: signature.returnType,
     ctx,
-    paramSerializerOverrides: signature.paramSerializerOverrides,
-    returnSerializerOverride: signature.returnSerializerOverride,
   });
   const key = registry.keyFor(effectId.hash, info.opIndex, signatureHash);
   const opIndex = registry.getOpIndex(key);

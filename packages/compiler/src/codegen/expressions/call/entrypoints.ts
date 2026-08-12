@@ -491,7 +491,9 @@ export const compileMethodCallExpr = (
     typeInstanceId,
   });
   if (typeof targetFunctionId !== "number") {
-    throw new Error("codegen missing method call target");
+    throw new Error(
+      `codegen missing method call target at ${expr.span.file}:${expr.span.start}`,
+    );
   }
 
   const targetRef = ctx.program.symbols.refOf(
@@ -571,8 +573,14 @@ export const compileMethodCallExpr = (
     typeInstanceId,
   });
   if (!meta) {
+    const targetLocation = ctx.program.modules
+      .get(targetRef.moduleId)
+      ?.functionLocations.get(targetRef.symbol);
+    const location = targetLocation
+      ? ` at ${targetLocation.filePath}:${targetLocation.startLine}:${targetLocation.startColumn}`
+      : "";
     throw new Error(
-      `codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}`,
+      `codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}${location} from ${ctx.moduleId}`,
     );
   }
   const resolvedMeta = receiverSpecializedMetaForCall({
@@ -1059,7 +1067,7 @@ const shouldCompileIntrinsicCall = ({
   usesSignature !== true ||
   external ||
   intrinsicName === "__retain_callback" ||
-  intrinsicName === "__boundary_retain_callback" ||
+  intrinsicName === "__host_retain_callback" ||
   intrinsicName === "__render_retain_callback" ||
   intrinsicName === "__render_claim_callback";
 

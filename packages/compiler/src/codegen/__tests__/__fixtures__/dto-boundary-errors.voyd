@@ -1,0 +1,19 @@
+use std::bytes::ByteBuffer
+use std::data::self as data
+use std::optional::types::all
+
+obj RecursiveNode {
+  value: i32,
+  next: Optional<RecursiveNode>
+}
+
+pub fn reject_invalid_byte() -> i32
+  let ~buffer = ByteBuffer::init()
+  buffer.push(256)
+  buffer.len()
+
+pub fn reject_cyclic_data() -> i32
+  let ~node = RecursiveNode { value: 1, next: None {} }
+  node.next = Some<RecursiveNode> { value: node }
+  let _ = data::encode(node)
+  0

@@ -77,18 +77,17 @@ role.
 
 The supported metadata has four distinct jobs:
 
-- `@compiler_contract(id: "...")` assigns an ordinary std function a stable,
-  compiler-owned role. Role IDs use dotted capability names; the current
-  catalog is the `voyd.std.boundary.msgpack.*` family in
-  `packages/compiler/src/compiler-contracts/function-contracts.ts`. The
-  boundary serializer, decoder, value constructors/accessors, array/map
-  helpers, and string constructor each have a separate role ID. Optimizer
-  reachability and host-boundary codegen resolve those IDs through the program
-  symbol arena instead of repeating function names and module paths.
-  Synthetic loaders that must place providers in the module graph before this
-  metadata exists use the single catalog-owned
-  `BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES` bootstrap list; it is never used
-  as a codegen identity.
+- `@compiler_contract(id: "...")` assigns an ordinary std function or trait a
+  stable, compiler-owned role. Function contracts identify singular helpers.
+  Trait contracts define an exact interface for selectable implementations.
+  Optimizer reachability and codegen resolve both through the program symbol
+  arena instead of repeating source names and module paths.
+- `@compiler_impl(id: "...", version: ...)` registers a stable implementation
+  of a compiler-contract trait. The trait supplies the contract identity; the
+  annotation supplies the implementation identity and version. The selected
+  host transport uses this mechanism, and its concrete methods are resolved
+  from semantic trait-implementation metadata. See
+  [`compiler-contracts.md`](compiler-contracts.md).
 - `@intrinsic_type(type: "...")` supplies nominal type identity for
   compiler-known types. The std identities currently consumed by optimization
   and lowering include `voyd.std.array`, `voyd.std.range`, `voyd.std.string`,
@@ -96,11 +95,6 @@ The supported metadata has four distinct jobs:
   both the intrinsic type ID and std
   package ownership, so a user-defined `Array`, `Range`, or structurally similar
   object cannot enter a std-only fast path.
-- `@serializer(format, encode, decode)` describes a type's host serialization
-  contract. Binding resolves the named functions and boundary lowering checks
-  the supported format and payload/signature requirements. It does not by
-  itself identify all helper functions used by that format; those dependencies
-  use `@compiler_contract` roles.
 - `@intrinsic(name: ..., uses_signature: ...)` identifies a function wrapper
   whose implementation is compiler-owned, while `@effect(id: "...")` gives a
   public effect a stable host capability ID. These annotations remain the
@@ -108,18 +102,19 @@ The supported metadata has four distinct jobs:
   dispatch; optimizer code must not rediscover either role from source names.
 
 Contract validation is deliberately strict. `@compiler_contract` accepts one
-known string ID, is restricted to an ordinary top-level function in the std
-namespace, and validates the catalogued arity during binding. Each role also
-declares a symbolic typed signature; boundary MsgPack feature use validates the
-complete relational ABI after typing, including primitive and shared types,
-fixed-array elements, generic/optional parameters, and purity, before emitting
-host-boundary calls. Imported aliases do not acquire the contract, duplicate
-providers fail when the program symbol arena is built, and a feature that needs
-a missing or incompatible role fails with a diagnostic instead of silently
-selecting a name-based fallback. Attribute syntax rejects duplicate attributes,
-invalid targets, unknown labels, and invalid value types.
+known string ID and validates its declaration kind, provider namespace, generic
+arity, members, and available signature relationships. `@compiler_impl` is
+valid only on an implementation of a compiler-contract trait and requires a
+non-empty ID plus positive version. Selected-provider feature use validates the
+complete specialized ABI after typing, including primitive and shared types,
+generic/optional parameters, secondary trait requirements, and purity, before
+emitting host calls. Imported aliases do not acquire a contract, duplicate
+contracts or selected implementations fail deterministically, and a feature
+that needs a missing or incompatible role fails instead of selecting a
+name-based fallback. Attribute syntax rejects duplicates, invalid targets,
+unknown labels, and invalid value types.
 The owning binder or lowering stage performs the additional semantic validation
-specific to `@serializer`, `@intrinsic_type`, `@intrinsic`, and `@effect`.
+specific to `@intrinsic_type`, `@intrinsic`, and `@effect`.
 
 Changing a contract ID, its meaning, or its required signature is a compiler/std
 compatibility change. Renaming or moving the annotated implementation is not,

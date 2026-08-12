@@ -418,11 +418,12 @@ let schema: Shape = shape_of<Change>() // compile-time duplicate discriminator e
 
 Give the variants distinct nominal names when they belong to one union.
 
-The existing calls in `std::msgpack` now use compiler-derived typed codecs:
+V-499 superseded the original boundary-tree helpers. Typed MessagePack now uses
+the provider-neutral DTO plan and immutable bytes:
 
 ```voyd
-pub fn pack_boundary_value<T>(value: T): () -> MsgPack
-pub fn unpack_boundary_value<T>(value: MsgPack): () -> T
+pub fn encode<T>(value: T): () -> Result<Bytes, MsgPackError>
+pub fn decode<T>(value: Bytes): () -> Result<T, MsgPackError>
 ```
 
 Supported closed shapes are `bool`, `i32`, `i64`, `f32`, `f64`, `void`,
@@ -432,15 +433,14 @@ enum/union variants. Recursive references are followed through the closed shape
 graph.
 
 ```voyd
-use std::msgpack::{ pack_boundary_value, unpack_boundary_value }
+use std::msgpack::{ encode, decode }
 
 obj Profile {
   name: String,
   nickname?: String
 }
 
-let wire = pack_boundary_value(Profile { name: "Ada" })
-let decoded = unpack_boundary_value<Profile>(wire)
+let wire = encode(Profile { name: "Ada" })
 ```
 
 Wire rules are explicit:
@@ -456,12 +456,10 @@ Wire rules are explicit:
 - union variants with the same discriminator spelling are rejected, including
   different instantiations of the same generic nominal type.
 
-Unsupported functions, traits, private/non-boundary fields, unresolved shapes,
-and ambiguous variants produce `CG0001` at the `pack_boundary_value` or
-`unpack_boundary_value` call with a nested path. Decoding a wrong runtime shape
-uses the strict generated decoder and panics rather than silently manufacturing
-defaults. Existing untyped MessagePack unpacking functions retain their own
-behavior.
+Unsupported functions, traits, private/non-DTO fields, unresolved shapes, and
+ambiguous variants produce a compiler diagnostic at the typed codec call with a
+nested path. Runtime decoding failures are returned as `MsgPackError`. Existing
+parsed-tree MessagePack accessors retain their format-specific behavior.
 
 Renaming a serialized field or variant is a wire-breaking change. The compiler
 does not inject versions or migrations; add an ordinary `version` field and own

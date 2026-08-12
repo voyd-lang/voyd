@@ -40,12 +40,14 @@ import {
   isCompilerPerfEnabled,
   recordCompilerPerfDuration,
 } from "../perf.js";
+import { SELECTED_HOST_TRANSPORT_PROVIDER_MODULES } from "../compiler-contracts/index.js";
 
 type BuildGraphOptions = {
   entryPath: string;
   host: ModuleHost;
   roots: ModuleRoots;
   includeTests?: boolean;
+  includeSelectedHostTransport?: boolean;
 };
 
 type PendingDependency = {
@@ -68,6 +70,23 @@ const IMPLICIT_PRELUDE_USE_DECL = (() => {
   }
   return entry;
 })();
+const IMPLICIT_HOST_TRANSPORT_USE_DECLS =
+  SELECTED_HOST_TRANSPORT_PROVIDER_MODULES.map((moduleId, index) => {
+    const ast = parseBase(
+      `use ${moduleId}::self as __voyd_host_transport_provider_${index}`,
+      "<implicit-host-transport>",
+    );
+    if (!formCallsInternal(ast, "ast")) {
+      throw new Error("failed to parse implicit host transport import");
+    }
+    const entry = ast.rest[0];
+    if (!isForm(entry)) {
+      throw new Error(
+        "failed to parse implicit host transport use declaration",
+      );
+    }
+    return entry;
+  });
 
 const formatErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -158,6 +177,7 @@ export const buildModuleGraph = async ({
   host,
   roots,
   includeTests,
+  includeSelectedHostTransport = false,
 }: BuildGraphOptions): Promise<ModuleGraph> => {
   const modules = new Map<string, ModuleNode>();
   const modulesByPath = new Map<string, ModuleNode>();
@@ -344,6 +364,9 @@ export const buildModuleGraph = async ({
     roots,
     host,
   });
+  const hasSelectedHostTransportModule =
+    includeSelectedHostTransport &&
+    (await supportsSelectedHostTransportImport({ roots, host }));
   recordCompilerPerfDuration({
     name: "graph.supports_std_prelude.ms",
     startedAt: preludeStartedAt,
@@ -389,6 +412,7 @@ export const buildModuleGraph = async ({
     roots,
     includeTests: includeTests === true,
     hasStdPreludeModule,
+    includeSelectedHostTransport: hasSelectedHostTransportModule,
   });
 
   addModuleTree(entryModule, modules, modulesByPath, (module) => {
@@ -1010,6 +1034,7 @@ const loadFileModule = async ({
   roots,
   includeTests,
   hasStdPreludeModule,
+  includeSelectedHostTransport = false,
 }: {
   filePath: string;
   modulePath: ModulePath;
@@ -1017,6 +1042,7 @@ const loadFileModule = async ({
   roots: ModuleRoots;
   includeTests: boolean;
   hasStdPreludeModule: boolean;
+  includeSelectedHostTransport?: boolean;
 }): Promise<LoadedModule> => {
   const moduleStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   incrementCompilerPerfCounter(
@@ -1077,6 +1103,21 @@ const loadFileModule = async ({
     hasStdPreludeModule,
     noPrelude,
   });
+  if (
+    includeSelectedHostTransport &&
+    modulePath.namespace !== "std" &&
+    formCallsInternal(ast, "ast")
+  ) {
+    const astHead = ast.first ?? new InternalIdentifierAtom("ast");
+    ast = new Form({
+      location: ast.location?.clone(),
+      elements: [
+        astHead,
+        ...IMPLICIT_HOST_TRANSPORT_USE_DECLS.map((decl) => decl.clone()),
+        ...ast.rest,
+      ],
+    }).toCall();
+  }
   const packageRootStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   const sourcePackageRoot = await discoverSourcePackageRoot({
     modulePath,
@@ -1604,6 +1645,22 @@ const supportsStdPreludeAutoImport = async ({
 
   const resolved = await resolveModuleFile(
     { namespace: "std", segments: ["prelude"] },
+    roots,
+    host,
+  );
+  return Boolean(resolved);
+};
+
+const supportsSelectedHostTransportImport = async ({
+  roots,
+  host,
+}: {
+  roots: ModuleRoots;
+  host: ModuleHost;
+}): Promise<boolean> => {
+  if (!roots.std) return false;
+  const resolved = await resolveModuleFile(
+    { namespace: "std", segments: ["msgpack"] },
     roots,
     host,
   );

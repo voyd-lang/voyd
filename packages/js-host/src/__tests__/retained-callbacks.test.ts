@@ -25,14 +25,18 @@ describe("retained event handler registry", () => {
     const secondId = registry.retain(second);
 
     registry.release(firstId);
-    await registry.dispatch(firstId, "one");
+    await expect(registry.dispatch(firstId, "one")).rejects.toThrow(
+      "stale or has already completed",
+    );
     await registry.dispatch(secondId, "two");
 
     expect(first).not.toHaveBeenCalled();
     expect(second).toHaveBeenCalledWith("two");
 
     registry.releaseMany([secondId]);
-    await registry.dispatch(secondId, "again");
+    await expect(registry.dispatch(secondId, "again")).rejects.toThrow(
+      "stale or has already completed",
+    );
     expect(second).toHaveBeenCalledTimes(1);
     expect(registry.size()).toBe(0);
   });
@@ -52,7 +56,9 @@ describe("retained event handler registry", () => {
     scopes.endScope(1, innerScope);
 
     expect(registry.size()).toBe(2);
-    await registry.dispatch(innerId, "inner");
+    await expect(registry.dispatch(innerId, "inner")).rejects.toThrow(
+      "stale or has already completed",
+    );
     await registry.dispatch(outerId, "outer");
     expect(innerHandler).not.toHaveBeenCalled();
     expect(outerHandler).toHaveBeenCalledWith("outer");
@@ -83,7 +89,7 @@ describe("retained event handler registry", () => {
     );
   });
 
-  it("releases callbacks retained while a render scope is active", () => {
+  it("releases callbacks retained while a render scope is active", async () => {
     const registry = createRetainedEventHandlerRegistry();
     const scopes = createRetainedCallbackScopeManager(registry);
     const scope = scopes.beginScope("render");
@@ -93,7 +99,9 @@ describe("retained event handler registry", () => {
     scopes.endScope("render", scope);
 
     expect(registry.size()).toBe(0);
-    expect(() => registry.dispatch(retainedId, undefined)).not.toThrow();
+    await expect(registry.dispatch(retainedId, undefined)).rejects.toThrow(
+      "stale or has already completed",
+    );
   });
 
   it("claims prebuilt render callbacks into the active scope", () => {
@@ -149,5 +157,44 @@ describe("retained event handler registry", () => {
     expect(() => scopes.endScope(1, scope)).toThrow(
       "is not active for owner 1",
     );
+  });
+
+  it("rejects capabilities from another runtime session", async () => {
+    const first = createRetainedEventHandlerRegistry<string>();
+    const second = createRetainedEventHandlerRegistry<string>();
+    const token = first.retain(vi.fn());
+
+    await expect(second.dispatch(token, "cross-session")).rejects.toThrow(
+      "different runtime session",
+    );
+  });
+
+  it("never reuses released callback capabilities", async () => {
+    const registry = createRetainedEventHandlerRegistry<string>();
+    const oldToken = registry.retain(vi.fn());
+    registry.release(oldToken);
+    const tokens = Array.from({ length: 300 }, () => {
+      const token = registry.retain(vi.fn());
+      registry.release(token);
+      return token;
+    });
+    const replacement = vi.fn();
+    const currentToken = registry.retain(replacement);
+
+    expect(new Set([oldToken, ...tokens, currentToken]).size).toBe(302);
+    await expect(registry.dispatch(oldToken, "stale")).rejects.toThrow(
+      "stale or has already completed",
+    );
+    await registry.dispatch(currentToken, "current");
+    expect(replacement).toHaveBeenCalledWith("current");
+  });
+
+  it("does not exhaust callback capability sessions", () => {
+    const tokens = Array.from({ length: 1_100 }, () => {
+      const registry = createRetainedEventHandlerRegistry();
+      return registry.retain(vi.fn());
+    });
+
+    expect(new Set(tokens).size).toBe(tokens.length);
   });
 });

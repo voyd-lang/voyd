@@ -1,0 +1,35 @@
+use std::array::Array
+use std::string::type::String
+
+obj ExchangePayload {
+  api code: i32,
+  api label: String,
+  api nested: Array<i32>
+}
+
+obj Accepted {
+  api value: ExchangePayload
+}
+
+obj Rejected {
+  api reason: String
+}
+
+type ExchangeDecision = Accepted | Rejected
+
+eff Exchange
+  roundtrip(resume, value: ExchangePayload) -> ExchangePayload
+  decide(resume, value: ExchangeDecision) -> ExchangeDecision
+
+pub fn main(): Exchange -> ExchangePayload
+  Exchange::roundtrip(ExchangePayload {
+    code: 1,
+    label: "hi",
+    nested: [2, 3]
+  })
+
+pub fn from_host(value: ExchangePayload): Exchange -> ExchangePayload
+  Exchange::roundtrip(value)
+
+pub fn decide_from_host(value: ExchangeDecision): Exchange -> ExchangeDecision
+  Exchange::decide(value)

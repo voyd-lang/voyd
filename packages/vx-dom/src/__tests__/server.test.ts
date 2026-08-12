@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { encode } from "@msgpack/msgpack";
 import { renderVxToString } from "../server.js";
 
 describe("vx-dom server renderer", () => {
@@ -11,11 +10,13 @@ describe("vx-dom server renderer", () => {
           kind: "element",
           tag: "svg",
           attrs: { viewBox: "0 0 24 24" },
-          children: [{
-            kind: "element",
-            tag: "linearGradient",
-            attrs: { gradientUnits: "userSpaceOnUse" },
-          }],
+          children: [
+            {
+              kind: "element",
+              tag: "linearGradient",
+              attrs: { gradientUnits: "userSpaceOnUse" },
+            },
+          ],
         },
       },
     });
@@ -47,18 +48,6 @@ describe("vx-dom server renderer", () => {
       version: 1,
       root: { kind: "element", tag: "button" },
     });
-  });
-
-  it("renders legacy Voyd HTML payloads", async () => {
-    const result = await renderVxToString({
-      tree: {
-        name: "main",
-        attributes: [["role", "main"]],
-        children: [{ name: "h1", children: ["Wiki"] }],
-      },
-    });
-
-    expect(result.html).toBe(`<main role="main"><h1>Wiki</h1></main>`);
   });
 
   it("encodes carriage returns so HTML parsing preserves exact text and attributes", async () => {
@@ -125,28 +114,34 @@ describe("vx-dom server renderer", () => {
   });
 
   it("rejects form properties without a stable SSR representation", async () => {
-    await expect(renderVxToString({
-      frame: {
-        version: 1,
-        root: {
-          kind: "element",
-          tag: "select",
-          props: { value: "draft" },
+    await expect(
+      renderVxToString({
+        frame: {
+          version: 1,
+          root: {
+            kind: "element",
+            tag: "select",
+            props: { value: "draft" },
+          },
         },
-      },
-    })).rejects.toThrow("property value has no stable SSR representation on <select>");
+      }),
+    ).rejects.toThrow(
+      "property value has no stable SSR representation on <select>",
+    );
 
-    await expect(renderVxToString({
-      frame: {
-        version: 1,
-        root: {
-          kind: "element",
-          tag: "textarea",
-          props: { value: "Draft" },
-          children: [{ kind: "text", value: "Other" }],
+    await expect(
+      renderVxToString({
+        frame: {
+          version: 1,
+          root: {
+            kind: "element",
+            tag: "textarea",
+            props: { value: "Draft" },
+            children: [{ kind: "text", value: "Other" }],
+          },
         },
-      },
-    })).rejects.toThrow("textarea value must match its text children");
+      }),
+    ).rejects.toThrow("textarea value must match its text children");
   });
 
   it("renders raw-text element children without entity decoding drift", async () => {
@@ -177,81 +172,100 @@ describe("vx-dom server renderer", () => {
   });
 
   it("rejects raw text that can terminate its containing element", async () => {
-    await expect(renderVxToString({
-      frame: {
-        version: 1,
-        root: {
-          kind: "element",
-          tag: "script",
-          children: [{ kind: "text", value: "</SCRIPT><p>unsafe</p>" }],
+    await expect(
+      renderVxToString({
+        frame: {
+          version: 1,
+          root: {
+            kind: "element",
+            tag: "script",
+            children: [{ kind: "text", value: "</SCRIPT><p>unsafe</p>" }],
+          },
         },
-      },
-    })).rejects.toThrow("script text contains its closing delimiter");
+      }),
+    ).rejects.toThrow("script text contains its closing delimiter");
   });
 
   it("rejects invalid SSR tag, attribute, and style names", async () => {
-    await expect(renderVxToString({
-      frame: { version: 1, root: { kind: "element", tag: "script>alert(1)</script" } },
-    })).rejects.toThrow("invalid HTML tag name");
-
-    await expect(renderVxToString({
-      frame: { version: 1, root: { kind: "element", tag: "INPUT" } },
-    })).rejects.toThrow("invalid HTML tag name");
-
-    await expect(renderVxToString({
-      frame: {
-        version: 1,
-        root: {
-          kind: "element",
-          tag: "input",
-          children: [{ kind: "text", value: "not allowed" }],
+    await expect(
+      renderVxToString({
+        frame: {
+          version: 1,
+          root: { kind: "element", tag: "script>alert(1)</script" },
         },
-      },
-    })).rejects.toThrow("void element at root cannot have children");
+      }),
+    ).rejects.toThrow("invalid HTML tag name");
 
-    await expect(renderVxToString({
-      frame: {
-        version: 1,
-        root: {
-          kind: "element",
-          tag: "div",
-          attrs: { "bad attr": "x" },
-        },
-      },
-    })).rejects.toThrow("invalid HTML attribute name");
+    await expect(
+      renderVxToString({
+        frame: { version: 1, root: { kind: "element", tag: "INPUT" } },
+      }),
+    ).rejects.toThrow("invalid HTML tag name");
 
-    await expect(renderVxToString({
-      frame: {
-        version: 1,
-        root: {
-          kind: "element",
-          tag: "div",
-          styles: { "color;position": "fixed" },
+    await expect(
+      renderVxToString({
+        frame: {
+          version: 1,
+          root: {
+            kind: "element",
+            tag: "input",
+            children: [{ kind: "text", value: "not allowed" }],
+          },
         },
-      },
-    })).rejects.toThrow("invalid CSS property name");
+      }),
+    ).rejects.toThrow("void element at root cannot have children");
 
-    await expect(renderVxToString({
-      frame: {
-        version: 1,
-        root: {
-          kind: "element",
-          tag: "div",
-          props: { innerHTML: "<img src=x onerror=alert(1)>" },
+    await expect(
+      renderVxToString({
+        frame: {
+          version: 1,
+          root: {
+            kind: "element",
+            tag: "div",
+            attrs: { "bad attr": "x" },
+          },
         },
-      },
-    })).rejects.toThrow("unsupported DOM property");
+      }),
+    ).rejects.toThrow("invalid HTML attribute name");
 
-    await expect(renderVxToString({
-      frame: {
-        version: 1,
-        root: {
-          kind: "element",
-          tag: "div",
-          styles: { color: "red; display: none" },
+    await expect(
+      renderVxToString({
+        frame: {
+          version: 1,
+          root: {
+            kind: "element",
+            tag: "div",
+            styles: { "color;position": "fixed" },
+          },
         },
-      },
-    })).rejects.toThrow("invalid CSS property value");
+      }),
+    ).rejects.toThrow("invalid CSS property name");
+
+    await expect(
+      renderVxToString({
+        frame: {
+          version: 1,
+          root: {
+            kind: "element",
+            tag: "div",
+            props: { innerHTML: "<img src=x onerror=alert(1)>" },
+          },
+        },
+      }),
+    ).rejects.toThrow("unsupported DOM property");
+
+    await expect(
+      renderVxToString({
+        frame: {
+          version: 1,
+          root: {
+            kind: "element",
+            tag: "div",
+            styles: { color: "red; display: none" },
+          },
+        },
+      }),
+    ).rejects.toThrow("invalid CSS property value");
   });
 
   it("allows vendor-prefixed and custom CSS property names", async () => {
@@ -273,37 +287,5 @@ describe("vx-dom server renderer", () => {
     expect(result.html).toBe(
       `<p style="-webkit-line-clamp: 2; --accent-color: red">Preview</p>`,
     );
-  });
-
-
-  it("renders from an existing Wasm instance export without a DOM", async () => {
-    const memory = new WebAssembly.Memory({ initial: 1 });
-    const frame = {
-      version: 1,
-      root: {
-        kind: "element",
-        tag: "p",
-        children: [{ kind: "text", value: "From Wasm" }],
-      },
-    };
-    const writeFrame = () => {
-      const bytes = encode(frame);
-      new Uint8Array(memory.buffer).set(bytes);
-      return bytes.length;
-    };
-    const instance = {
-      exports: {
-        main_memory: memory,
-        render_wiki: writeFrame,
-      },
-    } as unknown as WebAssembly.Instance;
-
-    const result = await renderVxToString({
-      instance,
-      exportName: "render_wiki",
-    });
-
-    expect(result.html).toBe(`<p>From Wasm</p>`);
-    expect(JSON.parse(result.hydrationData)).toEqual(frame);
   });
 });

@@ -1,0 +1,36 @@
+use std::vx::{ Attr, Cmd, Html, Program, Sub }
+
+type ChildModel = i32
+type ParentModel = String
+type ChildMsg = bool
+type ParentMsg = i64
+
+fn accept_parent_html(value: Html<i64>): () -> void
+  void
+
+fn accept_parent_attr(value: Attr<ParentMsg>): () -> void
+  void
+
+fn accept_parent_command(value: Cmd<ParentMsg>): () -> void
+  void
+
+fn accept_parent_program(value: Program<ParentModel, ParentMsg>): () -> void
+  void
+
+fn accept_parent_sub(value: Sub<ParentMsg>): () -> void
+  void
+
+pub fn reject_mixed_html(value: Html<bool>): () -> void
+  accept_parent_html(value)
+
+pub fn reject_mixed_attr(value: Attr<ChildMsg>): () -> void
+  accept_parent_attr(value)
+
+pub fn reject_mixed_command(value: Cmd<ChildMsg>): () -> void
+  accept_parent_command(value)
+
+pub fn reject_mixed_program(value: Program<ChildModel, ChildMsg>): () -> void
+  accept_parent_program(value)
+
+pub fn reject_mixed_sub(value: Sub<ChildMsg>): () -> void
+  accept_parent_sub(value)

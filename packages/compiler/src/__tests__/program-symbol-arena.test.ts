@@ -10,7 +10,7 @@ import { parse } from "../parser/index.js";
 import { semanticsPipeline } from "../semantics/pipeline.js";
 import type { ModuleGraph, ModuleNode, ModulePath } from "../modules/types.js";
 import {
-  BOUNDARY_MSGPACK_CONTRACT_IDS,
+  DTO_DATA_CONTRACT_IDS,
   STD_INTRINSIC_TYPE,
 } from "../compiler-contracts/index.js";
 
@@ -27,8 +27,8 @@ const analyzeContractModule = ({
   const path: ModulePath = { namespace: "std", segments: [name] };
   const moduleId = `std::${name}`;
   const source = `@compiler_contract(id: "${contractId}")
-fn contract_target() -> i32
-  0`;
+fn contract_target(value: i32) -> i32
+  value`;
   const ast = parse(source, `${moduleId}.voyd`);
   const module: ModuleNode = {
     id: moduleId,
@@ -96,7 +96,9 @@ pub fn main() -> i32
     });
 
     const { semantics, diagnostics } = analyzeModules({ graph });
-    expect(diagnostics.filter((diag) => diag.severity === "error")).toHaveLength(0);
+    expect(
+      diagnostics.filter((diag) => diag.severity === "error"),
+    ).toHaveLength(0);
 
     const modules = Array.from(semantics.values());
     const arenaA = buildProgramSymbolArena(modules);
@@ -123,7 +125,7 @@ pub fn main() -> i32
   });
 
   it("rejects duplicate contract declarations deterministically", () => {
-    const contractId = BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull;
+    const contractId = DTO_DATA_CONTRACT_IDS.makeBool;
     const left = analyzeContractModule({ name: "left", contractId });
     const right = analyzeContractModule({ name: "right", contractId });
 
@@ -140,7 +142,7 @@ pub fn main() -> i32
     const reverse = captureError([right, left]);
     expect(forward).toBe(reverse);
     expect(forward).toMatch(
-      /duplicate compiler function contract 'voyd\.std\.boundary\.msgpack\.make-null'/,
+      /duplicate compiler function contract 'voyd\.std\.data\.make-bool'/,
     );
     expect(forward).toMatch(/std::left.*std::right/);
   });
@@ -178,16 +180,16 @@ pub fn main() -> i32
   it("does not expose compiler contracts on imported aliases", async () => {
     const srcRoot = resolve("/contract-alias/src");
     const stdRoot = resolve("/contract-alias/std");
-    const contractId = BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull;
+    const contractId = DTO_DATA_CONTRACT_IDS.makeBool;
     const host = createMemoryHost({
       [`${srcRoot}${sep}main.voyd`]: `use std::{ contract_target }
 
 pub fn main() -> i32
-  contract_target()`,
+  contract_target(0)`,
       [`${stdRoot}${sep}pkg.voyd`]: `pub use self::contracts::{ contract_target }`,
       [`${stdRoot}${sep}contracts.voyd`]: `@compiler_contract(id: "${contractId}")
-pub fn contract_target() -> i32
-  0`,
+pub fn contract_target(value: i32) -> i32
+  value`,
     });
     const graph = await loadModuleGraph({
       entryPath: `${srcRoot}${sep}main.voyd`,
@@ -257,9 +259,7 @@ pub obj ArrayProvider {}`,
     if (alias === undefined) {
       return;
     }
-    expect(main.symbols.getIntrinsicType(alias)).toBe(
-      STD_INTRINSIC_TYPE.array,
-    );
+    expect(main.symbols.getIntrinsicType(alias)).toBe(STD_INTRINSIC_TYPE.array);
     expect(main.symbols.getStdIntrinsicTypeContract(alias)).toBeUndefined();
 
     const arena = buildProgramSymbolArena(Array.from(semantics.values()));

@@ -1,6 +1,8 @@
 use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
 use std::data::{
   DataArray,
+  DataBytes,
   DataField,
   DataI32,
   DataI64,
@@ -8,10 +10,20 @@ use std::data::{
   DataString,
   DataValue,
   DataVariant,
+  DataReader,
+  DataValueReadError,
+  DataValueReader,
+  DataValueWriteError,
+  DataValueWriter,
+  DataWriter,
+  CustomDto,
+  CustomDtoError,
   DecodeError,
-  decode
+  decode,
+  encode
 }
 use std::optional::all
+use std::meta::{ RecordShape, shape_of }
 use std::result::types::all
 use std::string::type::String
 use std::test::assertions::all
@@ -30,6 +42,25 @@ obj DataSuccessCreated { id: i32 }
 obj DataSuccessDeleted { reason: String }
 type DataSuccessEvent = DataSuccessCreated | DataSuccessDeleted
 type DataSuccessId = i64
+
+obj PositiveId { value: i32 }
+obj PositiveIdDto { value: i32 }
+obj PositiveEnvelope { id: PositiveId }
+
+impl CustomDto<PositiveId, PositiveIdDto> for PositiveId
+  fn write(value: PositiveId) -> PositiveIdDto
+    PositiveIdDto { value: value.value }
+
+  fn read(value: PositiveIdDto) -> Result<PositiveId, CustomDtoError>
+    if value.value > 0:
+      Ok<PositiveId> { value: PositiveId { value: value.value } }
+    else:
+      Err<CustomDtoError> {
+        error: CustomDtoError {
+          code: "positive_id.non_positive",
+          message: "positive id must be greater than zero"
+        }
+      }
 
 test "decode converts valid nested values and permits missing optional fields":
   let ~profile_fields = Array<DataField>::init()
@@ -74,9 +105,50 @@ test "decode handles primitive aliases and options":
     Err<DecodeError>:
       Test::fail()
 
+test "CustomDto uses one DTO-eligible representation and validates reads":
+  let representation = PositiveId::write(PositiveId { value: 7 })
+  assert(representation.value, eq: 7)
+  match(PositiveId::read(PositiveIdDto { value: 8 }))
+    Err<CustomDtoError>:
+      Test::fail()
+    Ok<PositiveId> { value }:
+      assert(value.value, eq: 8)
+  match(PositiveId::read(PositiveIdDto { value: 0 }))
+    Ok<PositiveId>:
+      Test::fail()
+    Err<CustomDtoError> { error }:
+      assert(error.message, eq: "positive id must be greater than zero")
+
+  shape_of<PositiveId>().root.match(root)
+    RecordShape:
+      assert(root.name, eq: "PositiveIdDto")
+      assert(root.fields.at(0).name, eq: "value")
+    else:
+      Test::fail()
+
+test "DataValue decoding preserves nested CustomDto errors":
+  let ~id_fields = Array<DataField>::init()
+  id_fields.push(DataField { name: "value", value: DataI32 { value: 0 } })
   let ~fields = Array<DataField>::init()
-  fields.push(DataField { name: "value", value: DataString { value: "ready" } })
-  match(decode<Optional<String>>(DataVariant { name: "Some", fields }))
+  fields.push(DataField {
+    name: "id",
+    value: DataObject { fields: id_fields }
+  })
+
+  match(decode<PositiveEnvelope>(DataObject { fields }))
+    Ok<PositiveEnvelope>:
+      Test::fail()
+    Err<DecodeError> { error }:
+      assert(error.path, eq: "$.id")
+      error.kind.match(kind)
+        CustomDtoFailure:
+          assert(kind.cause.code, eq: "positive_id.non_positive")
+        else:
+          Test::fail()
+
+  let ~optional_fields = Array<DataField>::init()
+  optional_fields.push(DataField { name: "value", value: DataString { value: "ready" } })
+  match(decode<Optional<String>>(DataVariant { name: "Some", fields: optional_fields }))
     Ok<Optional<String>> { value }:
       match(value)
         Some<String> { value: decoded }:
@@ -85,3 +157,210 @@ test "decode handles primitive aliases and options":
           Test::fail()
     Err<DecodeError>:
       Test::fail()
+
+test "encode and decode preserve bytes as a distinct neutral primitive":
+  let ~buffer = ByteBuffer::init()
+  buffer.push(1)
+  buffer.push(127)
+  buffer.push(255)
+  let source = buffer.as_bytes()
+
+  encode(source).match(encoded)
+    DataBytes:
+      assert(encoded.value.len(), eq: 3)
+      assert(encoded.value.at(2), eq: 255)
+    else:
+      Test::fail()
+
+  match(decode<Bytes>(DataBytes { value: source }))
+    Ok<Bytes> { value }:
+      assert(value.len(), eq: 3)
+      assert(value.at(0), eq: 1)
+    Err<DecodeError>:
+      Test::fail()
+
+test "DataValueWriter constructs one balanced scalar value":
+  let ~writer = DataValueWriter::init()
+  match(writer.write_i32(7))
+    Err<DataValueWriteError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  assert(writer.is_complete(), eq: true)
+
+test "DataValueWriter finishes a scalar value":
+  let ~writer = DataValueWriter::init()
+  match(writer.write_i32(7))
+    Err<DataValueWriteError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.finish())
+    Err<DataValueWriteError>:
+      Test::fail()
+    Ok<DataValue> { value }:
+      value.match(decoded)
+        DataI32:
+          assert(decoded.value, eq: 7)
+        else:
+          Test::fail()
+
+test "DataValueWriter rejects extra root values":
+  let ~invalid = DataValueWriter::init()
+  invalid.write_i32(0)
+  match(invalid.write_i32(1))
+    Ok<Unit>:
+      Test::fail()
+    Err<DataValueWriteError>:
+      void
+  match(invalid.finish())
+    Ok<DataValue>:
+      Test::fail()
+    Err<DataValueWriteError>:
+      void
+
+test "DataValueWriter balances nested arrays":
+  let ~writer = DataValueWriter::init()
+  match(writer.begin_array(length: 2))
+    Err<DataValueWriteError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.write_i32(1))
+    Err<DataValueWriteError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.begin_array(length: 1))
+    Err<DataValueWriteError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.write_string("nested"))
+    Err<DataValueWriteError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.end_array())
+    Err<DataValueWriteError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.end_array())
+    Err<DataValueWriteError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.finish())
+    Err<DataValueWriteError>:
+      Test::fail()
+    Ok<DataValue> { value }:
+      value.match(decoded)
+        DataArray:
+          assert(decoded.values.len(), eq: 2)
+          match(decoded.values.get(1))
+            None:
+              Test::fail()
+            Some<DataValue> { value: nested_value }:
+              nested_value.match(nested)
+                DataArray:
+                  assert(nested.values.len(), eq: 1)
+                else:
+                  Test::fail()
+        else:
+          Test::fail()
+
+test "DataValueReader pulls nested arrays in order":
+  let ~nested = Array<DataValue>::init()
+  nested.push(DataString { value: "nested" })
+  let ~values = Array<DataValue>::init()
+  values.push(DataI32 { value: 1 })
+  values.push(DataArray { values: nested })
+  let ~reader = DataValueReader::init(DataArray { values })
+  match(reader.begin_array())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<i32> { value: length }:
+      assert(length, eq: 2)
+  match(reader.read_i32())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<i32> { value }:
+      assert(value, eq: 1)
+  match(reader.begin_array())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<i32> { value: length }:
+      assert(length, eq: 1)
+  match(reader.read_string())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<String> { value }:
+      assert(value, eq: "nested")
+  match(reader.end_array())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(reader.end_array())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  assert(reader.is_complete(), eq: true)
+
+test "DataValueReader skips complete field values":
+  let ~nested = Array<DataValue>::init()
+  nested.push(DataI32 { value: 9 })
+  let ~fields = Array<DataField>::init()
+  fields.push(DataField { name: "ignored", value: DataArray { values: nested } })
+  fields.push(DataField { name: "kept", value: DataI32 { value: 4 } })
+  let ~reader = DataValueReader::init(DataObject { fields })
+  match(reader.begin_record())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(reader.next_field())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<Option<String>> { value }:
+      value.match(field)
+        None:
+          Test::fail()
+        Some<String>:
+          assert(field.value, eq: "ignored")
+  match(reader.skip_value())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(reader.next_field())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<Option<String>> { value }:
+      value.match(field)
+        None:
+          Test::fail()
+        Some<String>:
+          assert(field.value, eq: "kept")
+  match(reader.read_i32())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<i32> { value }:
+      assert(value, eq: 4)
+  match(reader.next_field())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<Option<String>> { value }:
+      value.match(field)
+        Some<String>:
+          Test::fail()
+        None:
+          void
+  match(reader.end_record())
+    Err<DataValueReadError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  assert(reader.is_complete(), eq: true)

@@ -1,4 +1,3 @@
-import { decode, encode } from "@msgpack/msgpack";
 import type {
   EffectHandler,
   EffectResourceCleanup,
@@ -9,10 +8,7 @@ import {
   resumeKindName,
   type EffectOpRequest,
 } from "../effect-op.js";
-import {
-  EFFECT_RESULT_STATUS,
-  RESUME_KIND,
-} from "./constants.js";
+import { EFFECT_RESULT_STATUS, RESUME_KIND } from "./constants.js";
 import {
   createEffectContinuation,
   isEffectContinuationCall,
@@ -21,22 +17,124 @@ import type {
   VoydRuntimeEffectContext,
   VoydRuntimeTransitionContext,
 } from "./trap-diagnostics.js";
+import type { HostTransportAdapter } from "../protocol/host-transport.js";
+import type { BoundarySchema } from "../protocol/export-abi.js";
+import {
+  decodeBoundaryArgs,
+  decodeBoundaryResult,
+  encodeBoundaryArgs,
+} from "../boundary-values.js";
+import { HostFrameFailureError } from "../protocol/host-frame.js";
 
-const MSGPACK_OPTS = { useBigInt64: true } as const;
+export type EffectBoundarySchemas = {
+  params: readonly BoundarySchema[];
+  result: BoundarySchema;
+};
+
+export const decodeEffectBoundaryArgs = ({
+  label,
+  payloads,
+  schemas,
+}: {
+  label: string;
+  payloads: readonly { fingerprint: string; value: unknown }[];
+  schemas?: EffectBoundarySchemas;
+}): unknown[] => {
+  if (!schemas) return payloads.map((payload) => payload.value);
+  if (payloads.length !== schemas.params.length) {
+    throw new Error(
+      `effect ${label} expected ${schemas.params.length} arguments, got ${payloads.length}`,
+    );
+  }
+  payloads.forEach((payload, index) => {
+    if (payload.fingerprint !== schemas.params[index]?.fingerprint) {
+      throw new Error(`effect ${label} argument ${index} fingerprint mismatch`);
+    }
+  });
+  return decodeBoundaryArgs({
+    exportName: `effect ${label}`,
+    schemas: schemas.params,
+    args: payloads.map((payload) => payload.value),
+  });
+};
+
+export const encodeEffectBoundaryResult = ({
+  label,
+  value,
+  schemas,
+}: {
+  label: string;
+  value: unknown;
+  schemas?: EffectBoundarySchemas;
+}): unknown =>
+  schemas
+    ? encodeBoundaryArgs({
+        exportName: `effect ${label}`,
+        schemas: [schemas.result],
+        args: [value],
+      })[0]
+    : value;
+
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
-const decodePayload = ({
+export type HostCompletionIdentity =
+  | { kind: "export"; id: number; name?: string; schema?: BoundarySchema }
+  | { kind: "callback"; id: number; name?: string; schema?: BoundarySchema };
+
+export const decodeHostCompletion = ({
   memory,
   ptr,
   length,
+  transport,
+  completion,
 }: {
   memory: WebAssembly.Memory;
   ptr: number;
   length: number;
+  transport: HostTransportAdapter;
+  completion: HostCompletionIdentity;
 }): unknown => {
   const bytes = new Uint8Array(memory.buffer, ptr, length);
-  return decode(bytes, MSGPACK_OPTS);
+  const frame = transport.decodeFrame(bytes);
+  if (completion.kind === "export") {
+    if (
+      frame.kind !== "export-completion" ||
+      frame.exportId !== completion.id
+    ) {
+      throw new Error(
+        "effect boundary returned an incompatible completion frame",
+      );
+    }
+  } else if (
+    frame.kind !== "callback-completion" ||
+    frame.invocationId !== completion.id
+  ) {
+    throw new Error(
+      "effect boundary returned an incompatible completion frame",
+    );
+  }
+  const outcome = frame.outcome;
+  if (outcome.kind === "failure") {
+    throw new HostFrameFailureError(outcome.failure);
+  }
+  if (!completion.schema) {
+    return outcome.value.value;
+  }
+  if (outcome.value.fingerprint !== completion.schema.fingerprint) {
+    const label = completion.kind === "export" ? "effectful export" : "effectful callback";
+    throw new Error(
+      `${label} ${completion.name ?? completion.id} result fingerprint mismatch`,
+    );
+  }
+  return decodeBoundaryResult({
+    exportName:
+      completion.kind === "callback"
+        ? `callback ${completion.name ?? completion.id}`
+        : completion.name ?? String(completion.id),
+    schema: completion.schema,
+    value: outcome.value.value,
+  });
 };
 
 const invalidPayloadLengthMessage = ({
@@ -109,13 +207,16 @@ export const continueEffectLoopStep = async <T = unknown>({
   resumeEffectful,
   table,
   handlersByOpIndex,
-  msgpackMemory,
+  transportMemory,
   bufferPtr,
   bufferSize,
   shouldContinue = () => true,
   registerResourceCleanup,
   annotateTrap,
   fallbackFunctionName,
+  transport,
+  completion,
+  effectSchemasByOpIndex,
 }: {
   result: unknown;
   effectStatus: CallableFunction;
@@ -124,17 +225,23 @@ export const continueEffectLoopStep = async <T = unknown>({
   resumeEffectful: CallableFunction;
   table: ParsedEffectTable;
   handlersByOpIndex: Array<EffectHandler | undefined>;
-  msgpackMemory: WebAssembly.Memory;
+  transportMemory: WebAssembly.Memory;
   bufferPtr: number;
   bufferSize: number;
   shouldContinue?: () => boolean;
   registerResourceCleanup?: (cleanup: EffectResourceCleanup) => void;
-  annotateTrap?: (error: unknown, opts: {
-    effect?: VoydRuntimeEffectContext;
-    transition?: VoydRuntimeTransitionContext;
-    fallbackFunctionName?: string;
-  }) => Error;
+  annotateTrap?: (
+    error: unknown,
+    opts: {
+      effect?: VoydRuntimeEffectContext;
+      transition?: VoydRuntimeTransitionContext;
+      fallbackFunctionName?: string;
+    },
+  ) => Error;
   fallbackFunctionName?: string;
+  transport: HostTransportAdapter;
+  completion: HostCompletionIdentity;
+  effectSchemasByOpIndex?: readonly (EffectBoundarySchemas | undefined)[];
 }): Promise<EffectLoopStepResult<T>> => {
   const withTrapContext = ({
     error,
@@ -173,21 +280,51 @@ export const continueEffectLoopStep = async <T = unknown>({
         status,
         payloadLength,
         bufferSize,
-      })
+      }),
     );
   }
-  const decoded = decodePayload({
-    memory: msgpackMemory,
-    ptr: bufferPtr,
-    length: payloadLength,
-  });
-
   if (status === EFFECT_RESULT_STATUS.value) {
-    return { kind: "value", value: decoded as T };
+    return {
+      kind: "value",
+      value: decodeHostCompletion({
+        memory: transportMemory,
+        ptr: bufferPtr,
+        length: payloadLength,
+        transport,
+        completion,
+      }) as T,
+    };
   }
 
   if (status === EFFECT_RESULT_STATUS.effect) {
-    const decodedEffect = decoded as EffectOpRequest;
+    const frame = transport.decodeFrame(
+      new Uint8Array(transportMemory.buffer, bufferPtr, payloadLength),
+    );
+    if (frame.kind !== "effect-request") {
+      throw new Error("effect boundary returned an incompatible host frame");
+    }
+    const framedOp = table.ops[frame.requestId];
+    if (
+      !framedOp ||
+      framedOp.effectId !== frame.effectId ||
+      framedOp.opId !== frame.operationId ||
+      framedOp.signatureHash !== frame.signatureHash >>> 0 ||
+      framedOp.resumeKind !== frame.resumeKind
+    ) {
+      throw new Error("effect request frame does not match the effect table");
+    }
+    const decodedEffect: EffectOpRequest = {
+      effectId: framedOp.effectIdHash.value,
+      opId: framedOp.opId,
+      opIndex: framedOp.opIndex,
+      resumeKind: framedOp.resumeKind,
+      handle: framedOp.opIndex,
+      args: decodeEffectBoundaryArgs({
+        label: framedOp.label,
+        payloads: frame.args,
+        schemas: effectSchemasByOpIndex?.[framedOp.opIndex],
+      }),
+    };
     const opEntry = resolveParsedEffectOp({
       table,
       request: decodedEffect,
@@ -195,13 +332,13 @@ export const continueEffectLoopStep = async <T = unknown>({
     const handler = handlersByOpIndex[opEntry.opIndex];
     if (!handler) {
       throw new Error(
-        `Unhandled effect ${opEntry.label} (${resumeKindName(opEntry.resumeKind)})`
+        `Unhandled effect ${opEntry.label} (${resumeKindName(opEntry.resumeKind)})`,
       );
     }
     const continuation = createEffectContinuation({ registerResourceCleanup });
     const handlerResult = await handler(
       continuation,
-      ...(decodedEffect.args ?? [])
+      ...(decodedEffect.args ?? []),
     );
     if (!shouldContinue()) {
       return { kind: "aborted" };
@@ -228,18 +365,36 @@ export const continueEffectLoopStep = async <T = unknown>({
       throw new Error(nonReturningHandlerMessage(opEntry.label));
     }
 
-    const encoded = encode(handlerResult.value, MSGPACK_OPTS) as Uint8Array;
+    const encoded = transport.encodeFrame({
+      kind: "effect-outcome",
+      requestId: frame.requestId,
+      outcome: {
+        kind: "success",
+        value: {
+          fingerprint: frame.resultFingerprint,
+          value: encodeEffectBoundaryResult({
+            label: opEntry.label,
+            value: handlerResult.value,
+            schemas: effectSchemasByOpIndex?.[opEntry.opIndex],
+          }),
+        },
+      },
+    });
     if (encoded.length > bufferSize) {
       throw new Error("resume payload exceeds buffer size");
     }
-    new Uint8Array(msgpackMemory.buffer, bufferPtr, encoded.length).set(encoded);
+    new Uint8Array(transportMemory.buffer, bufferPtr, encoded.length).set(
+      encoded,
+    );
     let resumed: unknown;
     try {
       resumed = resumeEffectful(
         effectCont(result),
         bufferPtr,
         encoded.length,
-        bufferSize
+        bufferSize,
+        completion.kind === "export" ? 0 : 1,
+        completion.id,
       );
     } catch (error) {
       throw withTrapContext({
@@ -271,9 +426,12 @@ export const runEffectLoop = async <T = unknown>({
   resumeEffectful,
   table,
   handlersByOpIndex,
-  msgpackMemory,
+  transportMemory,
   bufferPtr,
   bufferSize,
+  transport,
+  completion,
+  effectSchemasByOpIndex,
 }: {
   entry: CallableFunction;
   effectStatus: CallableFunction;
@@ -282,9 +440,12 @@ export const runEffectLoop = async <T = unknown>({
   resumeEffectful: CallableFunction;
   table: ParsedEffectTable;
   handlersByOpIndex: Array<EffectHandler | undefined>;
-  msgpackMemory: WebAssembly.Memory;
+  transportMemory: WebAssembly.Memory;
   bufferPtr: number;
   bufferSize: number;
+  transport: HostTransportAdapter;
+  completion: HostCompletionIdentity;
+  effectSchemasByOpIndex?: readonly (EffectBoundarySchemas | undefined)[];
 }): Promise<T> => {
   let result = entry(bufferPtr, bufferSize);
 
@@ -298,9 +459,12 @@ export const runEffectLoop = async <T = unknown>({
       resumeEffectful,
       table,
       handlersByOpIndex,
-      msgpackMemory,
+      transportMemory,
       bufferPtr,
       bufferSize,
+      transport,
+      completion,
+      effectSchemasByOpIndex,
     });
     if (stepResult.kind === "value") {
       return stepResult.value;

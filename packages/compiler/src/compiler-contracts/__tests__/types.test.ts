@@ -144,6 +144,8 @@ const programWithNominal = ({
       }),
     },
     symbols: {
+      refOf: (symbol: number) => ({ moduleId: "std::types", symbol }),
+      canonicalIdOf: (_moduleId: string, symbol: number) => symbol,
       getPackageId: () => packageId,
       getIntrinsicType: () => intrinsicType,
       getStdIntrinsicTypeContract: () =>

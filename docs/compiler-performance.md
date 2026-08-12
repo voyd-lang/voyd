@@ -49,7 +49,10 @@ The scorecard uses a fresh child process for every compile warmup and measured
 sample. Compile timing and peak compile RSS exclude runtime execution and WAT
 emission. After the timed compile it validates
 the Wasm, measures gzip and structural shape counts, checks deterministic bytes
-across identical compiles, and runs the public entrypoint after a warmup. CI
+across identical compiles, and runs the pure public entrypoint after a warmup.
+Optimizer scenarios disable host-boundary exports and effect hosting because
+the framed host ABI has separate boundary performance gates. This keeps the
+scorecard focused on generated program code and optimizer behavior. CI
 runtime samples batch entrypoint calls for at least 200 ms and report the
 per-call average, reducing timer and host-scheduling noise. It
 also records compiler phase timings, ordinal optimizer-pass metrics, codegen
@@ -89,6 +92,24 @@ the explicit level and legacy boolean. This lets the head-owned harness compare
 against revisions that predate optimization levels without silently measuring
 an unoptimized base. Balanced and ablation investigations are current-tree or
 saved-scorecard workflows.
+
+V-499 exposed an SDK routing bug where `effectsHostBoundary: "off"` was dropped
+and the selected host transport was loaded even when boundary exports were also
+disabled. That made pure optimizer cases analyze 612 extra `std::data` and
+`std::msgpack` functions. Threading the option through graph loading and codegen
+removed that accidental work; the focused cold compile dropped from 3.14 s to
+1.53 s on the same machine (the parent measured 1.88 s). The vtrace artifact
+still has a bounded 1,759-byte raw and 683-byte gzip baseline shift, so the PR
+lane uses 2 KiB and 1 KiB absolute floors while retaining the 5% relative size
+gates.
+
+The later V-499 CI investigation also found a mutable symbol-table leak in
+dependency snapshot clones and superlinear borrowing-analysis growth in
+selected-provider compiles. V-499 fixed the snapshot ownership boundary so
+source import changes can reuse cached dependencies safely. The raw phase
+timings, cache ablation, work counters, root cause, and recommended inputs for a
+borrowing-system redesign are preserved in
+[`docs/notes/v-499-compiler-performance-findings.md`](notes/v-499-compiler-performance-findings.md).
 
 Compiler perf summaries are versioned and enabled with
 `VOYD_COMPILER_PERF=1`. Optimizer passes emit both aggregate and canonical
@@ -135,13 +156,16 @@ values, stable-ID sharing, and budget fallback.
 Compiler/std optimization dependencies now use semantic role metadata instead
 of duplicated source-name, module-path, and structural heuristics.
 `@compiler_contract` gives each boundary MsgPack helper a stable
-`voyd.std.boundary.msgpack.*` function role, while compiler-recognized std
+`voyd.std.host-transport.msgpack.*` function role, while compiler-recognized std
 containers use `@intrinsic_type` nominal IDs. Binding rejects unknown roles,
 wrong arities, non-std or nested providers, and the program symbol arena rejects
 duplicate providers. At feature use, the typed signature catalog validates the
 entire MsgPack ABI (shared types, primitives, fixed arrays, generics,
 optionality, and effects) before codegen emits boundary calls. Missing or
 incompatible roles fail clearly; there is no silent name-based fallback.
+V-499 later replaced the host-transport subset of these function roles with the
+compiler-contract `HostTransportProvider` trait and a versioned
+`@compiler_impl`; provider-neutral data function contracts remain.
 
 All function-body specializations now share the frozen
 `SpecializationPolicy` carried by `ProgramCodegenOptimizationPlan`. Eligibility

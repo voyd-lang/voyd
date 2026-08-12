@@ -13,10 +13,6 @@ import type { Diagnostic } from "../diagnostics/index.js";
 import { diagnosticFromCode } from "../diagnostics/index.js";
 import { SyntaxMacroError } from "../parser/syntax-macros/macro-error.js";
 import {
-  serializerAttributeMacro,
-  stripSerializerAttributeForms,
-} from "../parser/syntax-macros/serializer-attribute.js";
-import {
   createSurfaceModuleView,
   type SurfaceModuleItem,
 } from "../parser/surface/index.js";
@@ -417,10 +413,6 @@ const applyPostSyntaxMacros = (form: Form, diagnostics: Diagnostic[]): Form => {
         error,
         fallbackSyntax: current,
       });
-
-      if (macro === serializerAttributeMacro) {
-        current = stripSerializerAttributeForms(current);
-      }
     }
   });
 
@@ -545,8 +537,7 @@ const collectMacroImports = ({
       module,
       entry,
       graph,
-      importerIsPackageRoot:
-        moduleIsPackageRoot && !preservesInlinePkgScope,
+      importerIsPackageRoot: moduleIsPackageRoot && !preservesInlinePkgScope,
     });
     if (!canImportMacroExports({ importer: module, moduleId, graph })) {
       return;
@@ -657,8 +648,7 @@ const collectMacroReexports = ({
         module,
         entry,
         graph,
-        importerIsPackageRoot:
-          moduleIsPackageRoot && !preservesInlinePkgScope,
+        importerIsPackageRoot: moduleIsPackageRoot && !preservesInlinePkgScope,
       });
       if (!canImportMacroExports({ importer: module, moduleId, graph })) {
         return;

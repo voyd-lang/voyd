@@ -98,26 +98,14 @@ describe("vx-dom VNode normalization", () => {
     });
   });
 
-  it("normalizes legacy create_element payloads", () => {
-    expect(
+  it("rejects legacy create_element payloads", () => {
+    expect(() =>
       normalizeRenderFrame({
         name: "button",
         attributes: { class: "primary", disabled: true },
         children: ["Save"],
       }),
-    ).toEqual({
-      version: 1,
-      root: {
-        kind: "element",
-        tag: "button",
-        key: undefined,
-        attrs: { class: "primary", disabled: true },
-        props: undefined,
-        styles: undefined,
-        events: undefined,
-        children: [{ kind: "text", value: "Save" }],
-      },
-    });
+    ).toThrow("invalid VX node kind");
   });
 
   it("rejects unknown render frame versions", () => {

@@ -475,7 +475,7 @@ const conservativeContractForArguments = (
 
 const RETAINING_INTRINSICS = new Set([
   "__retain_callback",
-  "__boundary_retain_callback",
+  "__host_retain_callback",
   "__render_retain_callback",
   "__task_spawn",
   "__task_detach",
@@ -729,85 +729,6 @@ const intrinsicBorrowContract = ({
           sourceParameter: 1,
           destinationParameter: 0,
           destinationPath: fieldPath("__value"),
-        },
-      ],
-      maySuspend: false,
-    };
-  }
-  if (
-    (name === "__boundary_value_to_msgpack" ||
-      name === "__boundary_msgpack_to_value") &&
-    argumentCount === 1
-  ) {
-    const identityOrigin = { source: [], result: [] };
-    const conditionId = borrowTypeConditionId({
-      parameter: 0,
-      sourcePath: [],
-      resultPath: [],
-    });
-    return {
-      parameters: [
-        {
-          access: "shared",
-          readPaths: [[]],
-          accessIfResultTypeDiffers: {
-            conditionId,
-            parameter: 0,
-            sourcePath: [],
-            resultPath: [],
-          },
-          retained: false,
-          returned: returnsReference,
-          ...(returnsReference
-            ? {
-                returnedOrigins: [identityOrigin],
-                returnedTypeMatchingOrigins: [
-                  { ...identityOrigin, conditionId },
-                ],
-              }
-            : {}),
-        },
-      ],
-      maySuspend: false,
-    };
-  }
-  if (
-    name === "__boundary_msgpack_to_value_or_identity" &&
-    argumentCount === 2
-  ) {
-    const identityOrigin = { source: [], result: [] };
-    const conditionId = borrowTypeConditionId({
-      parameter: 0,
-      sourcePath: [],
-      resultPath: [],
-    });
-    return {
-      parameters: [
-        {
-          access: "shared",
-          readPaths: [],
-          retained: false,
-          returned: returnsReference,
-          ...(returnsReference
-            ? {
-                returnedOrigins: [identityOrigin],
-                returnedTypeMatchingOrigins: [
-                  { ...identityOrigin, conditionId },
-                ],
-              }
-            : {}),
-        },
-        {
-          access: "shared",
-          readPaths: [[]],
-          accessIfResultTypeDiffers: {
-            conditionId,
-            parameter: 0,
-            sourcePath: [],
-            resultPath: [],
-          },
-          retained: false,
-          returned: false,
         },
       ],
       maySuspend: false,

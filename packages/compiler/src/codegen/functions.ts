@@ -48,18 +48,15 @@ import { isGeneratedTestId } from "../tests/prefix.js";
 import { emitSerializedExportWrapper } from "./exports/serialized-abi.js";
 import {
   emitExportAbiSection,
+  hostExportId,
   type ExportAbiEntry,
 } from "./exports/export-abi.js";
 import {
   BoundarySchemaError,
   deriveBoundarySchema,
+  withDtoFingerprint,
   type BoundarySchema,
 } from "./boundary/schema.js";
-import {
-  findUnambiguousSerializerForType,
-  serializerKeyFor,
-} from "./serializer.js";
-import type { SerializerMetadata } from "../semantics/symbol-index.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 import { walkHirExpression } from "./hir-walk.js";
 import { markDependencyFunctionReachable } from "./function-dependencies.js";
@@ -67,7 +64,6 @@ import {
   boxSignatureSpillValue,
   unboxSignatureSpillValue,
 } from "./signature-spill.js";
-import { createSerializedExportSpecialCaseResolver } from "./serialized-export-special-cases.js";
 import {
   markStaticEffectSpecializationCompiled,
   takePendingStaticEffectSpecializations,
@@ -78,7 +74,13 @@ import {
   takePendingReceiverSpecializations,
   type ReceiverSpecialization,
 } from "./receiver-specialization.js";
-import { EFFECTFUL_RETAINED_CALLBACK_TARGETS_KEY } from "./intrinsics.js";
+import {
+  EFFECTFUL_RETAINED_CALLBACK_TARGETS_KEY,
+  RETAINED_CALLBACK_BOUNDARIES_KEY,
+  TASK_STARTER_BOUNDARIES_KEY,
+  type RetainedCallbackBoundary,
+  type TaskStarterBoundary,
+} from "./intrinsics.js";
 import {
   createScalarAggregateTempBinding,
   loadScalarAggregateBindingAbiValue,
@@ -104,11 +106,21 @@ import {
   type DefaultIdentityGuardEntry,
 } from "./default-identity-guard-entry.js";
 import { wasmSymbolName } from "./symbol-names.js";
+import {
+  isCustomDtoFunctionReachable,
+  markCustomDtoFunctionReachable as markCustomDtoBoundaryFunctionReachable,
+} from "./boundary/custom-dto-reachability.js";
+import {
+  buildSelectedHostTransportIdentity,
+  enqueueSelectedHostTransportProviderReachability,
+} from "./host-transport/selected-provider.js";
+import { requiresSelectedHostTransport } from "./host-transport/requirements.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
   "voyd.codegen.functionMetadataRegistrationState",
 );
+const SHARED_REACHABILITY = new WeakMap<object, Set<ProgramSymbolId>>();
 
 type ReachabilityState = {
   symbols?: Set<ProgramSymbolId>;
@@ -116,88 +128,6 @@ type ReachabilityState = {
 
 type FunctionMetadataRegistrationState = {
   active?: boolean;
-};
-
-const resolveExportSerializers = ({
-  meta,
-  ctx,
-}: {
-  meta: FunctionMetadata;
-  ctx: CodegenContext;
-}): readonly SerializerMetadata[] => {
-  const signature = ctx.program.functions.getSignature(
-    meta.moduleId,
-    meta.symbol,
-  );
-  const typeIds = [...meta.paramTypeIds, meta.resultTypeId];
-  const overrides = [
-    ...(signature?.parameters.map((param) => param.declaredSerializer) ?? []),
-    signature?.declaredReturnSerializer,
-  ];
-  const serializers = typeIds
-    .map(
-      (typeId, index) =>
-        overrides[index] ?? findUnambiguousSerializerForType(typeId, ctx),
-    )
-    .filter((serializer): serializer is SerializerMetadata =>
-      Boolean(serializer),
-    );
-
-  if (serializers.length === 0) {
-    return [];
-  }
-  const unsupported = serializers.find(
-    (serializer) => serializer.formatId !== "msgpack",
-  );
-  if (unsupported) {
-    throw new Error(
-      `unsupported export serializer format for ${meta.wasmName}: ${unsupported.formatId}`,
-    );
-  }
-  const byKey = new Map<string, SerializerMetadata>();
-  serializers.forEach((serializer) =>
-    byKey.set(serializerKeyFor(serializer), serializer),
-  );
-  return Array.from(byKey.values());
-};
-
-const resolveExportReturnSerializer = ({
-  meta,
-  ctx,
-}: {
-  meta: FunctionMetadata;
-  ctx: CodegenContext;
-}): SerializerMetadata | undefined => {
-  const signature = ctx.program.functions.getSignature(
-    meta.moduleId,
-    meta.symbol,
-  );
-  return (
-    signature?.declaredReturnSerializer ??
-    findUnambiguousSerializerForType(meta.resultTypeId, ctx)
-  );
-};
-
-const serializerOverridesForExport = ({
-  meta,
-  ctx,
-}: {
-  meta: FunctionMetadata;
-  ctx: CodegenContext;
-}): {
-  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
-  returnSerializerOverride?: SerializerMetadata;
-} => {
-  const signature = ctx.program.functions.getSignature(
-    meta.moduleId,
-    meta.symbol,
-  );
-  return {
-    paramSerializerOverrides: signature?.parameters.map(
-      (param) => param.declaredSerializer,
-    ),
-    returnSerializerOverride: signature?.declaredReturnSerializer,
-  };
 };
 
 type ResolvedBoundaryExportOptions = {
@@ -300,22 +230,65 @@ const boundarySchemasForExport = ({
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
-}): { params: BoundarySchema[]; result: BoundarySchema } => ({
-  params: meta.paramTypeIds.map((typeId, index) =>
-    deriveBoundarySchema({
-      typeId,
-      ctx,
-      label: `${exportName} arg${index}`,
-      options: { tagStandaloneVariants: true },
-    }),
-  ),
-  result: deriveBoundarySchema({
-    typeId: meta.resultTypeId,
-    ctx,
-    label: `${exportName} result`,
-    options: { tagStandaloneVariants: true },
-  }),
-});
+}): { params: BoundarySchema[]; result: BoundarySchema } => {
+  const schemas = {
+    params: meta.paramTypeIds.map((typeId, index) =>
+      withDtoFingerprint(
+        deriveBoundarySchema({
+          typeId,
+          ctx,
+          label: `${exportName} arg${index}`,
+          options: { tagStandaloneVariants: true, portableNames: true },
+        }),
+      ),
+    ),
+    result: withDtoFingerprint(
+      deriveBoundarySchema({
+        typeId: meta.resultTypeId,
+        ctx,
+        label: `${exportName} result`,
+        options: { tagStandaloneVariants: true, portableNames: true },
+      }),
+    ),
+  };
+  [...schemas.params, schemas.result].forEach((schema) =>
+    markCustomDtoPlanReachable({ schema, ctx }),
+  );
+  return schemas;
+};
+
+const markCustomDtoPlanReachable = ({
+  schema,
+  ctx,
+}: {
+  schema: BoundarySchema;
+  ctx: CodegenContext;
+}): void => {
+  if (schema.kind === "custom") {
+    [schema.writeFunction, schema.readFunction].forEach((functionId) => {
+      markCustomDtoFunctionReachable(ctx, functionId);
+    });
+    markCustomDtoPlanReachable({ schema: schema.representation, ctx });
+    return;
+  }
+  if (schema.kind === "array") {
+    markCustomDtoPlanReachable({ schema: schema.element, ctx });
+    return;
+  }
+  if (schema.kind === "record") {
+    schema.fields.forEach((field) =>
+      markCustomDtoPlanReachable({ schema: field.schema, ctx }),
+    );
+    return;
+  }
+  if (schema.kind === "union") {
+    schema.variants.forEach((variant) =>
+      variant.fields.forEach((field) =>
+        markCustomDtoPlanReachable({ schema: field.schema, ctx }),
+      ),
+    );
+  }
+};
 
 const scalarBoundaryWasmType = (
   schema: BoundarySchema,
@@ -642,9 +615,62 @@ const collectReachableFunctionSymbols = ({
     queue.push(symbolId);
   };
 
+  const enqueueCustomDtoPlan = (plan: BoundarySchema): void => {
+    if (plan.kind === "custom") {
+      [plan.writeFunction, plan.readFunction].forEach((functionId) => {
+        markCustomDtoFunctionReachable(ctx, functionId);
+        enqueue(functionId);
+        const ref = ctx.program.symbols.refOf(functionId);
+        enqueue(
+          ctx.program.symbols.canonicalIdOf(
+            ref.moduleId,
+            ref.symbol,
+          ) as ProgramSymbolId,
+        );
+      });
+      enqueueCustomDtoPlan(plan.representation);
+      return;
+    }
+    if (plan.kind === "array") {
+      enqueueCustomDtoPlan(plan.element);
+      return;
+    }
+    if (plan.kind === "record") {
+      plan.fields.forEach((field) => enqueueCustomDtoPlan(field.schema));
+      return;
+    }
+    if (plan.kind === "union") {
+      plan.variants.forEach((variant) =>
+        variant.fields.forEach((field) => enqueueCustomDtoPlan(field.schema)),
+      );
+    }
+  };
+
+  const enqueueExportDtoMethods = ({
+    moduleId,
+    symbol,
+  }: {
+    moduleId: string;
+    symbol: number;
+  }): void => {
+    const signature = ctx.program.functions.getSignature(moduleId, symbol);
+    if (!signature) return;
+    [
+      ...signature.parameters.map((parameter) => parameter.typeId),
+      signature.returnType,
+    ].forEach((typeId) => {
+      try {
+        enqueueCustomDtoPlan(ctx.program.dtoPlans.get({ typeId, moduleId }));
+      } catch {
+        // Unsupported export types are handled by normal boundary diagnostics.
+      }
+    });
+  };
+
   const testScope = entryCtx.options.testScope ?? "all";
   const exportContexts =
     entryCtx.options.testMode && testScope === "all" ? contexts : [entryCtx];
+  let requiresSelectedHostTransport = false;
   exportContexts.forEach((exportCtx) => {
     getModuleExportEntries(exportCtx).forEach((entry) => {
       const intrinsicMetadata =
@@ -661,8 +687,51 @@ const collectReachableFunctionSymbols = ({
         exportCtx.moduleId,
         entry.symbol,
       );
+      const targetRef =
+        typeof targetId === "number"
+          ? exportCtx.program.symbols.refOf(targetId)
+          : { moduleId: exportCtx.moduleId, symbol: entry.symbol };
+      const metas = getFunctionMetas(
+        exportCtx,
+        targetRef.moduleId,
+        targetRef.symbol,
+      );
+      const meta =
+        metas?.find((candidate) => candidate.typeArgs.length === 0) ??
+        metas?.[0];
+      const baseExportName =
+        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
+      const exportName = exportCtx.options.testMode
+        ? formatTestExportName({
+            moduleId: exportCtx.moduleId,
+            testId: baseExportName,
+          })
+        : baseExportName;
+      if (meta?.effectful) {
+        requiresSelectedHostTransport = true;
+      } else if (
+        meta &&
+        !exportCtx.options.testMode &&
+        shouldConsiderBoundaryExport({
+          exportName,
+          options: resolveBoundaryExportOptions(exportCtx),
+        })
+      ) {
+        try {
+          const schemas = boundarySchemasForExport({
+            ctx: exportCtx,
+            meta,
+            exportName,
+          });
+          if (!supportsDirectScalarBoundary({ meta, schemas })) {
+            requiresSelectedHostTransport = true;
+          }
+        } catch {
+          // Unsupported export types are handled by normal boundary diagnostics.
+        }
+      }
       if (typeof targetId === "number") {
-        const targetRef = exportCtx.program.symbols.refOf(targetId);
+        enqueueExportDtoMethods(targetRef);
         enqueue(
           exportCtx.program.symbols.canonicalIdOf(
             targetRef.moduleId,
@@ -671,6 +740,10 @@ const collectReachableFunctionSymbols = ({
         );
         return;
       }
+      enqueueExportDtoMethods({
+        moduleId: exportCtx.moduleId,
+        symbol: entry.symbol,
+      });
       enqueue(
         exportCtx.program.symbols.canonicalIdOf(
           exportCtx.moduleId,
@@ -679,6 +752,12 @@ const collectReachableFunctionSymbols = ({
       );
     });
   });
+  if (requiresSelectedHostTransport) {
+    enqueueSelectedHostTransportProviderReachability({
+      ctx: entryCtx,
+      enqueue,
+    });
+  }
   if (queue.length === 0) {
     entryCtx.module.hir.items.forEach((item) => {
       if (item.kind !== "function") {
@@ -789,7 +868,9 @@ const reachabilitySetOf = (ctx: CodegenContext): Set<ProgramSymbolId> => {
   if (state.symbols) {
     return state.symbols;
   }
-  const symbols = new Set<ProgramSymbolId>();
+  const symbols =
+    SHARED_REACHABILITY.get(ctx.mod) ?? new Set<ProgramSymbolId>();
+  SHARED_REACHABILITY.set(ctx.mod, symbols);
   state.symbols = symbols;
   return symbols;
 };
@@ -810,23 +891,17 @@ const markFunctionReachable = ({
   );
 };
 
-const markSerializerReachable = ({
-  ctx,
-  serializer,
-}: {
-  ctx: CodegenContext;
-  serializer: SerializerMetadata;
-}): void => {
-  markFunctionReachable({
-    ctx,
-    moduleId: serializer.encode.moduleId,
-    symbol: serializer.encode.symbol,
+const markCustomDtoFunctionReachable = (
+  ctx: CodegenContext,
+  functionId: ProgramSymbolId,
+): void => {
+  const ref = ctx.program.symbols.refOf(functionId);
+  markCustomDtoBoundaryFunctionReachable({
+    mod: ctx.mod,
+    program: ctx.program,
+    functionId,
   });
-  markFunctionReachable({
-    ctx,
-    moduleId: serializer.decode.moduleId,
-    symbol: serializer.decode.symbol,
-  });
+  markFunctionReachable({ ctx, ...ref });
 };
 
 const markStringLiteralCtorReachable = ({
@@ -912,7 +987,13 @@ const getReachableFunctionSymbols = ({
     return state.symbols;
   }
   if (ctx.optimization?.reachableFunctionSymbols) {
-    const symbols = new Set(ctx.optimization.reachableFunctionSymbols);
+    const symbols =
+      resolveBoundaryExportOptions(ctx).mode === "off"
+        ? reachabilitySetOf(ctx)
+        : collectReachableFunctionSymbols({ ctx, contexts, entryModuleId });
+    ctx.optimization.reachableFunctionSymbols.forEach((symbol) =>
+      symbols.add(symbol),
+    );
     state.symbols = symbols;
     return symbols;
   }
@@ -1114,7 +1195,6 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           paramTypeIds: descriptor.parameters.map((param) => param.type),
           parameters: descriptor.parameters.map((param, index) => ({
             typeId: param.type,
-            serializer: signature.parameters[index]?.declaredSerializer,
             symbol: item.parameters[index]?.symbol,
             label: param.label,
             optional: param.optional,
@@ -1128,7 +1208,6 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           })),
           paramAbiKinds,
           resultTypeId: descriptor.returnType,
-          resultSerializer: signature.declaredReturnSerializer,
           resultAbiKind,
           outParamType,
           typeArgs,
@@ -1160,6 +1239,11 @@ export const compileFunctions = ({
     contexts,
     entryModuleId,
   }) as Set<ProgramSymbolId>;
+  contexts.forEach((candidate) => {
+    reachabilityStateOf(candidate).symbols?.forEach((symbolId) =>
+      reachableFunctions.add(symbolId),
+    );
+  });
   let compiledCount = 0;
   for (const item of ctx.module.hir.items.values()) {
     if (item.kind !== "function") continue;
@@ -1180,7 +1264,12 @@ export const compileFunctions = ({
       ctx.moduleId,
       item.symbol,
     ) as ProgramSymbolId;
-    if (!reachableFunctions.has(canonicalId)) {
+    const customDtoReachable = isCustomDtoFunctionReachable({
+      mod: ctx.mod,
+      moduleId: ctx.moduleId,
+      symbol: item.symbol,
+    });
+    if (!reachableFunctions.has(canonicalId) && !customDtoReachable) {
       continue;
     }
     const hasPendingMeta = metas.some(
@@ -1221,7 +1310,7 @@ export const compileFunctions = ({
             reachableFunctions.add(calleeId);
             if (
               ctx.program.symbols.getIntrinsicName(calleeId) ===
-              "__boundary_shape_of"
+              "__dto_shape_of"
             ) {
               markStringLiteralCtorReachable({
                 ctx,
@@ -1408,7 +1497,6 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         ),
         parameters: instantiatedTypeDesc.parameters.map((param, index) => ({
           typeId: param.type,
-          serializer: signature.parameters[index]?.declaredSerializer,
           symbol: signature.parameters[index]?.symbol,
           label: param.label,
           optional: param.optional,
@@ -1419,7 +1507,6 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         })),
         paramAbiKinds,
         resultTypeId: instantiatedTypeDesc.returnType,
-        resultSerializer: signature.declaredReturnSerializer,
         resultAbiKind,
         outParamType,
         typeArgs,
@@ -1506,16 +1593,6 @@ export const emitModuleExports = (
         metas?.[0]
       );
     };
-    const resolveSpecialSerializedExport =
-      createSerializedExportSpecialCaseResolver({
-        entries: exportEntries,
-        exportNameForEntry: (entry) =>
-          entry.alias ??
-          symbolName(exportCtx, exportCtx.moduleId, entry.symbol),
-        metaForEntry,
-        ctx: exportCtx,
-      });
-
     exportEntries.forEach((entry) => {
       const intrinsicMetadata =
         exportCtx.program.symbols.getIntrinsicFunctionFlags(
@@ -1545,105 +1622,38 @@ export const emitModuleExports = (
       }
       if (meta.effectful) {
         emitEffectfulWasmExportWrapper({ ctx: exportCtx, meta, exportName });
-
-        if (meta.paramTypes.length > firstUserParamIndexFor(meta)) {
-          return;
-        }
-        const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
-        const serializer = resolveExportReturnSerializer({
-          meta,
-          ctx: exportCtx,
-        });
-        if (serializer) {
-          markSerializerReachable({ ctx: exportCtx, serializer });
-        }
-        const supportedReturn =
-          valueType === binaryen.none ||
-          valueType === binaryen.i32 ||
-          valueType === binaryen.i64 ||
-          valueType === binaryen.f32 ||
-          valueType === binaryen.f64 ||
-          serializer?.formatId === "msgpack";
-        if (!supportedReturn) {
-          exportCtx.diagnostics.report(
-            diagnosticFromCode({
-              code: "CG0002",
-              params: {
-                kind: "unsupported-effectful-export-return",
-                exportName,
-                returnType: formatWasmType(valueType),
-              },
-              span: entry.span,
-            }),
-          );
-          return;
-        }
-        effectfulExports.push({ meta, exportName, emitEntry: true });
-        return;
-      }
-      let serializers: readonly SerializerMetadata[];
-      try {
-        serializers = resolveExportSerializers({ meta, ctx: exportCtx });
-      } catch (error) {
-        exportCtx.diagnostics.report(
-          diagnosticFromCode({
-            code: "CG0001",
-            params: {
-              kind: "codegen-error",
-              message: (error as Error).message,
-            },
-            span: entry.span,
-          }),
-        );
-        return;
-      }
-
-      const specialSerializedExport = resolveSpecialSerializedExport({
-        exportName,
-        meta,
-      });
-
-      if (serializers.length > 0 || specialSerializedExport) {
-        serializers.forEach((serializer) =>
-          markSerializerReachable({ ctx: exportCtx, serializer }),
-        );
+        let schemas: { params: BoundarySchema[]; result: BoundarySchema };
         try {
-          emitSerializedExportWrapper({
+          schemas = boundarySchemasForExport({
             ctx: exportCtx,
             meta,
             exportName,
-            typeAdapter: specialSerializedExport?.typeAdapter,
-            ...serializerOverridesForExport({ meta, ctx: exportCtx }),
           });
-          exportAbiEntries.push({
-            name: exportName,
-            abi: "serialized",
-            formatId: "msgpack",
-            ...(specialSerializedExport?.params
-              ? { params: specialSerializedExport.params }
-              : {}),
-            ...(specialSerializedExport?.result
-              ? { result: specialSerializedExport.result }
-              : {}),
-          });
-          if (specialSerializedExport) {
-            emittedBoundaryExports.add(exportName);
-          }
         } catch (error) {
-          exportCtx.diagnostics.report(
-            diagnosticFromCode({
-              code: "CG0001",
-              params: {
-                kind: "codegen-error",
-                message: (error as Error).message,
-              },
-              span: entry.span,
-            }),
-          );
+          if (
+            boundaryExportOptions.mode === "only" ||
+            boundaryExportOptions.onUnsupported === "diagnostic"
+          ) {
+            reportBoundaryExportUnsupported({
+              ctx: exportCtx,
+              entry,
+              exportName,
+              error,
+            });
+          }
+          return;
         }
+        effectfulExports.push({ meta, exportName, emitEntry: true });
+        emittedBoundaryExports.add(exportName);
+        exportAbiEntries.push({
+          id: hostExportId(exportName),
+          name: exportName,
+          abi: "serialized",
+          params: schemas.params,
+          result: schemas.result,
+        });
         return;
       }
-
       exportCtx.mod.addFunctionExport(meta.wasmName, exportName);
       if (
         !exportCtx.options.testMode &&
@@ -1660,6 +1670,7 @@ export const emitModuleExports = (
           });
           if (supportsDirectScalarBoundary({ meta, schemas })) {
             exportAbiEntries.push({
+              id: hostExportId(exportName),
               name: exportName,
               abi: "direct",
               params: schemas.params,
@@ -1677,14 +1688,14 @@ export const emitModuleExports = (
             ctx: exportCtx,
             meta,
             exportName,
+            schemas,
             wrapperExportName,
-            ...serializerOverridesForExport({ meta, ctx: exportCtx }),
           });
           exportAbiEntries.push({
+            id: hostExportId(exportName),
             name: exportName,
             abi: "serialized",
             wrapperName: wrapper.wrapperName,
-            formatId: wrapper.formatId,
             params: schemas.params,
             result: schemas.result,
           });
@@ -1704,7 +1715,11 @@ export const emitModuleExports = (
           }
         }
       }
-      exportAbiEntries.push({ name: exportName, abi: "direct" });
+      exportAbiEntries.push({
+        id: hostExportId(exportName),
+        name: exportName,
+        abi: "direct",
+      });
     });
   });
 
@@ -1724,9 +1739,61 @@ export const emitModuleExports = (
     });
   }
 
-  if (exportAbiEntries.length > 0) {
-    emitExportAbiSection({ mod: ctx.mod, entries: exportAbiEntries });
-  }
+  const taskCompletions = Array.from(
+    ctx.programHelpers
+      .getHelperState(
+        TASK_STARTER_BOUNDARIES_KEY,
+        () => new Map<string, TaskStarterBoundary>(),
+      )
+      .values(),
+  ).flatMap(({ name, resultTypeId }) => {
+    try {
+      return [
+        {
+          name,
+          result: withDtoFingerprint(
+            deriveBoundarySchema({
+              typeId: resultTypeId,
+              ctx,
+              label: `${name} result`,
+              options: { tagStandaloneVariants: true, portableNames: true },
+            }),
+          ),
+        },
+      ];
+    } catch (error) {
+      if (error instanceof BoundarySchemaError) return [];
+      throw error;
+    }
+  });
+  taskCompletions.forEach(({ result }) =>
+    markCustomDtoPlanReachable({ schema: result, ctx }),
+  );
+  emitExportAbiSection({
+    mod: ctx.mod,
+    transport: requiresSelectedHostTransport({
+      effectsHostBoundary: ctx.options.effectsHostBoundary,
+      boundaryExports: ctx.options.boundaryExports,
+    })
+      ? buildSelectedHostTransportIdentity()
+      : undefined,
+    entries: exportAbiEntries,
+    taskCompletions,
+    callbacks: Array.from(
+      ctx.programHelpers
+        .getHelperState(
+          RETAINED_CALLBACK_BOUNDARIES_KEY,
+          () => new Map<string, RetainedCallbackBoundary>(),
+        )
+        .values(),
+    ),
+    payloadFingerprints: Array.from(
+      ctx.programHelpers.getHelperState(
+        Symbol.for("voyd.codegen.dtoPayloadFingerprints"),
+        () => new Set<string>(),
+      ),
+    ),
+  });
 
   const retainedCallbackTargets = Array.from(
     ctx.programHelpers
@@ -1917,7 +1984,6 @@ const compileFunctionItem = (
           valueExpr: implFunctionBody,
           valueType: wrappedValueType,
           typeId: meta.resultTypeId,
-          serializer: meta.resultSerializer,
           ctx,
           fnCtx: implCtx,
         })
@@ -2096,7 +2162,6 @@ const compileFunctionItem = (
         valueExpr: functionBodyBeforeWrap,
         valueType: wrappedValueType,
         typeId: meta.resultTypeId,
-        serializer: meta.resultSerializer,
         ctx,
         fnCtx,
       })
@@ -2343,7 +2408,6 @@ const compileStaticEffectSpecialization = (
         valueExpr: bodyExpr,
         valueType: wasmTypeFor(meta.resultTypeId, ctx),
         typeId: meta.resultTypeId,
-        serializer: meta.resultSerializer,
         ctx,
         fnCtx,
       })
@@ -2509,7 +2573,6 @@ const compileReceiverSpecialization = (
           valueExpr: implFunctionBody,
           valueType: wrappedValueType,
           typeId: meta.resultTypeId,
-          serializer: meta.resultSerializer,
           ctx,
           fnCtx: implCtx,
         })
@@ -2650,7 +2713,6 @@ const compileReceiverSpecialization = (
         valueExpr: functionBodyBeforeWrap,
         valueType: wrappedValueType,
         typeId: meta.resultTypeId,
-        serializer: meta.resultSerializer,
         ctx,
         fnCtx,
       })
@@ -2773,16 +2835,6 @@ const makeFunctionName = (
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
-const formatWasmType = (valueType: binaryen.Type): string => {
-  if (valueType === binaryen.none) return "none";
-  if (valueType === binaryen.i32) return "i32";
-  if (valueType === binaryen.i64) return "i64";
-  if (valueType === binaryen.f32) return "f32";
-  if (valueType === binaryen.f64) return "f64";
-  if (valueType === binaryen.eqref) return "eqref";
-  if (valueType === binaryen.anyref) return "anyref";
-  return String(valueType);
-};
 const getDefaultInstantiationArgs = ({
   ctx,
   symbol,

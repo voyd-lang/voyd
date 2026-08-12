@@ -10,7 +10,7 @@ export const EFFECT_RESULT_STATUS = {
   effect: 1,
 } as const;
 
-export const EFFECT_REQUEST_MSGPACK_KEYS = {
+export const EFFECT_REQUEST_FRAME_KEYS = {
   effectId: "effectId",
   opId: "opId",
   opIndex: "opIndex",

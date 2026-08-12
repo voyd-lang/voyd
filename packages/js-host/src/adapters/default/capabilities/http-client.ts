@@ -1,7 +1,5 @@
 import {
   globalRecord,
-  hostError,
-  httpClientSuccessPayload,
   isRecord,
   readField,
   toNumberOrUndefined,
@@ -24,6 +22,26 @@ import {
 } from "../types.js";
 
 const textEncoder = new TextEncoder();
+const emptyResponse = (): DefaultAdapterHttpClientResponse => ({
+  status: 500,
+  reason: "",
+  headers: [],
+  body: new Uint8Array(),
+});
+
+const httpResult = <T>(value: T): Record<string, unknown> => ({
+  ok: true,
+  value,
+  error_code: 0,
+  error_message: "",
+});
+
+const httpFailure = (error: unknown): Record<string, unknown> => ({
+  ok: false,
+  value: emptyResponse(),
+  error_code: fetchErrorCode(error),
+  error_message: fetchErrorMessage(error),
+});
 const DEFAULT_FETCH_MAX_REDIRECTS = 20;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const REDIRECT_CREDENTIAL_HEADERS = new Set([
@@ -540,14 +558,28 @@ export const httpClientCapabilityDefinition: CapabilityDefinition = {
         try {
           const request = decodeHttpClientRequest(payload);
           const response = await httpClientSource.request(request);
-          return tail(
-            httpClientSuccessPayload({
-              response,
-              effectBufferSize,
-            })
-          );
+          const responseBytes =
+            response.body.byteLength +
+            textEncoder.encode(response.reason).byteLength +
+            response.headers.reduce(
+              (total, header) =>
+                total +
+                textEncoder.encode(header.name).byteLength +
+                textEncoder.encode(header.value).byteLength,
+              0,
+            );
+          if (responseBytes > effectBufferSize) {
+            return tail(
+              httpFailure(
+                new Error(
+                  `Default http-client adapter response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or request a smaller payload.`,
+                ),
+              ),
+            );
+          }
+          return tail(httpResult(response));
         } catch (error) {
-          return tail(hostError(fetchErrorMessage(error), fetchErrorCode(error)));
+          return tail(httpFailure(error));
         }
       },
     });

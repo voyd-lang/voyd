@@ -1,15 +1,14 @@
 //! Host-backed outbound HTTP client capability.
 //!
 //! Requests are built with typed HTTP values and cross the host boundary as
-//! internal MessagePack DTOs.
+//! provider-neutral automatic DTOs.
 
+use std::array::Array
+use std::bytes::Bytes
 use std::error::HostError
 use std::enums::{ enum }
-use std::host_dto::HostDto
 use std::http::{ Body, Header, Headers, Method, Response, method, method_as_string }
 use std::http::wire::self as wire
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
 use std::optional::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
@@ -32,11 +31,25 @@ pub enum RedirectPolicy
   Manual
   Error
 
+pub obj RedirectPolicyDto {
+  api kind: String,
+  api max_redirects: i32
+}
+
+pub obj ClientRequestDto {
+  api method: String,
+  api url: String,
+  api headers: Array<wire::HeaderDto>,
+  api body: Bytes,
+  api timeout_millis?: i32,
+  api redirect_policy: RedirectPolicyDto
+}
+
 /// Host HTTP client effect.
 @effect(id: "voyd.std.http.client")
 pub eff HttpClient
   /// Sends an HTTP request DTO and returns a host result DTO.
-  request(tail, payload: MsgPack) -> MsgPack
+  request(tail, payload: ClientRequestDto) -> wire::HttpResult<wire::ResponseDto>
 
 impl RequestOptions
   /// Returns the default request policy.
@@ -276,28 +289,21 @@ pub fn patch({ url: StringSlice, body: Body }): HttpClient -> Result<Response, H
 pub fn patch({ url: String, body: Body }): HttpClient -> Result<Response, HostError>
   patch(url: url.as_slice(), body: body)
 
-fn encode_request_payload(request: ClientRequest): () -> MsgPack
-  HostDto::init()
-    .set("method", msgpack::make_string(method_as_string(request.method)))
-    .set("url", msgpack::make_string(request.url))
-    .set("headers", wire::encode_headers(request.headers))
-    .set("body", wire::encode_body(request.body))
-    .set("timeout_millis", wire::encode_optional_i32(request.options.timeout_millis))
-    .set("redirect_policy", encode_redirect_policy(request.options.redirect_policy))
-    .pack()
+fn encode_request_payload(request: ClientRequest): () -> ClientRequestDto
+  ClientRequestDto {
+    method: method_as_string(request.method),
+    url: request.url,
+    headers: wire::encode_headers(request.headers),
+    body: request.body.as_bytes(),
+    timeout_millis: request.options.timeout_millis,
+    redirect_policy: encode_redirect_policy(request.options.redirect_policy)
+  }
 
-fn encode_redirect_policy(policy: RedirectPolicy): () -> MsgPack
+fn encode_redirect_policy(policy: RedirectPolicy): () -> RedirectPolicyDto
   policy.match(active)
     Follow:
-      HostDto::init()
-        .set("kind", msgpack::make_string("follow".as_slice().to_string()))
-        .set("max_redirects", msgpack::make_i32(active.max_redirects))
-        .pack()
+      RedirectPolicyDto { kind: "follow", max_redirects: active.max_redirects }
     Manual:
-      HostDto::init()
-        .set("kind", msgpack::make_string("manual".as_slice().to_string()))
-        .pack()
+      RedirectPolicyDto { kind: "manual", max_redirects: 0 }
     Error:
-      HostDto::init()
-        .set("kind", msgpack::make_string("error".as_slice().to_string()))
-        .pack()
+      RedirectPolicyDto { kind: "error", max_redirects: 0 }

@@ -1,4 +1,4 @@
-import { callComponentFn } from "./memory.js";
+import { decodeVxPayload } from "./payload.js";
 import {
   childNamespace,
   elementNamespace,
@@ -12,7 +12,6 @@ import {
   toListenerOptions,
 } from "./events.js";
 import type {
-  CallOptions,
   EventDescriptor,
   NormalizedEventPayload,
   RetainedEventHandlerRegistry,
@@ -32,7 +31,6 @@ import type {
   VxRuntimeStep,
   VxSubscriptionDisposer,
   VxSubscriptionEnvelope,
-  VoydComponentFn,
 } from "./types.js";
 
 const svgNamespaceUri = "http://www.w3.org/2000/svg";
@@ -56,9 +54,7 @@ const parserNamespacedSvgAttributes = new Map<
   ["xmlns:xlink", [xmlnsNamespaceUri, "xlink"]],
 ]);
 
-export {
-  createVoydVxAppRuntime,
-} from "./app-runtime.js";
+export { createVoydVxAppRuntime } from "./app-runtime.js";
 export type {
   CreateVoydVxAppRuntimeOptions,
   VoydVxAppHost,
@@ -82,11 +78,6 @@ export type {
   VxSubscriptionEnvelope,
   VxSubscriptionRunner,
 } from "./types.js";
-
-export type RenderOptions = {
-  callOptions: CallOptions;
-  handlers?: RetainedEventHandlerRegistry;
-};
 
 export type HydrationMismatch = {
   path: string;
@@ -125,13 +116,7 @@ export type VxRuntimeHostMode = "browser" | "explicit";
 
 export type MountVxAppOptions = {
   container: Element;
-  componentFn?: VoydComponentFn;
-  callOptions?: CallOptions;
   frame?: unknown;
-  wasm?: Uint8Array | WebAssembly.Module;
-  imports?: WebAssembly.Imports;
-  instance?: WebAssembly.Instance;
-  exportName?: string;
   handlers?: RetainedEventHandlerRegistry;
   app?: VxAppRuntime;
   runtimeHost?: VxRuntimeHostOptions;
@@ -159,10 +144,15 @@ export function readVoydHydrationRoot(
     scope.querySelectorAll<HTMLScriptElement>(
       'script[type="application/json"][data-voyd-hydration]',
     ),
-  ).find((candidate) =>
-    (candidate.dataset.voydHydrationId ?? candidate.dataset.voydHydration) === id
+  ).find(
+    (candidate) =>
+      (candidate.dataset.voydHydrationId ?? candidate.dataset.voydHydration) ===
+      id,
   );
-  if (!script) throw new Error(`vx-dom: missing Voyd hydration root ${JSON.stringify(id)}`);
+  if (!script)
+    throw new Error(
+      `vx-dom: missing Voyd hydration root ${JSON.stringify(id)}`,
+    );
   return hydrationRootFrom(script, scope);
 }
 
@@ -171,7 +161,10 @@ function hydrationRootFrom(
   scope: ParentNode,
 ): VoydHydrationRoot {
   const selector = script.dataset.voydHydration;
-  if (!selector) throw new Error("vx-dom: hydration metadata is missing its target selector");
+  if (!selector)
+    throw new Error(
+      "vx-dom: hydration metadata is missing its target selector",
+    );
   const id = script.dataset.voydHydrationId ?? selector;
   const container = scope.querySelector(selector);
   if (!container) {
@@ -190,9 +183,12 @@ function hydrationRootFrom(
       script,
     };
   } catch (error) {
-    throw new Error(`vx-dom: invalid hydration model for ${JSON.stringify(id)}`, {
-      cause: error,
-    });
+    throw new Error(
+      `vx-dom: invalid hydration model for ${JSON.stringify(id)}`,
+      {
+        cause: error,
+      },
+    );
   }
 }
 
@@ -218,7 +214,10 @@ type ActiveSubscription = {
   setMapHandlerIds: (ids: number[]) => void;
 };
 
-type RetainedHandlerReleaser = Pick<RetainedEventHandlerRegistry, "release" | "releaseMany">;
+type RetainedHandlerReleaser = Pick<
+  RetainedEventHandlerRegistry,
+  "release" | "releaseMany"
+>;
 
 const mapHandlerIdsProperty = "__vxMapHandlerIds";
 const mapHandlerKeysProperty = "__vxMapHandlerKeys";
@@ -227,7 +226,10 @@ const mapHandlerIdentityProperty = "__vxMapHandlerIdentity";
 const taskObserverProperty = Symbol.for("voyd.taskObserver");
 const locationChangeEvent = "vxlocationchange";
 const listenerState = new WeakMap<Element, Map<string, ListenerRecord>>();
-const pendingDirtyReconciliations = new WeakMap<Element, { cancelled: boolean }>();
+const pendingDirtyReconciliations = new WeakMap<
+  Element,
+  { cancelled: boolean }
+>();
 
 type TaskRunOutcome =
   | { kind: "value"; value: unknown }
@@ -286,22 +288,13 @@ export function createBrowserVxRuntimeHost(
   };
 }
 
-export function render(
-  componentFn: VoydComponentFn,
-  container: HTMLElement,
-  options: RenderOptions,
-): void {
-  const tree = callComponentFn(componentFn, options.callOptions);
-  renderMsgPackNode(tree, container, { handlers: options.handlers });
-}
-
-export function renderMsgPackNode(
+export function renderVxNode(
   tree: unknown,
   container: Element,
   options: { handlers?: RetainedEventHandlerRegistry } = {},
 ): VxDomRenderer {
   const renderer = createVxDomRenderer(container, options);
-  renderer.render(tree);
+  renderer.render(decodeVxPayload(tree));
   return renderer;
 }
 
@@ -317,7 +310,8 @@ export function createVxDomRenderer(
   let retainedHandlers = new Set<number>();
 
   const releaseHandlers = (handlers: ReadonlySet<number> | number[]) => {
-    if (Array.isArray(handlers) ? handlers.length === 0 : handlers.size === 0) return;
+    if (Array.isArray(handlers) ? handlers.length === 0 : handlers.size === 0)
+      return;
     if (options.handlers?.releaseMany) {
       options.handlers.releaseMany(handlers);
     } else {
@@ -335,12 +329,11 @@ export function createVxDomRenderer(
     retainedHandlers = next;
   };
 
-  const applyFrame = (
-    nextFrame: VxRenderFrame,
-    updateDom: () => void,
-  ) => {
+  const applyFrame = (nextFrame: VxRenderFrame, updateDom: () => void) => {
     const nextHandlers = collectHandlerIds(nextFrame.root);
-    const introduced = Array.from(nextHandlers).filter((id) => !retainedHandlers.has(id));
+    const introduced = Array.from(nextHandlers).filter(
+      (id) => !retainedHandlers.has(id),
+    );
     try {
       updateDom();
     } catch (error) {
@@ -360,13 +353,22 @@ export function createVxDomRenderer(
 
   return {
     render(input: unknown) {
-      const nextFrame = flattenRenderFrame(normalizeRenderFrame(input));
+      const nextFrame = flattenRenderFrame(
+        normalizeRenderFrame(decodeVxPayload(input)),
+      );
       applyFrame(nextFrame, () => {
-        patchContainer(container, currentFrame?.root, nextFrame.root, options.handlers);
+        patchContainer(
+          container,
+          currentFrame?.root,
+          nextFrame.root,
+          options.handlers,
+        );
       });
     },
     hydrate(input: unknown) {
-      const nextFrame = flattenRenderFrame(normalizeRenderFrame(input));
+      const nextFrame = flattenRenderFrame(
+        normalizeRenderFrame(decodeVxPayload(input)),
+      );
       try {
         applyFrame(nextFrame, () => {
           hydrateContainer(
@@ -393,21 +395,20 @@ export function createVxDomRenderer(
   };
 }
 
-export async function mountVxApp(options: MountVxAppOptions): Promise<MountedVxApp> {
+export async function mountVxApp(
+  options: MountVxAppOptions,
+): Promise<MountedVxApp> {
   if (options.app) return mountRuntimeApp(options, "render");
 
-  const instance = await resolveInstanceForMount(options);
-  const exportName = options.exportName ?? "main";
-  const renderer = createVxDomRenderer(options.container, { handlers: options.handlers });
+  if (options.frame === undefined) {
+    throw new Error("vx-dom: mountVxApp requires an app or frame");
+  }
+  const renderer = createVxDomRenderer(options.container, {
+    handlers: options.handlers,
+  });
 
   const renderNext = async () => {
-    if (options.frame !== undefined) {
-      renderer.render(options.frame);
-      return;
-    }
-    const componentFn = options.componentFn ?? exportedComponent(requiredInstance(instance), exportName);
-    const callOptions = options.callOptions ?? { instance: requiredInstance(instance) };
-    renderer.render(callComponentFn(componentFn, callOptions));
+    renderer.render(options.frame);
   };
 
   await renderNext();
@@ -428,8 +429,6 @@ export async function hydrateVxApp(
 ): Promise<MountedVxApp> {
   if (options.app) return mountRuntimeApp(options, "hydrate");
 
-  const instance = await resolveInstanceForMount(options);
-  const exportName = options.exportName ?? "main";
   const renderer = createVxDomRenderer(options.container, {
     handlers: options.handlers,
     onHydrationMismatch: options.onHydrationMismatch,
@@ -442,9 +441,9 @@ export async function hydrateVxApp(
       return JSON.parse(options.hydrationData) as unknown;
     }
     if (options.hydrationData) return options.hydrationData;
-    const componentFn = options.componentFn ?? exportedComponent(requiredInstance(instance), exportName);
-    const callOptions = options.callOptions ?? { instance: requiredInstance(instance) };
-    return callComponentFn(componentFn, callOptions);
+    throw new Error(
+      "vx-dom: hydrateVxApp requires an app, frame, or hydrationData",
+    );
   };
 
   try {
@@ -471,42 +470,53 @@ async function mountRuntimeApp(
   mode: "hydrate" | "render",
 ): Promise<MountedVxApp> {
   const app = options.app!;
-  const domSnapshot = mode === "hydrate"
-    ? captureContainerSnapshot(options.container)
-    : undefined;
+  const domSnapshot =
+    mode === "hydrate"
+      ? captureContainerSnapshot(options.container)
+      : undefined;
   let disposed = false;
   let previousSubscriptions: unknown;
   const abortController = new AbortController();
   const activeSubscriptions = new Map<string, ActiveSubscription>();
-  const runtimeHost = options.runtimeHostMode === "explicit"
-    ? options.runtimeHost ?? {}
-    : createBrowserVxRuntimeHost(options.runtimeHost);
+  const runtimeHost =
+    options.runtimeHostMode === "explicit"
+      ? (options.runtimeHost ?? {})
+      : createBrowserVxRuntimeHost(options.runtimeHost);
   const runtimeHostOnError = Object.hasOwn(runtimeHost, "onError")
     ? runtimeHost.onError
     : undefined;
-  const reportError = createRuntimeErrorReporter(options.onError ?? runtimeHostOnError);
-  const retainedHandlerReleaser = retainedHandlerReleaserFor(app, options.handlers);
+  const reportError = createRuntimeErrorReporter(
+    options.onError ?? runtimeHostOnError,
+  );
+  const retainedHandlerReleaser = retainedHandlerReleaserFor(
+    app,
+    options.handlers,
+  );
   const afterCommandCallbacks: Array<Array<() => void>> = [];
   let queue = Promise.resolve();
   const queuedRetainedHandlerReleaser: RetainedHandlerReleaser = {
     release: (id) => {
-      void queue.catch(() => undefined).then(() => {
-        if (retainedHandlerReleaser.release) {
-          retainedHandlerReleaser.release(id);
-          return;
-        }
-        retainedHandlerReleaser.releaseMany?.([id]);
-      });
+      void queue
+        .catch(() => undefined)
+        .then(() => {
+          if (retainedHandlerReleaser.release) {
+            retainedHandlerReleaser.release(id);
+            return;
+          }
+          retainedHandlerReleaser.releaseMany?.([id]);
+        });
     },
     releaseMany: (ids) => {
       const retainedIds = Array.from(ids);
-      void queue.catch(() => undefined).then(() => {
-        if (retainedHandlerReleaser.releaseMany) {
-          retainedHandlerReleaser.releaseMany(retainedIds);
-          return;
-        }
-        retainedIds.forEach((id) => retainedHandlerReleaser.release?.(id));
-      });
+      void queue
+        .catch(() => undefined)
+        .then(() => {
+          if (retainedHandlerReleaser.releaseMany) {
+            retainedHandlerReleaser.releaseMany(retainedIds);
+            return;
+          }
+          retainedIds.forEach((id) => retainedHandlerReleaser.release?.(id));
+        });
     },
   };
 
@@ -518,7 +528,9 @@ async function mountRuntimeApp(
 
   const dispatchQueued = async (message: VxRuntimeMessage): Promise<void> => {
     const run = queue.catch(() => undefined).then(() => dispatchNow(message));
-    queue = run.catch((error) => reportError(error, { phase: "dispatch", message }));
+    queue = run.catch((error) =>
+      reportError(error, { phase: "dispatch", message }),
+    );
     await run;
   };
   const executionContext: VxRuntimeExecutionContext = {
@@ -542,12 +554,19 @@ async function mountRuntimeApp(
       dispatchQueued({ kind: "event", handlerId, payload }),
     dispatchMapped: async (handlerId, payload, mapHandlerIds) => {
       if (!options.handlers?.dispatch) {
-        await dispatchQueued(mapDomEventMessage({ kind: "event", handlerId, payload }, mapHandlerIds));
+        await dispatchQueued(
+          mapDomEventMessage(
+            { kind: "event", handlerId, payload },
+            mapHandlerIds,
+          ),
+        );
         return;
       }
       const message = await options.handlers.dispatch(handlerId, payload);
       if (message !== undefined) {
-        await dispatchQueued(mapDomEventMessage(toRuntimeMessage(message), mapHandlerIds));
+        await dispatchQueued(
+          mapDomEventMessage(toRuntimeMessage(message), mapHandlerIds),
+        );
       }
     },
     dispatchMessage: (message) => dispatchQueued(toRuntimeMessage(message)),
@@ -560,7 +579,10 @@ async function mountRuntimeApp(
     deferHydrationReconciliation: executionContext.deferAfterCommands,
   });
 
-  const applyRuntimeStep = async (result: unknown, renderMode: "hydrate" | "render" = "render") => {
+  const applyRuntimeStep = async (
+    result: unknown,
+    renderMode: "hydrate" | "render" = "render",
+  ) => {
     if (disposed) return;
     const step = normalizeRuntimeStep(result);
     const deferredCallbacks: Array<() => void> = [];
@@ -622,7 +644,7 @@ async function mountRuntimeApp(
   try {
     const initial = app.init
       ? await app.init()
-      : initialHydrationFrame(options) ?? await app.render();
+      : (initialHydrationFrame(options) ?? (await app.render()));
     await applyRuntimeStep(initial, mode);
   } catch (error) {
     disposed = true;
@@ -649,10 +671,14 @@ async function mountRuntimeApp(
     dispose() {
       disposed = true;
       abortController.abort();
-      void disposeSubscriptions(activeSubscriptions, retainedHandlerReleaser)
-        .catch((error) => reportError(error, { phase: "dispose" }));
+      void disposeSubscriptions(
+        activeSubscriptions,
+        retainedHandlerReleaser,
+      ).catch((error) => reportError(error, { phase: "dispose" }));
       renderer.dispose();
-      void Promise.resolve(app.dispose?.()).catch((error) => reportError(error, { phase: "dispose" }));
+      void Promise.resolve(app.dispose?.()).catch((error) =>
+        reportError(error, { phase: "dispose" }),
+      );
     },
     getSnapshot() {
       return app.getSnapshot?.() ?? renderer.getSnapshot();
@@ -691,7 +717,9 @@ function patchContainer(
   const current = container.firstChild;
   if (!current || !oldNode) {
     container.textContent = "";
-    container.appendChild(createDom(newNode, handlers, domChildNamespace(container)));
+    container.appendChild(
+      createDom(newNode, handlers, domChildNamespace(container)),
+    );
     return;
   }
 
@@ -733,7 +761,8 @@ function flattenChildren(children: VNode[]): VNode[] {
           flattened.children.length === 1
             ? flattened.key!
             : `${flattened.key}:${fragmentChild.key ?? index}`,
-        ));
+        ),
+      );
     }
     return flattened.children;
   });
@@ -763,14 +792,24 @@ function patchNode(
   }
 
   if (newNode.kind === "fragment") {
-    patchChildren(dom, oldNode.kind === "fragment" ? oldNode.children : [], newNode.children, handlers);
+    patchChildren(
+      dom,
+      oldNode.kind === "fragment" ? oldNode.children : [],
+      newNode.children,
+      handlers,
+    );
     return dom;
   }
 
   const element = dom as Element;
   const oldElement = oldNode as VxElementNode;
   applyElementProps(element, oldElement, newNode, handlers);
-  patchChildren(element, oldElement.children ?? [], newNode.children ?? [], handlers);
+  patchChildren(
+    element,
+    oldElement.children ?? [],
+    newNode.children ?? [],
+    handlers,
+  );
   applyChildDependentProps(element, newNode);
   return element;
 }
@@ -784,19 +823,20 @@ function createDom(
   if (vnode.kind === "fragment") {
     const fragment = document.createDocumentFragment();
     vnode.children.forEach((child) =>
-      fragment.appendChild(createDom(child, handlers, parentNamespace))
+      fragment.appendChild(createDom(child, handlers, parentNamespace)),
     );
     return fragment;
   }
 
   const namespace = elementNamespace(vnode.tag, parentNamespace);
-  const element = namespace === "svg"
-    ? document.createElementNS(svgNamespaceUri, vnode.tag)
-    : document.createElement(vnode.tag);
+  const element =
+    namespace === "svg"
+      ? document.createElementNS(svgNamespaceUri, vnode.tag)
+      : document.createElement(vnode.tag);
   applyElementProps(element, undefined, vnode, handlers);
   const childrenNamespace = childNamespace(vnode.tag, namespace);
   (vnode.children ?? []).forEach((child) =>
-    element.appendChild(createDom(child, handlers, childrenNamespace))
+    element.appendChild(createDom(child, handlers, childrenNamespace)),
   );
   applyChildDependentProps(element, vnode);
   return element;
@@ -814,7 +854,10 @@ function domChildNamespace(parent: Node | null): MarkupNamespace {
 }
 
 function domElementMatches(dom: Element, vnode: VxElementNode): boolean {
-  const namespace = elementNamespace(vnode.tag, domChildNamespace(dom.parentNode));
+  const namespace = elementNamespace(
+    vnode.tag,
+    domChildNamespace(dom.parentNode),
+  );
   if (namespace === "svg") {
     return dom.namespaceURI === svgNamespaceUri && dom.localName === vnode.tag;
   }
@@ -848,7 +891,13 @@ function patchChildren(
       return;
     }
 
-    const patched = patchNode(parent, candidateDom, oldChild, newChild, handlers);
+    const patched = patchNode(
+      parent,
+      candidateDom,
+      oldChild,
+      newChild,
+      handlers,
+    );
     const desired = parent.childNodes.item(index);
     if (patched !== desired) parent.insertBefore(patched, desired ?? null);
     usedDom.add(patched);
@@ -867,10 +916,19 @@ function applyElementProps(
   preservedProps: ReadonlySet<string> = new Set(),
 ): void {
   patchAttrs(element, effectiveAttrs(oldNode), effectiveAttrs(newNode));
-  patchProps(element, effectiveProps(oldNode), effectiveProps(newNode), preservedProps);
+  patchProps(
+    element,
+    effectiveProps(oldNode),
+    effectiveProps(newNode),
+    preservedProps,
+  );
   restoreAttrsOverriddenByRemovedProps(element, oldNode, newNode);
   if (!usesUnstructuredStyle(newNode)) {
-    patchStyles(element as HTMLElement, oldNode?.styles ?? {}, newNode.styles ?? {});
+    patchStyles(
+      element as HTMLElement,
+      oldNode?.styles ?? {},
+      newNode.styles ?? {},
+    );
   }
   patchEvents(element, oldNode?.events ?? [], newNode.events ?? [], handlers);
 }
@@ -897,7 +955,9 @@ function restoreAttrsOverriddenByRemovedProps(
   });
 }
 
-function effectiveAttrs(node: VxElementNode | undefined): Record<string, unknown> {
+function effectiveAttrs(
+  node: VxElementNode | undefined,
+): Record<string, unknown> {
   const attrs = { ...(node?.attrs ?? {}) };
   Object.entries(node?.props ?? {}).forEach(([key, value]) => {
     const attrName = key === "className" ? "class" : key;
@@ -919,7 +979,9 @@ function serializesPropertyAsAttribute(tag: string, property: string): boolean {
   return ssrDomPropertyRepresentation(tag, property) === "attribute";
 }
 
-function effectiveProps(node: VxElementNode | undefined): Record<string, unknown> {
+function effectiveProps(
+  node: VxElementNode | undefined,
+): Record<string, unknown> {
   const props = { ...(node?.props ?? {}) };
   if (Object.keys(node?.styles ?? {}).length > 0) delete props.style;
   return props;
@@ -927,7 +989,9 @@ function effectiveProps(node: VxElementNode | undefined): Record<string, unknown
 
 function usesUnstructuredStyle(node: VxElementNode): boolean {
   const attrs = { ...(node.attrs ?? {}), ...(node.props ?? {}) };
-  return Object.hasOwn(attrs, "style") && Object.keys(node.styles ?? {}).length === 0;
+  return (
+    Object.hasOwn(attrs, "style") && Object.keys(node.styles ?? {}).length === 0
+  );
 }
 
 function patchAttrs(
@@ -961,7 +1025,11 @@ function getElementAttribute(element: Element, name: string): string | null {
     : element.getAttribute(name);
 }
 
-function setElementAttribute(element: Element, name: string, value: string): void {
+function setElementAttribute(
+  element: Element,
+  name: string,
+  value: string,
+): void {
   const namespaced = namespacedSvgAttribute(element, name);
   if (namespaced) {
     element.setAttributeNS(namespaced[0], name, value);
@@ -995,7 +1063,8 @@ function patchProps(
   preservedProps: ReadonlySet<string> = new Set(),
 ): void {
   Object.keys(oldProps).forEach((key) => {
-    if (!(key in newProps) && !preservedProps.has(key)) setDomProperty(element, key, undefined);
+    if (!(key in newProps) && !preservedProps.has(key))
+      setDomProperty(element, key, undefined);
   });
   Object.entries(newProps).forEach(([key, value]) => {
     if (preservedProps.has(key)) return;
@@ -1024,7 +1093,8 @@ function patchEvents(
   newEvents: EventDescriptor[],
   handlers: RetainedEventHandlerRegistry | undefined,
 ): void {
-  const current = listenerState.get(element) ?? new Map<string, ListenerRecord>();
+  const current =
+    listenerState.get(element) ?? new Map<string, ListenerRecord>();
   const nextKeys = new Set(newEvents.map(listenerKey));
 
   oldEvents.forEach((event) => {
@@ -1048,12 +1118,21 @@ function patchEvents(
       if (event.options?.preventDefault) browserEvent.preventDefault();
       if (event.options?.stopPropagation) browserEvent.stopPropagation();
       capturePointerForEvent(element, event, browserEvent);
-      dispatchEventDescriptor(event, normalizeBrowserEvent(browserEvent), handlers);
+      dispatchEventDescriptor(
+        event,
+        normalizeBrowserEvent(browserEvent),
+        handlers,
+      );
       releasePointerForEvent(element, event, browserEvent);
     };
     const options = toListenerOptions(event.options);
     element.addEventListener(event.event, listener, options);
-    current.set(key, { key, listener, options, handlerId: event.handlerId ?? -1 });
+    current.set(key, {
+      key,
+      listener,
+      options,
+      handlerId: event.handlerId ?? -1,
+    });
   });
 
   if (current.size > 0) {
@@ -1112,28 +1191,43 @@ function dispatchEventDescriptor(
   if (typeof event.handlerId === "number") {
     if (event.mapHandlerIds?.length) {
       if (handlers?.dispatchMapped) {
-        settleAsyncDispatch(handlers.dispatchMapped(event.handlerId, payload, event.mapHandlerIds));
+        settleAsyncDispatch(
+          handlers.dispatchMapped(
+            event.handlerId,
+            payload,
+            event.mapHandlerIds,
+          ),
+        );
         return;
       }
-      settleAsyncDispatch(handlers?.dispatchMessage?.(
-        mapDomEventMessage({ kind: "event", handlerId: event.handlerId, payload }, event.mapHandlerIds),
-      ));
+      settleAsyncDispatch(
+        handlers?.dispatchMessage?.(
+          mapDomEventMessage(
+            { kind: "event", handlerId: event.handlerId, payload },
+            event.mapHandlerIds,
+          ),
+        ),
+      );
       return;
     }
     void Promise.resolve(handlers?.dispatch(event.handlerId, payload))
-      .then((message) => message === undefined
-        ? undefined
-        : handlers?.dispatchMessage?.(message))
+      .then((message) =>
+        message === undefined
+          ? undefined
+          : handlers?.dispatchMessage?.(message),
+      )
       .catch(() => undefined);
     return;
   }
   if (!Object.hasOwn(event, "message")) return;
   const message = toVxMessage(event.message);
-  settleAsyncDispatch(handlers?.dispatchMessage?.(
-    event.mapHandlerIds?.length
-      ? mapDomEventMessage(message, event.mapHandlerIds)
-      : event.message,
-  ));
+  settleAsyncDispatch(
+    handlers?.dispatchMessage?.(
+      event.mapHandlerIds?.length
+        ? mapDomEventMessage(message, event.mapHandlerIds)
+        : event.message,
+    ),
+  );
 }
 
 function hydrateContainer(
@@ -1147,7 +1241,14 @@ function hydrateContainer(
     vnode.children.forEach((child, index) => {
       const domChild = container.childNodes.item(index);
       if (domChild) {
-        hydrateNode(domChild, child, handlers, onMismatch, `root[${index}]`, deferReconciliation);
+        hydrateNode(
+          domChild,
+          child,
+          handlers,
+          onMismatch,
+          `root[${index}]`,
+          deferReconciliation,
+        );
         return;
       }
       reportHydrationMismatch(onMismatch, {
@@ -1156,9 +1257,16 @@ function hydrateContainer(
         expected: describeVNode(child),
         actual: undefined,
       });
-      container.appendChild(createDom(child, handlers, domChildNamespace(container)));
+      container.appendChild(
+        createDom(child, handlers, domChildNamespace(container)),
+      );
     });
-    reportExtraHydrationChildren(container, vnode.children.length, "root", onMismatch);
+    reportExtraHydrationChildren(
+      container,
+      vnode.children.length,
+      "root",
+      onMismatch,
+    );
     removeExtraChildren(container, vnode.children.length);
     return;
   }
@@ -1171,10 +1279,19 @@ function hydrateContainer(
       expected: describeVNode(vnode),
       actual: undefined,
     });
-    container.appendChild(createDom(vnode, handlers, domChildNamespace(container)));
+    container.appendChild(
+      createDom(vnode, handlers, domChildNamespace(container)),
+    );
     return;
   }
-  hydrateNode(current, vnode, handlers, onMismatch, "root", deferReconciliation);
+  hydrateNode(
+    current,
+    vnode,
+    handlers,
+    onMismatch,
+    "root",
+    deferReconciliation,
+  );
   reportExtraHydrationChildren(container, 1, "root", onMismatch);
   removeExtraChildren(container, 1);
 }
@@ -1196,7 +1313,10 @@ function hydrateNode(
         actual: describeDomNode(dom),
       });
       const parent = dom.parentNode;
-      parent?.replaceChild(createDom(vnode, handlers, domChildNamespace(parent)), dom);
+      parent?.replaceChild(
+        createDom(vnode, handlers, domChildNamespace(parent)),
+        dom,
+      );
       return;
     }
     if (dom.textContent !== vnode.value) {
@@ -1214,7 +1334,14 @@ function hydrateNode(
     vnode.children.forEach((child, index) => {
       const domChild = dom.childNodes.item(index);
       if (domChild) {
-        hydrateNode(domChild, child, handlers, onMismatch, `${path}[${index}]`, deferReconciliation);
+        hydrateNode(
+          domChild,
+          child,
+          handlers,
+          onMismatch,
+          `${path}[${index}]`,
+          deferReconciliation,
+        );
       }
     });
     reportExtraHydrationChildren(dom, vnode.children.length, path, onMismatch);
@@ -1229,7 +1356,10 @@ function hydrateNode(
       actual: describeDomNode(dom),
     });
     const parent = dom.parentNode;
-    parent?.replaceChild(createDom(vnode, handlers, domChildNamespace(parent)), dom);
+    parent?.replaceChild(
+      createDom(vnode, handlers, domChildNamespace(parent)),
+      dom,
+    );
     return;
   }
   if (!domElementMatches(dom, vnode)) {
@@ -1240,7 +1370,10 @@ function hydrateNode(
       actual: dom.localName,
     });
     const parent = dom.parentNode;
-    parent?.replaceChild(createDom(vnode, handlers, domChildNamespace(parent)), dom);
+    parent?.replaceChild(
+      createDom(vnode, handlers, domChildNamespace(parent)),
+      dom,
+    );
     return;
   }
   const dirtyProps = dirtyFormProperties(dom, vnode);
@@ -1249,7 +1382,14 @@ function hydrateNode(
   (vnode.children ?? []).forEach((child, index) => {
     const domChild = dom.childNodes.item(index);
     if (domChild) {
-      hydrateNode(domChild, child, handlers, onMismatch, `${path}.${vnode.tag}[${index}]`, deferReconciliation);
+      hydrateNode(
+        domChild,
+        child,
+        handlers,
+        onMismatch,
+        `${path}.${vnode.tag}[${index}]`,
+        deferReconciliation,
+      );
       return;
     }
     reportHydrationMismatch(onMismatch, {
@@ -1260,12 +1400,26 @@ function hydrateNode(
     });
     dom.appendChild(createDom(child, handlers, domChildNamespace(dom)));
   });
-  reportExtraHydrationChildren(dom, vnode.children?.length ?? 0, path, onMismatch);
+  reportExtraHydrationChildren(
+    dom,
+    vnode.children?.length ?? 0,
+    path,
+    onMismatch,
+  );
   removeExtraChildren(dom, vnode.children?.length ?? 0);
-  reconcileDirtyFormControl(dom, vnode, dirtyProps, handlers, deferReconciliation);
+  reconcileDirtyFormControl(
+    dom,
+    vnode,
+    dirtyProps,
+    handlers,
+    deferReconciliation,
+  );
 }
 
-function dirtyFormProperties(element: Element, vnode: VxElementNode): Set<string> {
+function dirtyFormProperties(
+  element: Element,
+  vnode: VxElementNode,
+): Set<string> {
   const dirty = new Set<string>();
   const control = element as Element & {
     value?: unknown;
@@ -1275,14 +1429,16 @@ function dirtyFormProperties(element: Element, vnode: VxElementNode): Set<string
   };
   if (
     Object.hasOwn(vnode.props ?? {}, "value") &&
-    "value" in control && "defaultValue" in control &&
+    "value" in control &&
+    "defaultValue" in control &&
     control.value !== control.defaultValue
   ) {
     dirty.add("value");
   }
   if (
     Object.hasOwn(vnode.props ?? {}, "checked") &&
-    "checked" in control && "defaultChecked" in control &&
+    "checked" in control &&
+    "defaultChecked" in control &&
     control.checked !== control.defaultChecked
   ) {
     dirty.add("checked");
@@ -1302,7 +1458,9 @@ function reconcileDirtyFormControl(
   const events = vnode.events ?? [];
   const eventName = events.some((event) => event.event === preferredEvent)
     ? preferredEvent
-    : preferredEvent === "input" ? "change" : "input";
+    : preferredEvent === "input"
+      ? "change"
+      : "input";
   const control = element as Element & { value?: unknown; checked?: unknown };
   const payload: NormalizedEventPayload = {
     kind: "input",
@@ -1346,7 +1504,8 @@ function reportElementHydrationMismatch(
   if (
     recordsEqual(actual.attrs, expected.attrs) &&
     inlineStyleText(element) === expected.styles
-  ) return;
+  )
+    return;
   reportHydrationMismatch(onMismatch, {
     path,
     reason: "attributes",
@@ -1357,11 +1516,19 @@ function reportElementHydrationMismatch(
 
 function expectedHydrationAttrs(vnode: VxElementNode): Record<string, unknown> {
   const combined = effectiveAttrs(vnode);
-  return Object.fromEntries(Object.entries(combined).flatMap(([key, value]) => {
-    const name = key === "className" ? "class" : key;
-    if (name === "key" || name === "style" || value == null || value === false) return [];
-    return [[name, value === true ? "" : String(value)]];
-  }));
+  return Object.fromEntries(
+    Object.entries(combined).flatMap(([key, value]) => {
+      const name = key === "className" ? "class" : key;
+      if (
+        name === "key" ||
+        name === "style" ||
+        value == null ||
+        value === false
+      )
+        return [];
+      return [[name, value === true ? "" : String(value)]];
+    }),
+  );
 }
 
 function recordsEqual(
@@ -1370,10 +1537,13 @@ function recordsEqual(
 ): boolean {
   const leftKeys = Object.keys(left).sort();
   const rightKeys = Object.keys(right).sort();
-  return leftKeys.length === rightKeys.length &&
-    leftKeys.every((key, index) =>
-      key === rightKeys[index] && String(left[key]) === String(right[key])
-    );
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key, index) =>
+        key === rightKeys[index] && String(left[key]) === String(right[key]),
+    )
+  );
 }
 
 function reportExtraHydrationChildren(
@@ -1447,10 +1617,7 @@ function inlineStyleText(element: Element): string {
     : "";
 }
 
-function expectedStyleText(
-  element: Element,
-  vnode: VxElementNode,
-): string {
+function expectedStyleText(element: Element, vnode: VxElementNode): string {
   const scratch = element.ownerDocument.createElement("div");
   const attrs = { ...(vnode.attrs ?? {}), ...(vnode.props ?? {}) };
   const inlineStyle = attrs.style;
@@ -1523,7 +1690,8 @@ function restoreElementSnapshot(element: Element, snapshot: Element): void {
     if (!snapshot.hasAttribute(attr.name)) element.removeAttribute(attr.name);
   });
   Array.from(snapshot.attributes).forEach((attr) => {
-    if (element.getAttribute(attr.name) !== attr.value) element.setAttribute(attr.name, attr.value);
+    if (element.getAttribute(attr.name) !== attr.value)
+      element.setAttribute(attr.name, attr.value);
   });
   Array.from(snapshot.childNodes).forEach((snapshotChild, index) => {
     const child = element.childNodes.item(index);
@@ -1539,7 +1707,8 @@ function restoreElementSnapshot(element: Element, snapshot: Element): void {
       restoreElementSnapshot(child, snapshotChild);
       return;
     }
-    if (child.nodeValue !== snapshotChild.nodeValue) child.nodeValue = snapshotChild.nodeValue;
+    if (child.nodeValue !== snapshotChild.nodeValue)
+      child.nodeValue = snapshotChild.nodeValue;
   });
   while (element.childNodes.length > snapshot.childNodes.length) {
     if (element.lastChild) element.removeChild(element.lastChild);
@@ -1567,7 +1736,11 @@ function removeElementListeners(element: Element): void {
   const records = listenerState.get(element);
   if (!records) return;
   records.forEach((record) => {
-    element.removeEventListener(record.key.split(":")[0] ?? "", record.listener, record.options);
+    element.removeEventListener(
+      record.key.split(":")[0] ?? "",
+      record.listener,
+      record.options,
+    );
   });
   listenerState.delete(element);
 }
@@ -1618,7 +1791,8 @@ async function runCommands(
 ): Promise<void> {
   if (input === undefined || input === null) return;
   if (Array.isArray(input)) {
-    for (const child of input) await runCommands(child, host, context, taskObserver);
+    for (const child of input)
+      await runCommands(child, host, context, taskObserver);
     return;
   }
   const commandEnvelope = readRuntimeEnvelope(input, "cmd", "commands");
@@ -1636,12 +1810,18 @@ async function runCommands(
     if (!Object.hasOwn(commandEnvelope, "children")) {
       throw new Error("vx-dom: command batch missing required children");
     }
-    await runCommands(commandEnvelope.children, host, context, nextTaskObserver);
+    await runCommands(
+      commandEnvelope.children,
+      host,
+      context,
+      nextTaskObserver,
+    );
     return;
   }
   if (commandEnvelope.kind === "map") {
     const handlerId = readHandlerId(commandEnvelope);
-    if (handlerId === undefined) throw new Error("vx-dom: command map missing numeric handlerId");
+    if (handlerId === undefined)
+      throw new Error("vx-dom: command map missing numeric handlerId");
     const child = readRequiredMappedChild(commandEnvelope, "command map");
     const mapped = ownedCommandMapExecutionContext(
       context,
@@ -1649,12 +1829,7 @@ async function runCommands(
       mappedOwnedHandlerIds(commandEnvelope),
     );
     try {
-      await runCommands(
-        child,
-        host,
-        mapped.context,
-        nextTaskObserver,
-      );
+      await runCommands(child, host, mapped.context, nextTaskObserver);
     } finally {
       mapped.finish();
     }
@@ -1663,13 +1838,16 @@ async function runCommands(
   const command = nextTaskObserver
     ? attachTaskObserver(commandEnvelope, nextTaskObserver)
     : commandEnvelope;
-  const commands = host && Object.hasOwn(host, "commands")
-    ? host.commands
-    : undefined;
-  const executor = commands && Object.hasOwn(commands, commandEnvelope.kind)
-    ? commands[commandEnvelope.kind]
-    : undefined;
-  if (!executor) throw new Error(`vx-dom: no runtime command handler registered for "${commandEnvelope.kind}"`);
+  const commands =
+    host && Object.hasOwn(host, "commands") ? host.commands : undefined;
+  const executor =
+    commands && Object.hasOwn(commands, commandEnvelope.kind)
+      ? commands[commandEnvelope.kind]
+      : undefined;
+  if (!executor)
+    throw new Error(
+      `vx-dom: no runtime command handler registered for "${commandEnvelope.kind}"`,
+    );
   await executor(command, context);
 }
 
@@ -1678,8 +1856,10 @@ function runDelayCommand(
   context: VxRuntimeExecutionContext,
 ): void {
   const ms = readMillis(command);
-  if (ms === undefined) throw new Error("vx-dom: delay command missing non-negative millis");
-  if (!Object.hasOwn(command, "value")) throw new Error("vx-dom: delay command missing value");
+  if (ms === undefined)
+    throw new Error("vx-dom: delay command missing non-negative millis");
+  if (!Object.hasOwn(command, "value"))
+    throw new Error("vx-dom: delay command missing value");
   let resolveCompletion: () => void = () => undefined;
   const completion = new Promise<void>((resolve) => {
     resolveCompletion = resolve;
@@ -1689,12 +1869,19 @@ function runDelayCommand(
       resolveCompletion();
       return;
     }
-    Promise.resolve(context.dispatch(toVxMessage(command.value))).then(resolveCompletion, resolveCompletion);
+    Promise.resolve(context.dispatch(toVxMessage(command.value))).then(
+      resolveCompletion,
+      resolveCompletion,
+    );
   }, ms);
-  context.signal.addEventListener("abort", () => {
-    clearTimeout(timeout);
-    resolveCompletion();
-  }, { once: true });
+  context.signal.addEventListener(
+    "abort",
+    () => {
+      clearTimeout(timeout);
+      resolveCompletion();
+    },
+    { once: true },
+  );
   context.trackRetainedHandlerUse?.(completion);
   settleAsyncDispatch(completion);
 }
@@ -1705,8 +1892,10 @@ function runTaskCommand(
 ): void {
   const taskId = readTaskId(command);
   const observeTask = readTaskObserver(command);
-  if (taskId === undefined) throw new Error("vx-dom: task command missing numeric taskId");
-  if (!observeTask) throw new Error("vx-dom: task command requires task runtime support");
+  if (taskId === undefined)
+    throw new Error("vx-dom: task command missing numeric taskId");
+  if (!observeTask)
+    throw new Error("vx-dom: task command requires task runtime support");
 
   const ownedHandlerIds = mappedOwnedHandlerIds(command);
   let released = false;
@@ -1725,28 +1914,32 @@ function runTaskCommand(
   };
   context.signal.addEventListener("abort", abortListener, { once: true });
 
-  const completion = Promise.resolve().then(() => observeTask(taskId)).then((outcome) => {
-    if (context.signal.aborted) return;
-    if (outcome.kind === "failed") {
-      context.reportError?.(outcome.error, { phase: "commands" });
-      return;
-    }
-    if (outcome.kind !== "value") return;
-    const handlerId = readHandlerId(command);
-    const message = toVxMessage(outcome.value);
-    return context.dispatch(
-      handlerId === undefined
-        ? message
-        : { kind: "map", handlerId, message },
-    );
-  }).catch((error) => {
-    context.reportError?.(error, { phase: "commands" });
-  }).finally(() => {
-    context.signal.removeEventListener("abort", abortListener);
-    releaseOwnedHandlers();
-    resolveAbort();
-  });
-  context.trackRetainedHandlerUse?.(Promise.race([completion, abortCompletion]));
+  const completion = Promise.resolve()
+    .then(() => observeTask(taskId))
+    .then((outcome) => {
+      if (context.signal.aborted) return;
+      if (outcome.kind === "failed") {
+        context.reportError?.(outcome.error, { phase: "commands" });
+        return;
+      }
+      if (outcome.kind !== "value") return;
+      const handlerId = readHandlerId(command);
+      const message = toVxMessage(outcome.value);
+      return context.dispatch(
+        handlerId === undefined ? message : { kind: "map", handlerId, message },
+      );
+    })
+    .catch((error) => {
+      context.reportError?.(error, { phase: "commands" });
+    })
+    .finally(() => {
+      context.signal.removeEventListener("abort", abortListener);
+      releaseOwnedHandlers();
+      resolveAbort();
+    });
+  context.trackRetainedHandlerUse?.(
+    Promise.race([completion, abortCompletion]),
+  );
   settleAsyncDispatch(completion);
 }
 
@@ -1850,7 +2043,9 @@ function runCanvasRenderCommand(command: VxCommandEnvelope): void {
   const canvas = findCanvas(frame.selector);
   const context = canvas.getContext("2d");
   if (!context) {
-    throw new Error(`vx-dom: canvas_render could not create a 2D context for ${JSON.stringify(frame.selector)}`);
+    throw new Error(
+      `vx-dom: canvas_render could not create a 2D context for ${JSON.stringify(frame.selector)}`,
+    );
   }
 
   const pixelRatio = readCanvasPixelRatio();
@@ -1862,7 +2057,9 @@ function runCanvasRenderCommand(command: VxCommandEnvelope): void {
     backingWidth <= 0 ||
     backingHeight <= 0
   ) {
-    throw new Error("vx-dom: canvas_render dimensions produce an invalid backing store");
+    throw new Error(
+      "vx-dom: canvas_render dimensions produce an invalid backing store",
+    );
   }
 
   canvas.style.width = `${frame.width}px`;
@@ -1926,7 +2123,9 @@ function drawCanvasPrimitive(
       drawCanvasText(context, draw, label);
       return;
     }
-    throw new Error(`vx-dom: ${label} has unsupported kind ${JSON.stringify(kind)}`);
+    throw new Error(
+      `vx-dom: ${label} has unsupported kind ${JSON.stringify(kind)}`,
+    );
   } finally {
     context.restore();
   }
@@ -2014,7 +2213,7 @@ function drawCanvasPolyline(
     throw new Error(`vx-dom: ${label} missing points array`);
   }
   const points = draw.points.map((point, index) =>
-    readCanvasPoint(point, `${label}.points[${index}]`)
+    readCanvasPoint(point, `${label}.points[${index}]`),
   );
   if (points.length === 0) return;
 
@@ -2151,7 +2350,13 @@ function drawCanvasCircle(
   const radius = readPositiveCanvasNumber(draw, "radius", label, true);
   context.beginPath();
   context.arc(center.x, center.y, radius, 0, Math.PI * 2);
-  const gradient = readCanvasRadialGradient(context, draw.radialGradient, center, radius, label);
+  const gradient = readCanvasRadialGradient(
+    context,
+    draw.radialGradient,
+    center,
+    radius,
+    label,
+  );
   drawCanvasPathPaint(context, draw, label, gradient);
 }
 
@@ -2165,7 +2370,15 @@ function drawCanvasEllipse(
   const radiusY = readPositiveCanvasNumber(draw, "radiusY", label, true);
   const rotation = readFiniteCanvasNumber(draw, "rotation", label);
   context.beginPath();
-  context.ellipse(center.x, center.y, radiusX, radiusY, rotation, 0, Math.PI * 2);
+  context.ellipse(
+    center.x,
+    center.y,
+    radiusX,
+    radiusY,
+    rotation,
+    0,
+    Math.PI * 2,
+  );
   drawCanvasPathPaint(context, draw, label);
 }
 
@@ -2177,7 +2390,7 @@ function drawCanvasPathPaint(
   fillRule?: CanvasFillRule,
 ): void {
   if (fillOverride || typeof draw.fill === "string") {
-    context.fillStyle = fillOverride ?? draw.fill as string;
+    context.fillStyle = fillOverride ?? (draw.fill as string);
     if (fillRule === undefined) context.fill();
     else context.fill(fillRule);
   } else if (draw.fill !== undefined) {
@@ -2186,7 +2399,12 @@ function drawCanvasPathPaint(
 
   if (typeof draw.stroke === "string") {
     context.strokeStyle = draw.stroke;
-    context.lineWidth = readPositiveCanvasNumber(draw, "strokeWidth", label, true);
+    context.lineWidth = readPositiveCanvasNumber(
+      draw,
+      "strokeWidth",
+      label,
+      true,
+    );
     context.stroke();
   } else if (draw.stroke !== undefined) {
     throw new Error(`vx-dom: ${label} has non-string stroke`);
@@ -2230,7 +2448,13 @@ function applyCanvasDrawState(
   context.lineJoin = "round";
   context.shadowOffsetX = 0;
   context.shadowOffsetY = 0;
-  context.shadowBlur = readOptionalPositiveCanvasNumber(draw, "glowBlur", label, 0, true);
+  context.shadowBlur = readOptionalPositiveCanvasNumber(
+    draw,
+    "glowBlur",
+    label,
+    0,
+    true,
+  );
   context.shadowColor = "transparent";
   if (typeof draw.glowColor === "string") {
     context.shadowColor = draw.glowColor;
@@ -2263,10 +2487,20 @@ function readCanvasRadialGradient(
   if (!isRecord(input)) {
     throw new Error(`vx-dom: ${label} has invalid radialGradient`);
   }
-  const innerRadius = readFiniteCanvasNumber(input, "innerRadius", `${label}.radialGradient`);
-  const outerRadius = input.outerRadius === undefined
-    ? radius
-    : readPositiveCanvasNumber(input, "outerRadius", `${label}.radialGradient`, true);
+  const innerRadius = readFiniteCanvasNumber(
+    input,
+    "innerRadius",
+    `${label}.radialGradient`,
+  );
+  const outerRadius =
+    input.outerRadius === undefined
+      ? radius
+      : readPositiveCanvasNumber(
+          input,
+          "outerRadius",
+          `${label}.radialGradient`,
+          true,
+        );
   if (innerRadius < 0 || outerRadius < innerRadius) {
     throw new Error(`vx-dom: ${label}.radialGradient has invalid radii`);
   }
@@ -2278,16 +2512,27 @@ function readCanvasRadialGradient(
     center.y,
     outerRadius,
   );
-  gradient.addColorStop(0, readRequiredStringField(input, "innerColor", `${label}.radialGradient`));
-  gradient.addColorStop(1, readRequiredStringField(input, "outerColor", `${label}.radialGradient`));
+  gradient.addColorStop(
+    0,
+    readRequiredStringField(input, "innerColor", `${label}.radialGradient`),
+  );
+  gradient.addColorStop(
+    1,
+    readRequiredStringField(input, "outerColor", `${label}.radialGradient`),
+  );
   return gradient;
 }
 
-async function runCopyToClipboardCommand(command: VxCommandEnvelope): Promise<void> {
+async function runCopyToClipboardCommand(
+  command: VxCommandEnvelope,
+): Promise<void> {
   const value = readRequiredStringValue(command, "copy_to_clipboard");
-  const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+  const clipboard =
+    typeof navigator === "undefined" ? undefined : navigator.clipboard;
   if (!clipboard || typeof clipboard.writeText !== "function") {
-    throw new Error("vx-dom: copy_to_clipboard command requires navigator.clipboard.writeText");
+    throw new Error(
+      "vx-dom: copy_to_clipboard command requires navigator.clipboard.writeText",
+    );
   }
   await clipboard.writeText(value);
 }
@@ -2304,7 +2549,10 @@ function runLocalStorageRemoveCommand(command: VxCommandEnvelope): void {
 
 function runLocalStorageSetCommand(command: VxCommandEnvelope): void {
   const entry = readStorageEntry(command, "local_storage_set");
-  readBrowserStorage("local_storage_set", "local").setItem(entry.key, entry.value);
+  readBrowserStorage("local_storage_set", "local").setItem(
+    entry.key,
+    entry.value,
+  );
 }
 
 function runFocusCommand(command: VxCommandEnvelope): void {
@@ -2343,16 +2591,23 @@ async function runReadClipboardCommand(
   if (handlerId === undefined) {
     throw new Error("vx-dom: read_clipboard command missing numeric handlerId");
   }
-  const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+  const clipboard =
+    typeof navigator === "undefined" ? undefined : navigator.clipboard;
   if (!clipboard || typeof clipboard.readText !== "function") {
-    throw new Error("vx-dom: read_clipboard command requires navigator.clipboard.readText");
+    throw new Error(
+      "vx-dom: read_clipboard command requires navigator.clipboard.readText",
+    );
   }
   try {
     const value = await clipboard.readText();
     if (context.signal.aborted) return;
-    settleAsyncDispatch(context.dispatch({ kind: "map", handlerId, message: toVxMessage(value) }));
+    settleAsyncDispatch(
+      context.dispatch({ kind: "map", handlerId, message: toVxMessage(value) }),
+    );
   } finally {
-    mappedOwnedHandlerIds(command).forEach((id) => context.releaseRetainedHandler?.(id));
+    mappedOwnedHandlerIds(command).forEach((id) =>
+      context.releaseRetainedHandler?.(id),
+    );
   }
 }
 
@@ -2365,7 +2620,9 @@ function runReplaceUrlCommand(command: VxCommandEnvelope): void {
 }
 
 function runScrollIntoViewCommand(command: VxCommandEnvelope): void {
-  const target = findRefElement(readRequiredStringValue(command, "scroll_into_view"));
+  const target = findRefElement(
+    readRequiredStringValue(command, "scroll_into_view"),
+  );
   if (typeof target?.scrollIntoView === "function") target.scrollIntoView();
 }
 
@@ -2384,7 +2641,9 @@ function runScrollWindowToCommand(command: VxCommandEnvelope): void {
 }
 
 function runSelectTextCommand(command: VxCommandEnvelope): void {
-  const target = findRefElement(readRequiredStringValue(command, "select_text"));
+  const target = findRefElement(
+    readRequiredStringValue(command, "select_text"),
+  );
   if (target && "select" in target && typeof target.select === "function") {
     target.select();
   }
@@ -2402,7 +2661,10 @@ function runSessionStorageRemoveCommand(command: VxCommandEnvelope): void {
 
 function runSessionStorageSetCommand(command: VxCommandEnvelope): void {
   const entry = readStorageEntry(command, "session_storage_set");
-  readBrowserStorage("session_storage_set", "session").setItem(entry.key, entry.value);
+  readBrowserStorage("session_storage_set", "session").setItem(
+    entry.key,
+    entry.value,
+  );
 }
 
 function runSetHashCommand(command: VxCommandEnvelope): void {
@@ -2420,8 +2682,12 @@ function runIntervalSubscription(
   context: VxRuntimeExecutionContext,
 ): VxSubscriptionDisposer | void {
   const ms = readMillis(subscription);
-  if (ms === undefined) throw new Error("vx-dom: interval subscription missing non-negative millis");
-  if (!Object.hasOwn(subscription, "value")) throw new Error("vx-dom: interval subscription missing value");
+  if (ms === undefined)
+    throw new Error(
+      "vx-dom: interval subscription missing non-negative millis",
+    );
+  if (!Object.hasOwn(subscription, "value"))
+    throw new Error("vx-dom: interval subscription missing value");
   const interval = setInterval(() => {
     if (context.signal.aborted) return;
     settleAsyncDispatch(context.dispatch(toVxMessage(subscription.value)));
@@ -2433,18 +2699,19 @@ function runKeyboardSubscription(
   subscription: VxSubscriptionEnvelope,
   context: VxRuntimeExecutionContext,
 ): VxSubscriptionDisposer | void {
-  const eventName = typeof subscription.event === "string"
-    ? subscription.event
-    : "keydown";
+  const eventName =
+    typeof subscription.event === "string" ? subscription.event : "keydown";
   if (typeof window === "undefined") return;
   const listener: EventListener = (event) => {
     if (context.signal.aborted) return;
     const subscribedKey = optionalSubscriptionKey(subscription);
-    if (subscribedKey && isKeyboardEvent(event) && event.key !== subscribedKey) return;
-    settleAsyncDispatch(context.dispatch(subscriptionMessage(
-      subscription,
-      normalizeBrowserEvent(event),
-    )));
+    if (subscribedKey && isKeyboardEvent(event) && event.key !== subscribedKey)
+      return;
+    settleAsyncDispatch(
+      context.dispatch(
+        subscriptionMessage(subscription, normalizeBrowserEvent(event)),
+      ),
+    );
   };
   window.addEventListener(eventName, listener);
   return () => window.removeEventListener(eventName, listener);
@@ -2454,19 +2721,30 @@ function runAnimationFrameSubscription(
   subscription: VxSubscriptionEnvelope,
   context: VxRuntimeExecutionContext,
 ): VxSubscriptionDisposer | void {
-  if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") return;
+  if (
+    typeof window === "undefined" ||
+    typeof window.requestAnimationFrame !== "function"
+  )
+    return;
   let frameId: number | undefined;
   const tick = (timestamp: number) => {
     if (context.signal.aborted) return;
-    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
-      kind: "animation_frame",
-      timestamp,
-    })));
+    settleAsyncDispatch(
+      context.dispatch(
+        subscriptionMessage(subscription, {
+          kind: "animation_frame",
+          timestamp,
+        }),
+      ),
+    );
     frameId = window.requestAnimationFrame(tick);
   };
   frameId = window.requestAnimationFrame(tick);
   return () => {
-    if (frameId !== undefined && typeof window.cancelAnimationFrame === "function") {
+    if (
+      frameId !== undefined &&
+      typeof window.cancelAnimationFrame === "function"
+    ) {
       window.cancelAnimationFrame(frameId);
     }
   };
@@ -2476,14 +2754,22 @@ function runBroadcastChannelSubscription(
   subscription: VxSubscriptionEnvelope,
   context: VxRuntimeExecutionContext,
 ): VxSubscriptionDisposer | void {
-  const channelName = readRequiredStringField(subscription, "name", "broadcast_channel subscription");
+  const channelName = readRequiredStringField(
+    subscription,
+    "name",
+    "broadcast_channel subscription",
+  );
   if (typeof BroadcastChannel === "undefined") {
-    throw new Error("vx-dom: broadcast_channel subscription requires BroadcastChannel");
+    throw new Error(
+      "vx-dom: broadcast_channel subscription requires BroadcastChannel",
+    );
   }
   const channel = new BroadcastChannel(channelName);
   const listener = (event: MessageEvent) => {
     if (context.signal.aborted) return;
-    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, event.data)));
+    settleAsyncDispatch(
+      context.dispatch(subscriptionMessage(subscription, event.data)),
+    );
   };
   channel.addEventListener("message", listener);
   return () => {
@@ -2502,7 +2788,9 @@ function runLocationChangeSubscription(
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const dispatch = () => {
     if (cancelled || context.signal.aborted) return;
-    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, locationPayload())));
+    settleAsyncDispatch(
+      context.dispatch(subscriptionMessage(subscription, locationPayload())),
+    );
   };
   const dispatchObserved = () => {
     observedChange = true;
@@ -2532,18 +2820,31 @@ function runMediaQuerySubscription(
   subscription: VxSubscriptionEnvelope,
   context: VxRuntimeExecutionContext,
 ): VxSubscriptionDisposer | void {
-  const query = readRequiredStringField(subscription, "query", "media_query subscription");
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    throw new Error("vx-dom: media_query subscription requires window.matchMedia");
+  const query = readRequiredStringField(
+    subscription,
+    "query",
+    "media_query subscription",
+  );
+  if (
+    typeof window === "undefined" ||
+    typeof window.matchMedia !== "function"
+  ) {
+    throw new Error(
+      "vx-dom: media_query subscription requires window.matchMedia",
+    );
   }
   const media = window.matchMedia(query);
   const dispatch = () => {
     if (context.signal.aborted) return;
-    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
-      kind: "media_query",
-      query,
-      matches: media.matches,
-    })));
+    settleAsyncDispatch(
+      context.dispatch(
+        subscriptionMessage(subscription, {
+          kind: "media_query",
+          query,
+          matches: media.matches,
+        }),
+      ),
+    );
   };
   dispatch();
   if (typeof media.addEventListener === "function") {
@@ -2562,7 +2863,9 @@ function runOnlineStatusSubscription(
   const dispatch = () => {
     if (context.signal.aborted) return;
     const online = typeof navigator === "undefined" ? true : navigator.onLine;
-    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, online)));
+    settleAsyncDispatch(
+      context.dispatch(subscriptionMessage(subscription, online)),
+    );
   };
   window.addEventListener("online", dispatch);
   window.addEventListener("offline", dispatch);
@@ -2580,7 +2883,11 @@ function runStorageSubscription(
   if (typeof window === "undefined") return;
   const listener = (event: StorageEvent) => {
     if (context.signal.aborted) return;
-    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, storagePayload(event))));
+    settleAsyncDispatch(
+      context.dispatch(
+        subscriptionMessage(subscription, storagePayload(event)),
+      ),
+    );
   };
   window.addEventListener("storage", listener);
   return () => window.removeEventListener("storage", listener);
@@ -2593,11 +2900,15 @@ function runVisibilityChangeSubscription(
   if (typeof document === "undefined") return;
   const dispatch = () => {
     if (context.signal.aborted) return;
-    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
-      kind: "visibility",
-      state: document.visibilityState,
-      hidden: document.hidden,
-    })));
+    settleAsyncDispatch(
+      context.dispatch(
+        subscriptionMessage(subscription, {
+          kind: "visibility",
+          state: document.visibilityState,
+          hidden: document.hidden,
+        }),
+      ),
+    );
   };
   document.addEventListener("visibilitychange", dispatch);
   dispatch();
@@ -2611,11 +2922,15 @@ function runWindowResizeSubscription(
   if (typeof window === "undefined") return;
   const dispatch = () => {
     if (context.signal.aborted) return;
-    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
-      kind: "window_size",
-      width: window.innerWidth,
-      height: window.innerHeight,
-    })));
+    settleAsyncDispatch(
+      context.dispatch(
+        subscriptionMessage(subscription, {
+          kind: "window_size",
+          width: window.innerWidth,
+          height: window.innerHeight,
+        }),
+      ),
+    );
   };
   window.addEventListener("resize", dispatch);
   dispatch();
@@ -2630,10 +2945,14 @@ function runWindowEventSubscription(
   const eventName = windowEventName(subscription);
   const listener = () => {
     if (context.signal.aborted) return;
-    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
-      kind: "event",
-      event: eventName,
-    })));
+    settleAsyncDispatch(
+      context.dispatch(
+        subscriptionMessage(subscription, {
+          kind: "event",
+          event: eventName,
+        }),
+      ),
+    );
   };
   window.addEventListener(eventName, listener);
   return () => window.removeEventListener(eventName, listener);
@@ -2669,21 +2988,35 @@ async function syncRuntimeSubscriptions(
     const ownedMapHandlerIds = mappedOwnedHandlerIds(subscription);
     const previous = active.get(key);
     if (previous?.signature === signature) {
-      updateActiveSubscriptionMapHandlers(previous, mapHandlerIds, ownedMapHandlerIds, releaser, active);
+      updateActiveSubscriptionMapHandlers(
+        previous,
+        mapHandlerIds,
+        ownedMapHandlerIds,
+        releaser,
+        active,
+      );
       continue;
     }
     if (previous) {
       active.delete(key);
       await disposeActiveSubscription(previous, releaser, active);
     }
-    const subscriptions = host && Object.hasOwn(host, "subscriptions")
-      ? host.subscriptions
-      : undefined;
-    const runner = subscriptions && Object.hasOwn(subscriptions, subscription.kind)
-      ? subscriptions[subscription.kind]
-      : undefined;
-    if (!runner) throw new Error(`vx-dom: no runtime subscription handler registered for "${subscription.kind}"`);
-    const mappedContext = mutableMappedSubscriptionContext(subscription, context);
+    const subscriptions =
+      host && Object.hasOwn(host, "subscriptions")
+        ? host.subscriptions
+        : undefined;
+    const runner =
+      subscriptions && Object.hasOwn(subscriptions, subscription.kind)
+        ? subscriptions[subscription.kind]
+        : undefined;
+    if (!runner)
+      throw new Error(
+        `vx-dom: no runtime subscription handler registered for "${subscription.kind}"`,
+      );
+    const mappedContext = mutableMappedSubscriptionContext(
+      subscription,
+      context,
+    );
     const dispose = await runner(subscription, mappedContext.context);
     active.set(key, {
       signature,
@@ -2701,7 +3034,8 @@ async function disposeSubscriptions(
 ): Promise<void> {
   const records = Array.from(active.values());
   active.clear();
-  for (const record of records) await disposeActiveSubscription(record, releaser, active);
+  for (const record of records)
+    await disposeActiveSubscription(record, releaser, active);
 }
 
 async function disposeActiveSubscription(
@@ -2723,7 +3057,9 @@ function updateActiveSubscriptionMapHandlers(
   releaser: RetainedHandlerReleaser | undefined,
   active: Map<string, ActiveSubscription>,
 ): void {
-  const removed = record.ownedMapHandlerIds.filter((id) => !nextOwnedIds.includes(id));
+  const removed = record.ownedMapHandlerIds.filter(
+    (id) => !nextOwnedIds.includes(id),
+  );
   record.mapHandlerIds = nextIds;
   record.ownedMapHandlerIds = nextOwnedIds;
   record.setMapHandlerIds(nextIds);
@@ -2735,8 +3071,9 @@ function releaseRetainedHandlers(
   releaser: RetainedHandlerReleaser | undefined,
   active: Map<string, ActiveSubscription>,
 ): void {
-  const inactiveIds = Array.from(new Set(ids))
-    .filter((id) => !activeSubscriptionUsesHandler(active, id));
+  const inactiveIds = Array.from(new Set(ids)).filter(
+    (id) => !activeSubscriptionUsesHandler(active, id),
+  );
   if (inactiveIds.length === 0) return;
   if (releaser?.releaseMany) {
     releaser.releaseMany(inactiveIds);
@@ -2749,7 +3086,9 @@ function activeSubscriptionUsesHandler(
   active: Map<string, ActiveSubscription>,
   id: number,
 ): boolean {
-  return Array.from(active.values()).some((record) => record.ownedMapHandlerIds.includes(id));
+  return Array.from(active.values()).some((record) =>
+    record.ownedMapHandlerIds.includes(id),
+  );
 }
 
 function flattenSubscriptions(
@@ -2761,7 +3100,12 @@ function flattenSubscriptions(
   if (input === undefined || input === null) return [];
   if (Array.isArray(input)) {
     return input.flatMap((child) =>
-      flattenSubscriptions(child, mapHandlerIds, mapHandlerKeys, ownedMapHandlerIds)
+      flattenSubscriptions(
+        child,
+        mapHandlerIds,
+        mapHandlerKeys,
+        ownedMapHandlerIds,
+      ),
     );
   }
   const envelope = readRuntimeEnvelope(input, "sub", "subscriptions");
@@ -2770,11 +3114,17 @@ function flattenSubscriptions(
     if (!Object.hasOwn(envelope, "children")) {
       throw new Error("vx-dom: subscription batch missing required children");
     }
-    return flattenSubscriptions(envelope.children, mapHandlerIds, mapHandlerKeys, ownedMapHandlerIds);
+    return flattenSubscriptions(
+      envelope.children,
+      mapHandlerIds,
+      mapHandlerKeys,
+      ownedMapHandlerIds,
+    );
   }
   if (envelope.kind === "map") {
     const handlerId = readHandlerId(envelope);
-    if (handlerId === undefined) throw new Error("vx-dom: subscription map missing numeric handlerId");
+    if (handlerId === undefined)
+      throw new Error("vx-dom: subscription map missing numeric handlerId");
     const handlerKey = readHandlerKey(envelope);
     const ownedHandlerIds = mappedOwnedHandlerIds(envelope);
     return flattenSubscriptions(
@@ -2785,29 +3135,37 @@ function flattenSubscriptions(
     );
   }
   if (!optionalSubscriptionKey(envelope)) {
-    throw new Error(`vx-dom: subscription "${envelope.kind}" requires a stable key`);
+    throw new Error(
+      `vx-dom: subscription "${envelope.kind}" requires a stable key`,
+    );
   }
   if (mapHandlerIds.length === 0) return [envelope];
-  return [{
-    ...envelope,
-    [mapHandlerIdsProperty]: mapHandlerIds,
-    [mapHandlerKeysProperty]: mapHandlerKeys,
-    ...(ownedMapHandlerIds.length > 0
-      ? { [ownedMapHandlerIdsProperty]: ownedMapHandlerIds }
-      : {}),
-  }];
+  return [
+    {
+      ...envelope,
+      [mapHandlerIdsProperty]: mapHandlerIds,
+      [mapHandlerKeysProperty]: mapHandlerKeys,
+      ...(ownedMapHandlerIds.length > 0
+        ? { [ownedMapHandlerIdsProperty]: ownedMapHandlerIds }
+        : {}),
+    },
+  ];
 }
 
 function subscriptionIdentityKey(subscription: VxSubscriptionEnvelope): string {
-  const mapPrefix = mappedHandlerIdentityParts(subscription)
-    .join("/");
+  const mapPrefix = mappedHandlerIdentityParts(subscription).join("/");
   const explicitKey = subscription.key ?? subscription.id;
   const base = `${subscriptionIdentityKind(subscription)}:${String(explicitKey)}`;
   return mapPrefix ? `${mapPrefix}|${base}` : base;
 }
 
-function subscriptionIdentityKind(subscription: VxSubscriptionEnvelope): string {
-  if (subscription.kind === "keyboard" && typeof subscription.event === "string") {
+function subscriptionIdentityKind(
+  subscription: VxSubscriptionEnvelope,
+): string {
+  if (
+    subscription.kind === "keyboard" &&
+    typeof subscription.event === "string"
+  ) {
     return `${subscription.kind}:${subscription.event}`;
   }
   return subscription.kind;
@@ -2819,13 +3177,18 @@ function subscriptionSignature(subscription: VxSubscriptionEnvelope): string {
   delete normalized[mapHandlerKeysProperty];
   delete normalized[ownedMapHandlerIdsProperty];
   const mappedIdentity = mappedHandlerIdentityParts(subscription);
-  if (mappedIdentity.length > 0) normalized[mapHandlerIdentityProperty] = mappedIdentity;
+  if (mappedIdentity.length > 0)
+    normalized[mapHandlerIdentityProperty] = mappedIdentity;
   return stableStringify(normalized);
 }
 
-function optionalSubscriptionKey(subscription: VxSubscriptionEnvelope): string | undefined {
+function optionalSubscriptionKey(
+  subscription: VxSubscriptionEnvelope,
+): string | undefined {
   const key = subscription.key ?? subscription.id;
-  return typeof key === "string" || typeof key === "number" ? String(key) : undefined;
+  return typeof key === "string" || typeof key === "number"
+    ? String(key)
+    : undefined;
 }
 
 function isKeyboardEvent(event: Event): event is KeyboardEvent {
@@ -2846,7 +3209,9 @@ function isRuntimeEnvelope<T extends VxRuntimeEnvelope["type"]>(
   input: unknown,
   type: T,
 ): input is T extends "cmd" ? VxCommandEnvelope : VxSubscriptionEnvelope {
-  return isRecord(input) && input.type === type && typeof input.kind === "string";
+  return (
+    isRecord(input) && input.type === type && typeof input.kind === "string"
+  );
 }
 
 function readRuntimeEnvelope<T extends VxRuntimeEnvelope["type"]>(
@@ -2855,7 +3220,9 @@ function readRuntimeEnvelope<T extends VxRuntimeEnvelope["type"]>(
   path: string,
 ): T extends "cmd" ? VxCommandEnvelope : VxSubscriptionEnvelope {
   if (!isRuntimeEnvelope(input, type)) {
-    throw new Error(`vx-dom: invalid ${type === "cmd" ? "command" : "subscription"} envelope at ${path}`);
+    throw new Error(
+      `vx-dom: invalid ${type === "cmd" ? "command" : "subscription"} envelope at ${path}`,
+    );
   }
   return input as T extends "cmd" ? VxCommandEnvelope : VxSubscriptionEnvelope;
 }
@@ -2866,7 +3233,8 @@ function readMillis(input: Record<string, unknown>): number | undefined {
     if (raw < 0n || raw > BigInt(Number.MAX_SAFE_INTEGER)) return undefined;
     return Number(raw);
   }
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) return undefined;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0)
+    return undefined;
   return raw;
 }
 
@@ -2892,7 +3260,7 @@ function readCanvasFrame(command: VxCommandEnvelope): {
     throw new Error("vx-dom: canvas_render command missing frame value");
   }
   const frame = command.value;
-  const version = readCanvasFrameVersion(frame.version);
+  readCanvasFrameVersion(frame.version);
   if (!Array.isArray(frame.draws)) {
     throw new Error("vx-dom: canvas_render frame missing draws array");
   }
@@ -2906,7 +3274,7 @@ function readCanvasFrame(command: VxCommandEnvelope): {
     if (!isRecord(draw)) {
       throw new Error(`vx-dom: ${label} must be an object`);
     }
-    validateCanvasDraw(draw, label, version);
+    validateCanvasDraw(draw, label);
     const kind = readRequiredStringField(draw, "kind", label);
     if (kind === "save") savedStateDepth += 1;
     if (kind === "restore") {
@@ -2934,38 +3302,18 @@ function readCanvasFrame(command: VxCommandEnvelope): {
   };
 }
 
-type CanvasFrameVersion = 1 | 2;
-
-function readCanvasFrameVersion(input: unknown): CanvasFrameVersion {
-  if (input === 1 || input === 2) return input;
+function readCanvasFrameVersion(input: unknown): 2 {
+  if (input === 2) return input;
   throw new Error(
     `vx-dom: canvas_render unsupported frame version ${String(input)}`,
   );
 }
 
-const canvasV2DrawKinds = new Set([
-  "save",
-  "restore",
-  "transform",
-  "translate",
-  "rotate",
-  "scale",
-  "lineDash",
-  "composite",
-  "path",
-]);
-
 function validateCanvasDraw(
   draw: Record<string, unknown>,
   label: string,
-  version: CanvasFrameVersion,
 ): void {
   const kind = readRequiredStringField(draw, "kind", label);
-  if (version === 1 && canvasV2DrawKinds.has(kind)) {
-    throw new Error(
-      `vx-dom: ${label} kind ${JSON.stringify(kind)} requires frame version 2`,
-    );
-  }
   if (kind === "save" || kind === "restore") return;
   if (kind === "transform") {
     ["a", "b", "c", "d", "e", "f"].forEach((field) => {
@@ -3318,26 +3666,36 @@ function findCanvas(
   try {
     target = document.querySelector(selector);
   } catch (error) {
-    throw new Error(`vx-dom: ${operation} has invalid selector ${JSON.stringify(selector)}`, {
-      cause: error,
-    });
+    throw new Error(
+      `vx-dom: ${operation} has invalid selector ${JSON.stringify(selector)}`,
+      {
+        cause: error,
+      },
+    );
   }
   if (
     !target ||
     typeof HTMLCanvasElement === "undefined" ||
     !(target instanceof HTMLCanvasElement)
   ) {
-    throw new Error(`vx-dom: ${operation} could not find canvas ${JSON.stringify(selector)}`);
+    throw new Error(
+      `vx-dom: ${operation} could not find canvas ${JSON.stringify(selector)}`,
+    );
   }
   return target;
 }
 
 function readCanvasPixelRatio(): number {
   const ratio = typeof window === "undefined" ? 1 : window.devicePixelRatio;
-  return typeof ratio === "number" && Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+  return typeof ratio === "number" && Number.isFinite(ratio) && ratio > 0
+    ? ratio
+    : 1;
 }
 
-function readCanvasPoint(input: unknown, label: string): { x: number; y: number } {
+function readCanvasPoint(
+  input: unknown,
+  label: string,
+): { x: number; y: number } {
   if (!isRecord(input)) throw new Error(`vx-dom: ${label} must be a point`);
   return {
     x: readFiniteCanvasNumber(input, "x", label),
@@ -3376,7 +3734,9 @@ function readPositiveCanvasNumber(
 ): number {
   const value = readFiniteCanvasNumber(input, field, label);
   if (allowZero ? value < 0 : value <= 0) {
-    throw new Error(`vx-dom: ${label} ${field} must be ${allowZero ? "non-negative" : "positive"}`);
+    throw new Error(
+      `vx-dom: ${label} ${field} must be ${allowZero ? "non-negative" : "positive"}`,
+    );
   }
   return value;
 }
@@ -3415,7 +3775,9 @@ function readCanvasTextAlign(
   if (["center", "end", "left", "right", "start"].includes(value)) {
     return value as CanvasTextAlign;
   }
-  throw new Error(`vx-dom: ${label} has invalid text align ${JSON.stringify(value)}`);
+  throw new Error(
+    `vx-dom: ${label} has invalid text align ${JSON.stringify(value)}`,
+  );
 }
 
 function readCanvasTextBaseline(
@@ -3423,28 +3785,57 @@ function readCanvasTextBaseline(
   label: string,
 ): CanvasTextBaseline {
   const value = readRequiredStringField(input, "baseline", label);
-  if (["alphabetic", "bottom", "hanging", "ideographic", "middle", "top"].includes(value)) {
+  if (
+    [
+      "alphabetic",
+      "bottom",
+      "hanging",
+      "ideographic",
+      "middle",
+      "top",
+    ].includes(value)
+  ) {
     return value as CanvasTextBaseline;
   }
-  throw new Error(`vx-dom: ${label} has invalid text baseline ${JSON.stringify(value)}`);
+  throw new Error(
+    `vx-dom: ${label} has invalid text baseline ${JSON.stringify(value)}`,
+  );
 }
 
-function readBrowserStorage(commandKind: string, storageKind: "local" | "session"): Storage {
-  const storage = storageKind === "local"
-    ? typeof localStorage === "undefined" ? undefined : localStorage
-    : typeof sessionStorage === "undefined" ? undefined : sessionStorage;
-  if (!storage) throw new Error(`vx-dom: ${commandKind} command requires ${storageKind}Storage`);
+function readBrowserStorage(
+  commandKind: string,
+  storageKind: "local" | "session",
+): Storage {
+  const storage =
+    storageKind === "local"
+      ? typeof localStorage === "undefined"
+        ? undefined
+        : localStorage
+      : typeof sessionStorage === "undefined"
+        ? undefined
+        : sessionStorage;
+  if (!storage)
+    throw new Error(
+      `vx-dom: ${commandKind} command requires ${storageKind}Storage`,
+    );
   return storage;
 }
 
-function readOpenUrlTarget(command: VxCommandEnvelope): { url: string; target?: string } {
-  if (typeof command.value === "string") return { url: command.value, target: "_blank" };
+function readOpenUrlTarget(command: VxCommandEnvelope): {
+  url: string;
+  target?: string;
+} {
+  if (typeof command.value === "string")
+    return { url: command.value, target: "_blank" };
   if (!isRecord(command.value) || typeof command.value.url !== "string") {
     throw new Error("vx-dom: open_url command missing string url");
   }
   return {
     url: command.value.url,
-    target: typeof command.value.target === "string" ? command.value.target : "_blank",
+    target:
+      typeof command.value.target === "string"
+        ? command.value.target
+        : "_blank",
   };
 }
 
@@ -3498,17 +3889,24 @@ function subscriptionMessage(
     kind: "subscription",
     subscriptionKind: subscription.kind,
     key: optionalSubscriptionKey(subscription),
-    ...(shouldDispatchSubscriptionValue(subscription) ? { value: subscription.value } : {}),
+    ...(shouldDispatchSubscriptionValue(subscription)
+      ? { value: subscription.value }
+      : {}),
     payload,
   };
 }
 
-function shouldDispatchSubscriptionValue(subscription: VxSubscriptionEnvelope): boolean {
-  return Object.hasOwn(subscription, "value") && subscription.valueRole !== "config";
+function shouldDispatchSubscriptionValue(
+  subscription: VxSubscriptionEnvelope,
+): boolean {
+  return (
+    Object.hasOwn(subscription, "value") && subscription.valueRole !== "config"
+  );
 }
 
 function dispatchLocationChange(): void {
-  if (typeof window !== "undefined") window.dispatchEvent(new Event(locationChangeEvent));
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new Event(locationChangeEvent));
 }
 
 function locationPayload(): Record<string, string> {
@@ -3542,8 +3940,10 @@ function storagePayload(event: StorageEvent): Record<string, unknown> {
 }
 
 function storageKind(storageArea: Storage | null): string {
-  if (typeof sessionStorage !== "undefined" && storageArea === sessionStorage) return "session";
-  if (typeof localStorage !== "undefined" && storageArea === localStorage) return "local";
+  if (typeof sessionStorage !== "undefined" && storageArea === sessionStorage)
+    return "session";
+  if (typeof localStorage !== "undefined" && storageArea === localStorage)
+    return "local";
   return "unknown";
 }
 
@@ -3557,7 +3957,8 @@ function mapExecutionContext(
     releaseRetainedHandler: context.releaseRetainedHandler,
     trackRetainedHandlerUse: context.trackRetainedHandlerUse,
     reportError: context.reportError,
-    dispatch: (message) => context.dispatch({ kind: "map", handlerId, message }),
+    dispatch: (message) =>
+      context.dispatch({ kind: "map", handlerId, message }),
   };
 }
 
@@ -3587,10 +3988,12 @@ function ownedCommandMapExecutionContext(
   const trackUse = (result: Promise<unknown> | unknown) => {
     pendingUses += 1;
     context.trackRetainedHandlerUse?.(result);
-    void Promise.resolve(result).catch(() => undefined).then(() => {
-      pendingUses -= 1;
-      releaseIfDone();
-    });
+    void Promise.resolve(result)
+      .catch(() => undefined)
+      .then(() => {
+        pendingUses -= 1;
+        releaseIfDone();
+      });
   };
 
   return {
@@ -3628,7 +4031,8 @@ function mutableMappedSubscriptionContext(
       releaseRetainedHandler: context.releaseRetainedHandler,
       trackRetainedHandlerUse: context.trackRetainedHandlerUse,
       reportError: context.reportError,
-      dispatch: (message) => context.dispatch(mapRuntimeMessage(message, mapHandlerIds)),
+      dispatch: (message) =>
+        context.dispatch(mapRuntimeMessage(message, mapHandlerIds)),
     },
     setMapHandlerIds: (ids) => {
       mapHandlerIds = ids;
@@ -3638,24 +4042,33 @@ function mutableMappedSubscriptionContext(
 
 function mappedHandlerIds(subscription: VxSubscriptionEnvelope): number[] {
   const raw = subscription[mapHandlerIdsProperty];
-  return Array.isArray(raw) ? raw.filter((id): id is number => typeof id === "number") : [];
+  return Array.isArray(raw)
+    ? raw.filter((id): id is number => typeof id === "number")
+    : [];
 }
 
 function mappedOwnedHandlerIds(input: Record<string, unknown>): number[] {
   const raw = input[ownedMapHandlerIdsProperty];
-  return Array.isArray(raw) ? raw.filter((id): id is number => typeof id === "number") : [];
+  return Array.isArray(raw)
+    ? raw.filter((id): id is number => typeof id === "number")
+    : [];
 }
 
 function mappedHandlerKeys(subscription: VxSubscriptionEnvelope): string[] {
   const raw = subscription[mapHandlerKeysProperty];
   return Array.isArray(raw)
     ? raw
-        .filter((key): key is string | number => typeof key === "string" || typeof key === "number")
+        .filter(
+          (key): key is string | number =>
+            typeof key === "string" || typeof key === "number",
+        )
         .map((key) => String(key))
     : [];
 }
 
-function mappedHandlerIdentityParts(subscription: VxSubscriptionEnvelope): string[] {
+function mappedHandlerIdentityParts(
+  subscription: VxSubscriptionEnvelope,
+): string[] {
   const keys = mappedHandlerKeys(subscription);
   if (keys.length > 0) return keys.map((key) => `key:${key}`);
   return mappedHandlerIds(subscription).map((id) => `id:${id}`);
@@ -3671,7 +4084,9 @@ function readHandlerId(input: Record<string, unknown>): number | undefined {
 
 function readHandlerKey(input: Record<string, unknown>): string | undefined {
   const raw = input.handlerKey ?? input.handler_key;
-  return typeof raw === "string" || typeof raw === "number" ? String(raw) : undefined;
+  return typeof raw === "string" || typeof raw === "number"
+    ? String(raw)
+    : undefined;
 }
 
 function readTaskId(input: Record<string, unknown>): number | undefined {
@@ -3685,7 +4100,9 @@ function readTaskId(input: Record<string, unknown>): number | undefined {
 function readTaskObserver(input: unknown): TaskObserver | undefined {
   if (!isRecord(input)) return undefined;
   const observer = input[taskObserverProperty];
-  return typeof observer === "function" ? observer as TaskObserver : undefined;
+  return typeof observer === "function"
+    ? (observer as TaskObserver)
+    : undefined;
 }
 
 function attachTaskObserver(
@@ -3705,18 +4122,25 @@ function readMappedChild(input: Record<string, unknown>): unknown {
   return input.child ?? input.command ?? input.subscription;
 }
 
-function readRequiredMappedChild(input: Record<string, unknown>, label: string): unknown {
+function readRequiredMappedChild(
+  input: Record<string, unknown>,
+  label: string,
+): unknown {
   const child = readMappedChild(input);
-  if (child === undefined) throw new Error(`vx-dom: ${label} missing required child`);
+  if (child === undefined)
+    throw new Error(`vx-dom: ${label} missing required child`);
   return child;
 }
 
 function findRefElement(value: unknown): Element | undefined {
-  if (typeof document === "undefined" || typeof value !== "string") return undefined;
+  if (typeof document === "undefined" || typeof value !== "string")
+    return undefined;
   const refs = Array.from(document.querySelectorAll("[data-vx-ref]"));
-  return refs.find((element) => element.getAttribute("data-vx-ref") === value)
-    ?? document.getElementById(value)
-    ?? undefined;
+  return (
+    refs.find((element) => element.getAttribute("data-vx-ref") === value) ??
+    document.getElementById(value) ??
+    undefined
+  );
 }
 
 function normalizeRuntimeStep(input: unknown): VxRuntimeStep {
@@ -3733,36 +4157,58 @@ function normalizeRuntimeStep(input: unknown): VxRuntimeStep {
 }
 
 function toRuntimeMessage(input: unknown): VxRuntimeMessage {
-  if (isRecord(input) && input.kind === "event" && typeof input.handlerId === "number") {
+  if (
+    isRecord(input) &&
+    input.kind === "event" &&
+    typeof input.handlerId === "number"
+  ) {
     return input as VxRuntimeMessage;
   }
-  if (isRecord(input) && input.kind === "subscription" && typeof input.subscriptionKind === "string") {
+  if (
+    isRecord(input) &&
+    input.kind === "subscription" &&
+    typeof input.subscriptionKind === "string"
+  ) {
     return input as VxRuntimeMessage;
   }
-  if (isRecord(input) && input.kind === "map" && typeof input.handlerId === "number") {
+  if (
+    isRecord(input) &&
+    input.kind === "map" &&
+    typeof input.handlerId === "number"
+  ) {
     return input as VxRuntimeMessage;
   }
   return toVxMessage(input);
 }
 
 function toVxMessage(input: unknown): VxMessage {
-  if (isRecord(input) && input.kind === "debug" && typeof input.name === "string") {
+  if (
+    isRecord(input) &&
+    input.kind === "debug" &&
+    typeof input.name === "string"
+  ) {
     return input as VxMessage;
   }
-  if (isRecord(input) && input.kind === "msgpack") {
+  if (isRecord(input) && input.kind === "value") {
     return input as VxMessage;
   }
-  return { kind: "msgpack", value: input };
+  return { kind: "value", value: input };
 }
 
-function mapRuntimeMessage(message: VxRuntimeMessage, handlerIds: readonly number[]): VxRuntimeMessage {
+function mapRuntimeMessage(
+  message: VxRuntimeMessage,
+  handlerIds: readonly number[],
+): VxRuntimeMessage {
   return handlerIds.reduceRight<VxRuntimeMessage>(
     (child, handlerId) => ({ kind: "map", handlerId, message: child }),
     message,
   );
 }
 
-function mapDomEventMessage(message: VxRuntimeMessage, handlerIds: readonly number[]): VxRuntimeMessage {
+function mapDomEventMessage(
+  message: VxRuntimeMessage,
+  handlerIds: readonly number[],
+): VxRuntimeMessage {
   return handlerIds.reduce<VxRuntimeMessage>(
     (child, handlerId) => ({ kind: "map", handlerId, message: child }),
     message,
@@ -3773,9 +4219,9 @@ function settleAsyncDispatch(result: Promise<unknown> | unknown): void {
   void Promise.resolve(result).catch(() => undefined);
 }
 
-function initialHydrationFrame(
-  options: { hydrationData?: string | VxRenderFrame },
-): unknown {
+function initialHydrationFrame(options: {
+  hydrationData?: string | VxRenderFrame;
+}): unknown {
   if (typeof options.hydrationData === "string") {
     return JSON.parse(options.hydrationData) as unknown;
   }
@@ -3790,47 +4236,6 @@ function createRuntimeErrorReporter(
   };
 }
 
-async function resolveInstanceForMount(
-  options: Pick<MountVxAppOptions, "componentFn" | "frame" | "instance" | "wasm" | "imports">,
-): Promise<WebAssembly.Instance | undefined> {
-  if (options.instance) return options.instance;
-  if (options.frame !== undefined || options.componentFn) return undefined;
-  return instantiateWasm(options);
-}
-
-function requiredInstance(instance: WebAssembly.Instance | undefined): WebAssembly.Instance {
-  if (instance) return instance;
-  throw new Error("vx-dom: mountVxApp requires callOptions, an instance, wasm, frame, app, or componentFn");
-}
-
 function isRecord(input: unknown): input is Record<PropertyKey, unknown> {
   return typeof input === "object" && input !== null;
-}
-
-async function instantiateWasm(
-  options: Pick<MountVxAppOptions, "wasm" | "imports" | "instance">,
-): Promise<WebAssembly.Instance> {
-  if (options.instance) return options.instance;
-  if (!options.wasm) {
-    throw new Error("vx-dom: mountVxApp requires an instance, wasm, frame, or componentFn");
-  }
-  if (options.wasm instanceof WebAssembly.Module) {
-    return WebAssembly.instantiate(options.wasm, options.imports ?? {});
-  }
-  const result = (await WebAssembly.instantiate(
-    options.wasm as BufferSource,
-    options.imports ?? {},
-  )) as WebAssembly.WebAssemblyInstantiatedSource;
-  return result.instance;
-}
-
-function exportedComponent(
-  instance: WebAssembly.Instance,
-  exportName: string,
-): VoydComponentFn {
-  const entry = instance.exports[exportName];
-  if (typeof entry !== "function") {
-    throw new Error(`vx-dom: WebAssembly export ${exportName} is not a function`);
-  }
-  return entry as VoydComponentFn;
 }

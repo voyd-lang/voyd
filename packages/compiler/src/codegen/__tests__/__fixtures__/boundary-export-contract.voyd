@@ -25,9 +25,6 @@ fn view(model: Model) -> Html<Msg>
     Count
   </button>
 
-pub fn echo_command(command: Cmd<Msg>) -> Cmd<Msg>
-  command
-
 pub fn derived_canvas_frame() -> canvas::Frame
   canvas::frame(
     selector: "#scene",

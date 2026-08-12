@@ -14,11 +14,7 @@ export type {
   SourceSpan,
 } from "@voyd-lang/compiler/diagnostics/index.js";
 export { DiagnosticError } from "@voyd-lang/compiler/diagnostics/index.js";
-export {
-  BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES,
-  /** @deprecated Use BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES. */
-  BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES as EFFECTS_HOST_BOUNDARY_STD_DEPS,
-} from "@voyd-lang/compiler/compiler-contracts/index.js";
+export { SELECTED_HOST_TRANSPORT_PROVIDER_MODULES } from "@voyd-lang/compiler/compiler-contracts/index.js";
 export {
   modulePathFromFile,
   modulePathToString,

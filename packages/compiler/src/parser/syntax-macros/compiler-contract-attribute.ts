@@ -46,12 +46,14 @@ const processSequence = (
     }
 
     if (pending && allowAttributes) {
-      if (isForm(processed) && isFunctionDeclForm(processed)) {
+      if (isForm(processed) && isCompilerContractDeclForm(processed)) {
         attachCompilerContractAttribute(processed, pending);
         changed = true;
         pending = null;
       } else {
-        throw new Error("@compiler_contract attribute must precede a function");
+        throw new Error(
+          "@compiler_contract attribute must precede a function or trait",
+        );
       }
     }
 
@@ -59,25 +61,28 @@ const processSequence = (
   }
 
   if (pending && allowAttributes) {
-    throw new Error("@compiler_contract attribute missing a function");
+    throw new Error("@compiler_contract attribute missing a function or trait");
   }
 
   return { elements: result, changed };
 };
 
-const isFunctionDeclForm = (form: Form): boolean => {
+const isCompilerContractDeclForm = (form: Form): boolean => {
   const head = form.at(0);
   if (!isIdentifierAtom(head)) {
     return false;
   }
-  if (head.value === "fn") {
+  if (head.value === "fn" || head.value === "trait") {
     return true;
   }
   if (!["pub", "api", "pri", "#"].includes(head.value)) {
     return false;
   }
   const keyword = form.at(1);
-  return isIdentifierAtom(keyword) && keyword.value === "fn";
+  return (
+    isIdentifierAtom(keyword) &&
+    (keyword.value === "fn" || keyword.value === "trait")
+  );
 };
 
 const isCompilerContractAttributeForm = (expr: Expr): expr is Form =>

@@ -117,6 +117,12 @@ The main types are:
 - `Cmd<Msg>`: one-off work, such as a request or navigation.
 - `Sub<Msg>`: an ongoing source of messages, such as a timer or global listener.
 
+These values are opaque typed plans. Composition keeps application values and
+child plans typed; VX creates its private renderer/command wire only when the
+plan crosses the runtime boundary. Application code cannot read or construct a
+raw renderer payload for these types. The private wire is provider-neutral and
+uses the module's selected host transport at JavaScript boundaries.
+
 Add a `subscriptions` function when the app needs ongoing outside input:
 
 ```voyd
@@ -398,21 +404,22 @@ Return commands from `init` or `step`; do not perform browser work in `view`.
 
 ### Async Tasks
 
-Use `Cmd.task` for API calls, storage services, and other Voyd tasks. Map the
+Use `Cmd.perform` for API calls, storage services, and other Voyd tasks. Map the
 result back into the application as a message:
 
 ```voyd
 use std::task::TaskRuntime
 
 fn load_todos(): TaskRuntime -> Cmd<Msg>
-  Cmd::task(
+  Cmd::perform(
     work: () => fetch_todos(),
     handler: (result) =>
       Msg::TodosLoaded { result: result }
   )
 ```
 
-The function that constructs a `Cmd.task` needs the `TaskRuntime` effect. Handle
+The function that constructs a `Cmd.perform` from `work` needs the `TaskRuntime`
+effect. Handle
 loading, success, and expected failure in `step`:
 
 ```voyd
@@ -448,7 +455,7 @@ fn fetch_message(): http_client::HttpClient -> Result<String, String>
       Err<String> { error: error.message }
 
 fn load_message(): (http_client::HttpClient, TaskRuntime) -> Cmd<Msg>
-  Cmd::task(
+  Cmd::perform(
     work: () => fetch_message(),
     handler: (result) =>
       Msg::MessageLoaded { result: result }
@@ -463,7 +470,7 @@ returned `JsonValue` into the boundary-safe application type your API expects.
 
 The built-in commands cover common browser work:
 
-- Flow: `Cmd.none`, `Cmd.message`, `Cmd.delay`, `Cmd.batch`, and `Cmd.task`.
+- Flow: `Cmd.none`, `Cmd.message`, `Cmd.delay`, `Cmd.batch`, and `Cmd.perform`.
 - Canvas: `canvas::render` and `canvas::measure_text`.
 - Clipboard: `copy_to_clipboard` and `read_clipboard`.
 - Document and history: `set_document_title`, `push_url`, `replace_url`,
@@ -485,8 +492,8 @@ Cmd::batch([
 ])
 ```
 
-`Cmd.perform` is the lower-level task API for an existing `Task<T>` or task id.
-Most applications should use `Cmd.task`.
+`Cmd.perform` accepts effectful work, an existing `Task<T>`, or a task id and
+maps its typed result into `Msg`.
 
 ## Canvas Rendering And Interaction
 
@@ -533,10 +540,11 @@ cover affine transforms, translate/rotate/scale, line dashes, compositing, and
 balanced save/restore scopes. A frame with an unknown primitive, invalid field,
 or unbalanced state stack is rejected before the canvas is resized or painted.
 
-The constructors derive their MessagePack encoding from private typed records.
-Their declared camel-case field names are the wire keys, absent optional values
-are omitted, and the explicit frame `version` is encoded like any other field.
-Callers use the typed constructors rather than assembling boundary maps.
+The constructors derive a provider-neutral renderer value from private typed
+records. Their declared camel-case field names are the wire keys, absent
+optional values are omitted, and the explicit frame `version` is encoded like
+any other field. Callers use the typed constructors rather than assembling
+boundary maps.
 
 All coordinates, dimensions, line widths, and text metrics are logical CSS
 pixels. The browser host sizes the backing store using the current device pixel
@@ -846,18 +854,10 @@ const app = createVoydVxAppRuntime({
 
 ### Custom Host Capabilities
 
-Use a runtime command for fire-and-forget work implemented in JavaScript:
-
-```voyd
-use std::msgpack::self as msgpack
-
-Cmd<Msg>::runtime(
-  kind: "analytics_track",
-  value: msgpack::make_string(event_name)
-)
-```
-
-Register an executor when mounting:
+Define typed custom host work as a versioned effect or external package
+interface. VX commands are a closed set of typed constructors, so application
+payloads cannot enter the renderer through a raw command name or encoded value.
+The resulting adapter can still be installed alongside the VX runtime:
 
 ```ts
 const mounted = await mountVxApp({
@@ -865,16 +865,14 @@ const mounted = await mountVxApp({
   app,
   runtimeHost: {
     commands: {
-      analytics_track: async (command) => {
-        await analytics.track(command.value);
-      },
+      // Typed built-in command overrides, when needed.
     },
   },
 });
 ```
 
 By default, `mountVxApp` installs the standard browser commands and
-subscriptions, then applies `runtimeHost` as overrides. Set
+subscriptions, then applies typed `runtimeHost` overrides. Set
 `runtimeHostMode: "explicit"` when an embedder needs an exact capability set:
 
 ```ts
@@ -898,44 +896,23 @@ capabilities. Structural VX commands such as `none`, `message`, `batch`, and
 `map` remain available, while any unknown external capability fails with the
 normal missing-handler error.
 
-For an ongoing host listener, use a configured runtime subscription:
+For an ongoing custom host listener, define a versioned effect or external
+package whose operations use typed DTOs. Raw subscription names and encoded
+configuration values are not part of the VX application API.
+
+Built-in browser listeners remain available through typed constructors:
 
 ```voyd
-use std::msgpack::self as msgpack
-
-Sub::runtime_configured(
-  kind: "websocket",
-  key: "project:".concat(model.project_id),
-  value: msgpack::make_string(model.socket_url),
-  handler: (message) =>
+broadcast_channel<String, Msg>(
+  name: "project-updates",
+  handler: (message: String) -> Msg =>
     Msg::SocketMessage { value: message }
 )
 ```
 
-The JavaScript runner starts the listener, dispatches payloads, and returns a
-cleanup function:
-
-```ts
-runtimeHost: {
-  subscriptions: {
-    websocket: (subscription, context) => {
-      const socket = new WebSocket(String(subscription.value));
-      socket.addEventListener("message", (event) => {
-        void context.dispatch({
-          kind: "subscription",
-          subscriptionKind: "websocket",
-          key: String(subscription.key),
-          payload: String(event.data),
-        });
-      });
-      return () => socket.close();
-    },
-  },
-}
-```
-
-Use `Cmd.task` when work should produce a typed Voyd result. Use runtime commands
-and subscriptions for capabilities owned by the browser or another host.
+Use `Cmd.perform` when work should produce a typed Voyd result. Use runtime commands
+and built-in subscriptions for capabilities owned by the browser. Put custom
+capabilities behind typed effect or external adapters.
 
 Runtime errors are reported with a phase such as `init`, `dispatch`, `render`,
 `subscriptions`, `commands`, or `dispose`. Use `mountVxApp({ onError })` or

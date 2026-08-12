@@ -3,9 +3,8 @@
 //! duration utilities, and blocking sleep.
 
 use std::error::{ HostError, panic }
-use std::host_dto::HostDto
-use std::msgpack::MsgPack
 use std::number::cast::{ to_i32_checked, to_i64, to_string }
+use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use std::task::self as task
@@ -133,6 +132,12 @@ pub obj Overlap {
   kind: i32
 }
 
+pub obj TimeResult {
+  api ok: bool,
+  api code: i32,
+  api message: String
+}
+
 impl Overlap
   /// Run one callback at a time. The next delay starts after the callback finishes.
   api fn serial() -> Overlap
@@ -153,8 +158,7 @@ pub eff Time
   system_now_millis(tail) -> i64
   /// Suspends execution for `ms` milliseconds.
   ///
-  /// Returns `{ ok: true }` on success or `{ ok: false, code, message }` on failure.
-  sleep_millis(tail, ms: i64) -> MsgPack
+  sleep_millis(tail, ms: i64) -> TimeResult
 
 /// Suspends execution for the provided millisecond count.
 /// Example: `time::sleep(250)`.
@@ -204,32 +208,13 @@ fn sleep_or_panic(delay: Duration): Time -> Unit
       panic(error.message)
       Unit {}
 
-fn decode_host_void_result(payload: MsgPack): () -> Result<Unit, HostError>
-  match(HostDto::unpack(payload))
-    Err<HostError> { error }:
-      Err<HostError> { error: error }
-    Ok<HostDto> { value: decoded }:
-      match(decoded.read_bool("ok".as_slice().to_string()))
-        Err<HostError> { error }:
-          Err<HostError> { error: error }
-        Ok<bool> { value }:
-          if value:
-            Ok<Unit> { value: Unit {} }
-          else:
-            decode_host_error_result(decoded)
-
-fn decode_host_error_result(payload: HostDto): () -> Result<Unit, HostError>
-  match(payload.read_i32("code".as_slice().to_string()))
-    Err<HostError> { error }:
-      Err<HostError> { error: error }
-    Ok<i32> { value: code }:
-      match(payload.read_string("message".as_slice().to_string()))
-        Err<HostError> { error }:
-          Err<HostError> { error: error }
-        Ok<String> { value: message }:
-          Err<HostError> {
-            error: HostError { code: code, message: message }
-          }
+fn decode_host_void_result(result: TimeResult): () -> Result<Unit, HostError>
+  if result.ok:
+    Ok<Unit> { value: Unit {} }
+  else:
+    Err<HostError> {
+      error: HostError { code: result.code, message: result.message }
+    }
 
 obj CivilDate {
   year: i32,

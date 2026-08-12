@@ -9,6 +9,7 @@
 //! converts buffered bytes into a validated `String`.
 
 use std::array::Array
+use std::error::panic
 use std::optional::types::all
 use std::range::Range
 
@@ -16,6 +17,7 @@ use std::range::Range
 pub type Byte = i32
 
 /// An immutable byte sequence view.
+@intrinsic_type(type: "voyd.std.bytes")
 pub obj Bytes {
   storage: Array<Byte>
 }
@@ -101,6 +103,8 @@ impl ByteBuffer
 
   /// Appends one byte.
   api fn push(~self, value: Byte) -> void
+    if value < 0 or value > 255:
+      panic()
     self.storage.push(value)
 
   /// Appends all bytes from `bytes`.

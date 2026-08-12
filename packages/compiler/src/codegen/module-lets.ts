@@ -156,7 +156,7 @@ const markInitializerDependenciesReachable = ({
         reachable.add(calleeId);
         if (
           ctx.program.symbols.getIntrinsicName(calleeId) ===
-          "__boundary_shape_of"
+          "__dto_shape_of"
         ) {
           markDependencyFunctionReachable({
             ctx,

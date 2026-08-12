@@ -1,6 +1,7 @@
 import { buildModuleGraph } from "./modules/graph.js";
 import { createFsModuleHost } from "./modules/fs-host.js";
 import type { ModuleGraph } from "./modules/types.js";
+import { requiresSelectedHostTransport } from "./codegen/host-transport/requirements.js";
 import {
   compileProgramWithLoader,
   type CompileProgramOptions,
@@ -19,10 +20,22 @@ export const loadModuleGraph = async (
     host,
     roots: options.roots,
     includeTests: options.includeTests,
+    includeSelectedHostTransport: options.includeSelectedHostTransport,
   });
 };
 
 export const compileProgram = (
   options: CompileProgramOptions,
 ): Promise<CompileProgramResult> =>
-  compileProgramWithLoader(options, loadModuleGraph);
+  compileProgramWithLoader(options, (loadOptions) =>
+    buildModuleGraph({
+      entryPath: loadOptions.entryPath,
+      host: loadOptions.host ?? createFsModuleHost(),
+      roots: loadOptions.roots,
+      includeTests: loadOptions.includeTests,
+      includeSelectedHostTransport: requiresSelectedHostTransport({
+        effectsHostBoundary: options.codegenOptions?.effectsHostBoundary,
+        boundaryExports: options.codegenOptions?.boundaryExports,
+      }),
+    }),
+  );

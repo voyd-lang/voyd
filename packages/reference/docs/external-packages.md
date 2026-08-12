@@ -220,13 +220,14 @@ the caller does not supply `adapters`. Passing an explicit adapter list disables
 discovery for that run. Browser builds use the generated static registry.
 
 The compiler records reachable imports in the versioned
-`voyd.external_requirements` custom section. MsgPack is used by the current
-fallback transport but is not part of the package contract.
+`voyd.external_requirements` custom section. The module's selected host
+transport carries ABI-v2 external invocation and completion frames; the
+transport is not part of the package contract.
 
 ## Component Model migration
 
 The durable contract consists of the Voyd API, external interface ID, function
-names, execution semantics, and DTO shapes. The current MsgPack buffer,
+names, execution semantics, and DTO shapes. The current provider buffer,
 core-Wasm import trampolines, custom section, and generated JavaScript registry
 are replaceable transport details.
 

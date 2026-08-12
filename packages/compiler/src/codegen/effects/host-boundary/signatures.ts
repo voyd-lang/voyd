@@ -15,18 +15,24 @@ import {
   resolvePerformSignature,
 } from "../effect-registry.js";
 import { ensureEffectArgsType } from "../args-type.js";
+import {
+  deriveBoundarySchema,
+  withDtoFingerprint,
+} from "../../boundary/schema.js";
 
 const OP_SIGNATURES_KEY = Symbol("voyd.effects.hostBoundary.opSignatures");
 
 const isPerformSite = (
-  site: ContinuationSite
-): site is Extract<ContinuationSite, { kind: "perform" }> => site.kind === "perform";
+  site: ContinuationSite,
+): site is Extract<ContinuationSite, { kind: "perform" }> =>
+  site.kind === "perform";
 
 const sameTypeList = (
   left: readonly binaryen.Type[],
-  right: readonly binaryen.Type[]
+  right: readonly binaryen.Type[],
 ): boolean =>
-  left.length === right.length && left.every((type, index) => type === right[index]);
+  left.length === right.length &&
+  left.every((type, index) => type === right[index]);
 
 const buildOwnerMap = (ctx: CodegenContext): Map<HirExprId, SymbolId> => {
   const ownerByExpr = new Map<HirExprId, SymbolId>();
@@ -48,7 +54,7 @@ const buildOwnerMap = (ctx: CodegenContext): Map<HirExprId, SymbolId> => {
 };
 
 const instancesBySymbol = (
-  ctx: CodegenContext
+  ctx: CodegenContext,
 ): Map<SymbolId, ProgramFunctionInstanceId[]> => {
   const bySymbol = new Map<SymbolId, ProgramFunctionInstanceId[]>();
   ctx.functionInstances.forEach((meta, instanceId) => {
@@ -62,7 +68,7 @@ const instancesBySymbol = (
 
 export const collectEffectOperationSignatures = (
   ctx: CodegenContext,
-  contexts: readonly CodegenContext[] = [ctx]
+  contexts: readonly CodegenContext[] = [ctx],
 ): EffectOpSignature[] =>
   stateFor(ctx, OP_SIGNATURES_KEY, () => {
     const registry = ctx.effectsState.effectRegistry;
@@ -78,9 +84,11 @@ export const collectEffectOperationSignatures = (
 
       siteCtx.effectLowering.sites.filter(isPerformSite).forEach((site) => {
         const ownerSymbol = ownerByExpr.get(site.exprId);
-        const owners = ownerSymbol ? instances.get(ownerSymbol) ?? [] : [];
+        const owners = ownerSymbol ? (instances.get(ownerSymbol) ?? []) : [];
         const instanceList =
-          owners.length > 0 ? owners : [undefined as ProgramFunctionInstanceId | undefined];
+          owners.length > 0
+            ? owners
+            : [undefined as ProgramFunctionInstanceId | undefined];
 
         instanceList.forEach((typeInstanceId) => {
           const opInfo = getEffectOpInstanceInfo({
@@ -95,7 +103,7 @@ export const collectEffectOperationSignatures = (
             typeInstanceId,
           });
           const params = signature.params.map((paramType) =>
-            wasmTypeFor(paramType, siteCtx)
+            wasmTypeFor(paramType, siteCtx),
           );
           const returnType = wasmTypeFor(signature.returnType, siteCtx);
           const argsType = ensureEffectArgsType({
@@ -110,21 +118,37 @@ export const collectEffectOperationSignatures = (
               opInfo.signatureHash,
             ),
           )?.external;
+          const fingerprintFor = (typeId: number, label: string): string => {
+            const fingerprint = withDtoFingerprint(
+              deriveBoundarySchema({ typeId, ctx: siteCtx, label }),
+            ).fingerprint;
+            if (!fingerprint) {
+              throw new Error(`missing DTO fingerprint for ${label}`);
+            }
+            return fingerprint;
+          };
 
           const existing = signaturesByIndex.get(opInfo.opIndex);
           if (!existing) {
             signaturesByIndex.set(opInfo.opIndex, {
               opIndex: opInfo.opIndex,
               effectId: opInfo.effectId.hash.value,
+              effectIdentity: opInfo.effectId.id,
               opId: opInfo.opId,
               resumeKind: opInfo.resumeKind,
               signatureHash: opInfo.signatureHash,
               params,
               paramTypeIds: signature.params,
-              paramSerializerOverrides: signature.paramSerializerOverrides,
+              paramFingerprints: signature.params.map(
+                (typeId, index) =>
+                  external?.params[index]?.fingerprint ??
+                  fingerprintFor(typeId, `${opInfo.label} arg${index}`),
+              ),
               returnType,
               returnTypeId: signature.returnType,
-              returnSerializerOverride: signature.returnSerializerOverride,
+              resultFingerprint:
+                external?.result.fingerprint ??
+                fingerprintFor(signature.returnType, `${opInfo.label} result`),
               argsType,
               label: opInfo.label,
               span:
@@ -147,7 +171,7 @@ export const collectEffectOperationSignatures = (
             !sameTypeList(existing.params, params)
           ) {
             throw new Error(
-              `host boundary signature conflict for ${opInfo.label} (opIndex=${opInfo.opIndex}); ensure it resolves to a single concrete wasm signature`
+              `host boundary signature conflict for ${opInfo.label} (opIndex=${opInfo.opIndex}); ensure it resolves to a single concrete wasm signature`,
             );
           }
 
@@ -158,5 +182,7 @@ export const collectEffectOperationSignatures = (
       });
     });
 
-    return Array.from(signaturesByIndex.values()).sort((a, b) => a.opIndex - b.opIndex);
+    return Array.from(signaturesByIndex.values()).sort(
+      (a, b) => a.opIndex - b.opIndex,
+    );
   });

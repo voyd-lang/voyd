@@ -1,8 +1,6 @@
 import type { SourceSpan } from "../../../diagnostics/types.js";
 import type { TypeId } from "../../../semantics/ids.js";
-import type { SerializerMetadata } from "../../../semantics/symbol-index.js";
 import type { CodegenContext } from "../../context.js";
-import { findSerializerFormatForType } from "../../serializer.js";
 import type { EffectOpSignature } from "./types.js";
 
 type HostBoundaryPrimitive = "bool" | "i32" | "i64" | "f32" | "f64" | "void";
@@ -11,13 +9,11 @@ type HostBoundaryPayloadPosition =
   | { kind: "argument"; index: number }
   | { kind: "return" };
 
-type UnsupportedPayloadReason =
-  | { kind: "unsupported-type" }
-  | { kind: "unsupported-serializer-format"; formatId: string };
+type UnsupportedPayloadReason = { kind: "unsupported-type" };
 
 export type HostBoundaryPayloadSupport =
   | { supported: true; strategy: "primitive"; primitive: HostBoundaryPrimitive }
-  | { supported: true; strategy: "serializer-msgpack" }
+  | { supported: true; strategy: "dto" }
   | {
       supported: false;
       typeLabel: string;
@@ -33,7 +29,7 @@ export type HostBoundaryPayloadViolation = {
 };
 
 export const HOST_BOUNDARY_DTO_COMPATIBILITY_SUMMARY =
-  '`bool`, `i32`, `i64`, `f32`, `f64`, `void`, or types annotated with `@serializer("msgpack", ...)`';
+  "an automatic DTO type or a type with a CustomDto representation";
 
 const primitiveForType = (
   typeId: TypeId,
@@ -99,11 +95,13 @@ const formatTypeForHostBoundary = ({
         return `{ ${desc.fields
           .map(
             (field) =>
-              `${field.name}${field.optional ? "?" : ""}: ${formatTypeForHostBoundary({
-                typeId: field.type,
-                ctx,
-                active,
-              })}`,
+              `${field.name}${field.optional ? "?" : ""}: ${formatTypeForHostBoundary(
+                {
+                  typeId: field.type,
+                  ctx,
+                  active,
+                },
+              )}`,
           )
           .join(", ")} }`;
       case "function":
@@ -168,35 +166,12 @@ const formatTypeForHostBoundary = ({
 export const hostBoundaryPayloadSupportForType = ({
   typeId,
   ctx,
-  serializerOverride,
 }: {
   typeId: TypeId;
   ctx: CodegenContext;
-  serializerOverride?: SerializerMetadata;
 }): HostBoundaryPayloadSupport => {
-  const formatId =
-    serializerOverride?.formatId ?? findSerializerFormatForType(typeId, ctx);
-  if (formatId) {
-    if (formatId === "msgpack") {
-      return { supported: true, strategy: "serializer-msgpack" };
-    }
-    return {
-      supported: false,
-      reason: {
-        kind: "unsupported-serializer-format",
-        formatId,
-      },
-      typeLabel: formatTypeForHostBoundary({
-        typeId,
-        ctx,
-        active: new Set<TypeId>(),
-      }),
-    };
-  }
-
-  const primitive = primitiveForType(typeId, ctx);
-  if (primitive) {
-    return { supported: true, strategy: "primitive", primitive };
+  if (ctx.program.dtoPlans.isEligible({ typeId, moduleId: ctx.moduleId })) {
+    return { supported: true, strategy: "dto" };
   }
 
   return {
@@ -214,21 +189,18 @@ const collectViolation = ({
   signature,
   position,
   typeId,
-  serializerOverride,
   ctx,
   out,
 }: {
   signature: EffectOpSignature;
   position: HostBoundaryPayloadPosition;
   typeId: TypeId;
-  serializerOverride?: SerializerMetadata;
   ctx: CodegenContext;
   out: HostBoundaryPayloadViolation[];
 }): void => {
   const support = hostBoundaryPayloadSupportForType({
     typeId,
     ctx,
-    serializerOverride,
   });
   if (support.supported) {
     return;
@@ -257,7 +229,6 @@ export const collectHostBoundaryPayloadViolations = ({
         signature,
         position: { kind: "argument", index: index + 1 },
         typeId,
-        serializerOverride: signature.paramSerializerOverrides?.[index],
         ctx,
         out: violations,
       });
@@ -266,7 +237,6 @@ export const collectHostBoundaryPayloadViolations = ({
       signature,
       position: { kind: "return" },
       typeId: signature.returnTypeId,
-      serializerOverride: signature.returnSerializerOverride,
       ctx,
       out: violations,
     });
@@ -281,9 +251,6 @@ export const formatHostBoundaryPayloadViolation = (
     violation.position.kind === "argument"
       ? `arg${violation.position.index}`
       : "return value";
-  const reason =
-    violation.reason.kind === "unsupported-serializer-format"
-      ? `serializer format "${violation.reason.formatId}" is not supported at the host boundary`
-      : "the type is not host-boundary DTO compatible";
+  const reason = "the type is not host-boundary DTO compatible";
   return `host boundary payload for ${violation.signature.label} ${where} uses unsupported type ${violation.typeLabel}; ${reason}. Supported payload categories: ${HOST_BOUNDARY_DTO_COMPATIBILITY_SUMMARY}.`;
 };
