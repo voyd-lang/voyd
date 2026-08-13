@@ -53,9 +53,20 @@ npm run bench:v500 -- --families ordinary-fields,ordinary-topology,borrow-calls,
 npm run test:perf
 ```
 
-The full same-machine base/head matrix remains available through
-`npm run bench:v500 -- --list-workloads`. V-509 completion does not block on
-that full matrix unless the bounded run exposes a correctness or scaling defect.
+The follow-up timing run compares clean base and head checkouts on the same
+machine. It alternates revisions, discards one warmup per workload, and records
+five fresh-process samples for six focused workloads:
+
+```sh
+npm run bench:v500 -- --repo base=/Users/drewy/code/voyd --repo head=/Users/drewy/.codex/worktrees/c695/voyd --scenario borrow-depth-8 --scenario borrow-depth-16 --scenario ordinary-topology-8 --scenario ordinary-topology-16 --scenario mutation-mixed-8 --scenario mutation-mixed-16 --modes none --samples 5 --warmups 1 --fail-on-diagnostics --output /tmp/v509-base-head-compiler.json
+```
+
+The representative package-scale run uses one discarded warmup and three
+alternating fresh-process samples per revision:
+
+```sh
+npm run bench:web-openapi -- --repo base=/Users/drewy/code/voyd --repo head=/Users/drewy/.codex/worktrees/c695/voyd --compiler-cache none --compile-count 1 --warmups 1 --samples 3 --timeout-ms 60000 --require-clean --output /tmp/v509-web-base-head.json
+```
 
 ## Results
 
@@ -73,15 +84,42 @@ gate. The mixed mutation series grew from 376 to 400 summary evaluations and
 from 1,061 to 1,333 liveness state insertions. Exact-call budget-exhaustion and
 fallback counters were explicitly present and zero in this workload set.
 
-The largest adjacent timing increase was 1.75x for borrow-depth from size 8 to
-16 while its summary evaluations, retained summary bytes, and liveness state
-insertions remained constant. Because the run uses one sample and has no base
-comparison, this is recorded as a timing signal rather than a V-509 blocker.
+The repeated focused comparison produced these compile-time medians:
+
+| Workload | Base | V-509 | Head/base | Peak RSS head/base |
+| --- | ---: | ---: | ---: | ---: |
+| Borrow depth 8 | 1,041 ms | 1,030 ms | 0.989x | 1.014x |
+| Borrow depth 16 | 1,841 ms | 1,829 ms | 0.994x | 0.997x |
+| Ordinary topology 8 | 178 ms | 185 ms | 1.035x | 1.000x |
+| Ordinary topology 16 | 219 ms | 225 ms | 1.027x | 1.000x |
+| Mixed mutation 8 | 503 ms | 514 ms | 1.021x | 1.001x |
+| Mixed mutation 16 | 522 ms | 535 ms | 1.024x | 1.001x |
+
+The borrowing phase was 5% to 16% slower across these workloads. Its absolute
+increase was small: the largest ordinary-mutation increase was 1.72 ms. Total
+compile time ranged from 1.1% faster to 3.5% slower, and peak RSS ranged from
+0.3% lower to 1.4% higher.
+
+The earlier 1.75x borrow-depth timing signal is present in both revisions. The
+8-to-16 compile ratio was 1.768x on base and 1.775x on V-509 while summary and
+liveness work remained constant. The ordinary-topology ratios were 1.227x on
+base and 1.218x on V-509; mixed mutation was 1.038x and 1.042x. The comparison
+therefore gives no evidence that V-509 worsens asymptotic scaling.
+
 `npm run test:perf` passed eight tests with one intentionally skipped test.
 
-The Web/OpenAPI compile gate also passed after the breaking standard-library
-migration: 25.0 s compile time, 4.14 GB maximum RSS, and a 1,933,383-byte Wasm
-binary.
+The Web/OpenAPI package-scale comparison measured a 24,244 ms base compiler
+median and a 24,537 ms V-509 median, a 1.012x ratio. Process wall time was
+1.011x and peak RSS was 0.968x. Borrow analysis rose from 1,178 ms to 1,249 ms
+(1.060x), remaining 5.1% of total compiler time. Ordinary mutation analysis
+rose from 127 ms to 137 ms (1.084x).
+
+The package-scale finite solver used 7,260 of its 139,458 evaluation bound
+(5.2%). Liveness recorded 10,949 state insertions against a `B * L` bound of
+2,854,698 (0.38%), and 12,891 work items against a `B + E * L` bound of
+2,924,806 (0.44%). No widening or full-fact materialization occurred. These
+results support the intended finite, bounded scaling model while leaving ample
+headroom in the production assertions.
 
 ## Follow-up performance ownership
 
