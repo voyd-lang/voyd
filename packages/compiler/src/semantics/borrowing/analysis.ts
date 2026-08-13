@@ -11,6 +11,7 @@ import type {
   HirFunction,
   HirGraph,
   HirLambdaExpr,
+  HirTraitMethod,
   HirVisibility,
 } from "../hir/index.js";
 import type { HirItemId, SymbolId } from "../ids.js";
@@ -360,7 +361,11 @@ const buildOrdinaryDeclarationBounds = ({
                     fallbackEffectType: method.effectType,
                     typing,
                   }),
-                  traitMethodInvokesUnknownCallback(method.symbol, symbolTable),
+                  traitMethodAllowsUnknownCallback(method, typing) ||
+                    traitMethodInvokesUnknownCallback(
+                      method.symbol,
+                      symbolTable,
+                    ),
                 ),
               ] as const,
           )
@@ -423,7 +428,8 @@ const addDeclarationOrdinaryMutationSummaries = ({
               fallbackEffectType: method.effectType,
               typing,
             }),
-            traitMethodInvokesUnknownCallback(method.symbol, symbolTable),
+            traitMethodAllowsUnknownCallback(method, typing) ||
+              traitMethodInvokesUnknownCallback(method.symbol, symbolTable),
           ),
         ),
       );
@@ -485,6 +491,20 @@ const traitMethodInvokesUnknownCallback = (
     | { ordinaryMutationInvokesUnknownCallback?: unknown }
     | undefined;
   return metadata?.ordinaryMutationInvokesUnknownCallback === true;
+};
+
+const traitMethodAllowsUnknownCallback = (
+  method: HirTraitMethod,
+  typing: TypingResult,
+): boolean => {
+  if (!method.effectType) return true;
+  const signature = ordinaryMutationSignatureForSymbol(method.symbol, typing);
+  if (signature) return typing.effects.isOpen(signature.effectRow);
+  return (
+    method.effectType.typeKind === "named" &&
+    method.effectType.path.length === 1 &&
+    method.effectType.path[0] === "open"
+  );
 };
 
 const ordinaryMutationSignatureForSymbol = (

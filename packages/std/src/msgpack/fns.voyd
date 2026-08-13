@@ -1738,30 +1738,22 @@ impl Decoder
     if count <= 0:
       return true
     let next = self.pos + count
-    self.source.match(active)
+    let source_length = self.source_length()
+    let memory_in_bounds = self.source.match(active)
       MemoryDecoderSource:
-        if next > active.len:
-          self.ok = false
-          return false
         let memory_end = memory::size() * 65536
-        if active.ptr + next > memory_end:
-          self.ok = false
-          return false
-        true
+        active.ptr + next <= memory_end
       BytesDecoderSource:
-        if next > active.bytes.len():
-          self.ok = false
-          return false
         true
+    if next > source_length or memory_in_bounds == false:
+      self.ok = false
+      return false
+    true
 
   fn read_u8(~self) -> i32
     if self.can_read(1) == false:
       return 0
-    let value = self.source.match(active)
-      MemoryDecoderSource:
-        memory::load_u8(active.ptr + self.pos)
-      BytesDecoderSource:
-        active.bytes.at(self.pos)
+    let value = self.peek_u8()
     self.pos = self.pos + 1
     value
 

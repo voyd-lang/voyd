@@ -31,7 +31,10 @@ import {
   COMPACT_BORROW_INTRINSICS,
 } from "./call-resolution.js";
 import { placeOfExpression } from "./places.js";
-import { typeHasIntrinsicRole } from "./intrinsic-type-role.js";
+import {
+  typeHasIntrinsicRole,
+  typeHasNominalIdentity,
+} from "./intrinsic-type-role.js";
 
 export type CallableBorrowIndexAccess = {
   exprId: HirExprId;
@@ -63,6 +66,8 @@ export type CallableBorrowIndexArgument = {
     parameter: number;
     path: readonly PlaceProjection[];
   }[];
+  /** Exact local cursor created by the compiler-owned std Array iterator factory. */
+  compilerArrayIterator?: true;
   defaulted?: true;
 };
 
@@ -91,6 +96,8 @@ export type CallableBorrowIndexCall = {
   openTraitDispatch?: true;
   /** Exact compiler-owned SharedCell access nested inside a Borrow callback. */
   scopedSharedCellAccess?: true;
+  /** Exact std Array cursor step; mutates only the fresh cursor outer object. */
+  compilerArrayIteratorNext?: true;
   /** Finite declaration ceiling for a constrained/open trait call. */
   ordinaryDynamicBound?: {
     parameterBindingKinds: readonly (
@@ -167,6 +174,9 @@ type MutableFlags = {
 
 const MAX_LOCAL_ALIAS_TRAVERSAL = 4_096;
 const MAX_LOCAL_ALIAS_EDGES = 4_096;
+const STD_ARRAY_MODULE_ID = "std::array";
+const STD_ARRAY_TYPE_NAME = "Array";
+const STD_ARRAY_ITERATOR_TYPE_NAME = "ArrayIterator";
 
 const emptyFlags = (): MutableFlags => ({
   hasMutableParameter: false,
@@ -453,6 +463,7 @@ export const extractSingleCallableBorrowIndex = ({
   const parameterPlaces = parameterPlacesFor(callable.parameters);
   const freshBindingRoots = new Set<SymbolId>();
   const provenanceFreeFreshBindingRoots = new Set<SymbolId>();
+  const compilerArrayIteratorRoots = new Set<SymbolId>();
   const localAliasParents = new Map<SymbolId, SymbolId>();
   const localAliasComponentSizes = new Map<SymbolId, number>();
   const localAliasSourceComponents = new Map<SymbolId, Set<SymbolId>>();
@@ -588,6 +599,62 @@ export const extractSingleCallableBorrowIndex = ({
     if (signature) return signature;
     return undefined;
   };
+  const targetNameFor = (target: SymbolRef): string | undefined =>
+    target.moduleId === context.moduleId
+      ? symbolTable.hasSymbol(target.symbol)
+        ? symbolTable.getSymbol(target.symbol).name
+        : undefined
+      : context.dependencies.get(target.moduleId)?.callables.get(target.symbol)
+          ?.name;
+  const isCanonicalStdArrayTarget = (
+    target: SymbolRef,
+    name: "iter" | "next",
+  ): boolean =>
+    target.moduleId === STD_ARRAY_MODULE_ID && targetNameFor(target) === name;
+  const isCanonicalStdArrayType = (type: TypeId | undefined): boolean =>
+    typeHasIntrinsicRole({
+      type,
+      role: STD_INTRINSIC_TYPE.array,
+      typing,
+      symbolTable,
+      moduleId: context.moduleId,
+      imports: context.imports,
+    }) &&
+    typeHasNominalIdentity({
+      type,
+      ownerModuleId: STD_ARRAY_MODULE_ID,
+      ownerName: STD_ARRAY_TYPE_NAME,
+      typing,
+    });
+  const isCanonicalStdArrayIteratorType = (
+    type: TypeId | undefined,
+  ): boolean =>
+    typeHasNominalIdentity({
+      type,
+      ownerModuleId: STD_ARRAY_MODULE_ID,
+      ownerName: STD_ARRAY_ITERATOR_TYPE_NAME,
+      typing,
+    });
+  const expressionIsCompilerArrayIteratorFactory = (
+    expressionId: HirExprId,
+  ): boolean => {
+    const expression = hir.expressions.get(expressionId);
+    if (
+      expression?.exprKind !== "method-call" ||
+      expression.method !== "iter"
+    ) {
+      return false;
+    }
+    const receiverType = typeFor(expression.target, context);
+    if (!isCanonicalStdArrayType(receiverType)) return false;
+    const targets = callTargetsFor(expressionId);
+    const signature = targets.length === 1 ? targetSignatureFor(targets[0]!) : undefined;
+    return (
+      targets.length === 1 &&
+      isCanonicalStdArrayTarget(targets[0]!, "iter") &&
+      isCanonicalStdArrayIteratorType(signature?.returnType)
+    );
+  };
   const targetMaySuspend = (target: SymbolRef): boolean =>
     target.moduleId === context.moduleId
       ? decls.getEffectOperation(target.symbol)?.operation.resumable ===
@@ -621,6 +688,30 @@ export const extractSingleCallableBorrowIndex = ({
   const constrainedTraitMethodsFor = (
     expression: HirExpression,
   ): readonly HirTraitMethod[] => {
+    if (
+      expression.exprKind === "call" &&
+      typeof expression.staticTraitSymbol === "number"
+    ) {
+      const methodName =
+        expression.staticTraitMethod ??
+        (() => {
+          const callee = hir.expressions.get(expression.callee);
+          return callee?.exprKind === "identifier" &&
+            symbolTable.hasSymbol(callee.symbol)
+            ? symbolTable.getSymbol(callee.symbol).name
+            : undefined;
+        })();
+      if (!methodName) return [];
+      return (
+        typing.traits
+          .getDecl(expression.staticTraitSymbol)
+          ?.methods.filter(
+            (method) =>
+              symbolTable.hasSymbol(method.symbol) &&
+              symbolTable.getSymbol(method.symbol).name === methodName,
+          ) ?? []
+      );
+    }
     if (expression.exprKind !== "method-call") return [];
     const receiverType = typeFor(expression.target, context);
     if (typeof receiverType !== "number") return [];
@@ -659,11 +750,19 @@ export const extractSingleCallableBorrowIndex = ({
     method: HirTraitMethod,
     expression: HirExpression,
   ): boolean => {
-    if (expression.exprKind !== "method-call") return false;
-    if (method.parameters.length !== expression.args.length + 1) return false;
+    if (expression.exprKind === "method-call") {
+      if (method.parameters.length !== expression.args.length + 1) {
+        return false;
+      }
+      return expression.args.every(
+        (argument, index) =>
+          argument.label === method.parameters[index + 1]?.label,
+      );
+    }
+    if (expression.exprKind !== "call") return false;
+    if (method.parameters.length !== expression.args.length) return false;
     return expression.args.every(
-      (argument, index) =>
-        argument.label === method.parameters[index + 1]?.label,
+      (argument, index) => argument.label === method.parameters[index]?.label,
     );
   };
   const declarationRefForTarget = (
@@ -801,6 +900,20 @@ export const extractSingleCallableBorrowIndex = ({
     }
     return false;
   };
+  const expressionIsStableStringSlice = (expressionId: HirExprId): boolean => {
+    const type = typeFor(expressionId, context);
+    return (
+      typeof type === "number" &&
+      typeHasIntrinsicRole({
+        type,
+        role: STD_INTRINSIC_TYPE.stringSlice,
+        typing,
+        symbolTable,
+        moduleId: context.moduleId,
+        imports: context.imports,
+      })
+    );
+  };
   const expressionIsProvenanceFreeFresh = (
     expressionId: HirExprId,
   ): boolean => {
@@ -808,6 +921,7 @@ export const extractSingleCallableBorrowIndex = ({
     if (typeof type !== "number" || !typeCanCarryReference(type, typing)) {
       return true;
     }
+    if (expressionIsStableStringSlice(expressionId)) return true;
     const expression = hir.expressions.get(expressionId);
     if (expression?.exprKind === "object-literal") {
       return expression.entries.every((entry) =>
@@ -1201,10 +1315,7 @@ export const extractSingleCallableBorrowIndex = ({
     const current = callerParameterOriginsByRoot.get(target) ?? [];
     const merged = Array.from(new Set([...current, ...origins]));
     if (merged.length === current.length) return false;
-    callerParameterOriginsByRoot.set(
-      target,
-      merged,
-    );
+    callerParameterOriginsByRoot.set(target, merged);
     return true;
   };
   const callerParameterOriginTransfers: {
@@ -1216,6 +1327,14 @@ export const extractSingleCallableBorrowIndex = ({
     active = new Set<HirExprId>(),
   ): readonly number[] => {
     if (active.has(expressionId)) return allReferenceParameterOrigins;
+    const expressionType = typeFor(expressionId, context);
+    if (
+      typeof expressionType === "number" &&
+      !typeCanCarryReference(expressionType, typing)
+    ) {
+      return [];
+    }
+    if (expressionIsStableStringSlice(expressionId)) return [];
     const place = placeOfExpression(expressionId, hir, context);
     if (place) return callerParameterOriginsForPlace(place);
     const expression = hir.expressions.get(expressionId);
@@ -1273,6 +1392,14 @@ export const extractSingleCallableBorrowIndex = ({
         path: [],
       }));
     }
+    const expressionType = typeFor(expressionId, context);
+    if (
+      typeof expressionType === "number" &&
+      !typeCanCarryReference(expressionType, typing)
+    ) {
+      return [];
+    }
+    if (expressionIsStableStringSlice(expressionId)) return [];
     const place = placeOfExpression(expressionId, hir, context);
     if (place) {
       const parameter = parameterPlaces.get(place.root);
@@ -1448,6 +1575,12 @@ export const extractSingleCallableBorrowIndex = ({
           if (expressionIsProvenanceFreeFresh(statement.initializer)) {
             provenanceFreeFreshBindingRoots.add(statement.pattern.symbol);
           }
+        }
+        if (
+          statement.pattern.kind === "identifier" &&
+          expressionIsCompilerArrayIteratorFactory(statement.initializer)
+        ) {
+          compilerArrayIteratorRoots.add(statement.pattern.symbol);
         }
       }
     },
@@ -1629,6 +1762,23 @@ export const extractSingleCallableBorrowIndex = ({
           ? ordinaryDynamicBoundForTraitMethods(
               declarationTraitMethods,
               traitMethodMaySuspend,
+              (method) => {
+                if (!method.effectType) return true;
+                const target = canonicalSymbolRef({
+                  symbol: method.symbol,
+                  symbolTable,
+                  moduleId: context.moduleId,
+                });
+                const signature = targetSignatureFor(target);
+                if (signature) {
+                  return typing.effects.isOpen(signature.effectRow);
+                }
+                return (
+                  method.effectType.typeKind === "named" &&
+                  method.effectType.path.length === 1 &&
+                  method.effectType.path[0] === "open"
+                );
+              },
             )
           : dynamicBoundParameters
             ? ordinaryDynamicBoundForParameters(
@@ -1732,6 +1882,12 @@ export const extractSingleCallableBorrowIndex = ({
                             callerParameterOriginsByRoot.get(rawPlace.root)!,
                         }
                       : {}),
+                    ...(compilerArrayIteratorRoots.has(rawPlace.root) &&
+                    rawPlace.projections.every(
+                      (projection) => projection.kind === "identity",
+                    )
+                      ? { compilerArrayIterator: true as const }
+                      : {}),
                   };
                 })()
               : {}),
@@ -1759,6 +1915,14 @@ export const extractSingleCallableBorrowIndex = ({
               : {}),
           }) satisfies CallableBorrowIndexArgument,
       );
+      const compilerArrayIteratorNext =
+        expression.exprKind === "method-call" &&
+        expression.method === "next" &&
+        targets.length === 1 &&
+        isCanonicalStdArrayTarget(targets[0]!, "next") &&
+        arguments_[0]?.compilerArrayIterator === true &&
+        isCanonicalStdArrayIteratorType(arguments_[0]?.type) &&
+        isCanonicalStdArrayIteratorType(signature?.parameters[0]?.type);
       const returnsBorrowed =
         (signature !== undefined &&
           isBorrowedType(signature.returnType, typing)) ||
@@ -1805,6 +1969,9 @@ export const extractSingleCallableBorrowIndex = ({
         ...(traitDispatch ? { traitDispatch: true as const } : {}),
         ...(openTraitDispatch ? { openTraitDispatch: true as const } : {}),
         ...(ordinaryDynamicBound ? { ordinaryDynamicBound } : {}),
+        ...(compilerArrayIteratorNext
+          ? { compilerArrayIteratorNext: true as const }
+          : {}),
       } satisfies CallableBorrowIndexCall;
       const call: CallableBorrowIndexCall = {
         ...indexedCall,
@@ -1889,7 +2056,21 @@ export const extractSingleCallableBorrowIndex = ({
         expression.exprKind === "method-call"
       ) {
         const call = callsByExpression.get(exprId);
-        if (call) invalidateRetainableCallArguments(call);
+        if (call) {
+          invalidateRetainableCallArguments(call);
+          if (call.compilerArrayIteratorNext !== true) {
+            call.arguments.forEach((argument) => {
+              if (
+                argument.bindingKind === "mutable-ref" &&
+                argument.place?.projections.every(
+                  (projection) => projection.kind === "identity",
+                )
+              ) {
+                compilerArrayIteratorRoots.delete(argument.place.root);
+              }
+            });
+          }
+        }
       }
       if (expression.exprKind !== "assign") {
         return;
@@ -1897,6 +2078,7 @@ export const extractSingleCallableBorrowIndex = ({
       if (typeof expression.target === "number") {
         const targetPlace = placeOfExpression(expression.target, hir, context);
         if (targetPlace) {
+          compilerArrayIteratorRoots.delete(targetPlace.root);
           callerParameterOriginTransfers.push({
             targets: [targetPlace.root],
             expression: expression.value,
@@ -2138,6 +2320,7 @@ const ordinaryDynamicBoundForParameters = (
 const ordinaryDynamicBoundForTraitMethods = (
   methods: readonly HirTraitMethod[],
   maySuspend: (method: HirTraitMethod) => boolean,
+  invokesUnknownCallback: (method: HirTraitMethod) => boolean,
 ): NonNullable<CallableBorrowIndexCall["ordinaryDynamicBound"]> => {
   const parameterCount = Math.max(
     0,
@@ -2155,7 +2338,9 @@ const ordinaryDynamicBoundForTraitMethods = (
       },
     ),
     ambientObjectAccess: false,
-    invokesUnknownCallback: false,
+    // An open declaration row admits unknown implementation work. That same
+    // openness is the finite callback ceiling for dynamic dispatch.
+    invokesUnknownCallback: methods.some(invokesUnknownCallback),
     maySuspend: methods.some(maySuspend),
   };
 };

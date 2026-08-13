@@ -39,6 +39,8 @@ export type OrdinaryMutationCall = {
   arguments: readonly OrdinaryMutationCallArgument[];
   /** Signature upper bound for dynamic dispatch; concrete targets are ignored. */
   dynamicBound?: OrdinaryMutationSummary;
+  /** Exact std Array cursor step; retained Array origins are read-only. */
+  compilerArrayIteratorNext?: true;
   unknownTarget: boolean;
 };
 
@@ -397,6 +399,9 @@ const callInput = ({
       };
     }),
     ...(dynamicBound ? { dynamicBound } : {}),
+    ...(call.compilerArrayIteratorNext === true
+      ? { compilerArrayIteratorNext: true as const }
+      : {}),
     unknownTarget:
       dynamicBound === undefined &&
       (call.targets.length === 0 || call.argumentPlanAmbiguous === true),
@@ -464,8 +469,12 @@ const applyCalleeSummary = ({
     maySuspend: summary.maySuspend || callee.maySuspend,
   };
   callee.parameterAccesses.forEach((access, parameter) => {
+    const effectiveAccess =
+      call.compilerArrayIteratorNext === true && parameter === 0
+        ? OrdinaryParameterAccess.Read
+        : access;
     next = applyAccessToArgument({
-      access,
+      access: effectiveAccess,
       argument: call.arguments.find(
         (argument) => argument.parameter === parameter,
       ),

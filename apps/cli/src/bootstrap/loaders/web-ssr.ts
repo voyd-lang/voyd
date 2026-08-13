@@ -912,12 +912,11 @@ use std::string::type::String
 use std::vx::all
 
 pub fn view(model: Model) -> Html<Msg>
-  let ~attrs = [
+  let attrs = [
     class("mx-auto flex w-full max-w-5xl flex-col px-5 py-8 lg:px-10"),
     attr(name: "action", value: "/wiki/".concat(model.slug)),
     attr(name: "method", value: "post")
-  ]
-  attrs.push(html_event_handler<Msg>(
+  ].pushed(html_event_handler<Msg>(
     name: "submit",
     handler: () -> Msg => Msg::Save {},
     options: EventOptions {

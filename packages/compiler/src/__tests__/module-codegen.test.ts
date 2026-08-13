@@ -494,7 +494,7 @@ impl Sequence for Array
     self.value
 `,
       [`${std}${sep}traits${sep}sequence.voyd`]: `pub trait Sequence
-  fn measure(~self) -> i32
+  fn measure(~self): () -> i32
 `,
     });
 

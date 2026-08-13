@@ -42,10 +42,10 @@ val DisjointValuePair {
 }
 
 trait Replaceable
-  fn replace(~self) -> void
+  fn replace(~self): () -> void
 
 trait PairReplaceable
-  fn replace_and_report(~self) -> (i32, i32)
+  fn replace_and_report(~self): () -> (i32, i32)
 
 impl Replaceable for Box
   fn replace(~self) -> void

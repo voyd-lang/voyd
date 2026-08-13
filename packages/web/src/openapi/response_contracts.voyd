@@ -56,12 +56,7 @@ pub fn merge_response_contracts(
   left: Array<OpenApiResponseContract>,
   right: Array<OpenApiResponseContract>
 ) -> Array<OpenApiResponseContract>
-  let ~out = left.copied()
-  var index = 0
-  while index < right.len():
-    append_response_contract(out, right.at(index))
-    index = index + 1
-  out
+  left.extended(right)
 
 pub fn append_response_contract(
   ~responses: Array<OpenApiResponseContract>,

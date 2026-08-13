@@ -72,7 +72,93 @@ const input = ({
   callEdges: calls.flatMap((call) => call.targets),
 });
 
+const analyzeStd = (source: string) => {
+  const module: ModuleNode = {
+    id: "std::ordinary_mutation_test",
+    path: { namespace: "std", segments: ["ordinary_mutation_test"] },
+    origin: {
+      kind: "file",
+      filePath: "ordinary-mutation-std.test.voyd",
+    },
+    source,
+    dependencies: [],
+    ast: parse(source, "ordinary-mutation-std.test.voyd"),
+  };
+  const graph: ModuleGraph = {
+    entry: module.id,
+    modules: new Map([[module.id, module]]),
+    diagnostics: [],
+  };
+  return semanticsPipeline({ module, graph });
+};
+
+const analyzeStdModule = (moduleId: string, source: string) => {
+  const module: ModuleNode = {
+    id: moduleId,
+    path: { namespace: "std", segments: moduleId.split("::").slice(1) },
+    origin: { kind: "file", filePath: `${moduleId}.test.voyd` },
+    source,
+    dependencies: [],
+    ast: parse(source, `${moduleId}.test.voyd`),
+  };
+  const graph: ModuleGraph = {
+    entry: module.id,
+    modules: new Map([[module.id, module]]),
+    diagnostics: [],
+  };
+  return semanticsPipeline({ module, graph });
+};
+
 describe("ordinary mutation summaries", () => {
+  it("uses the declaration bound for generic static trait dispatch", () => {
+    const result = semanticsPipeline(
+      parse(
+        `obj Value { value: i32 }
+obj Wrapper<T> { value: Value }
+
+trait Provider<T>
+  fn provide(): () -> Value
+
+trait Consumer<T>
+  fn consume(): () -> Value
+
+impl<T: Provider<T>> Consumer<Wrapper<T>> for Wrapper<T>
+  fn consume() -> Value
+    call_provider<T>()
+
+fn call_provider<T: Provider<T>>() -> Value
+  T::provide()
+`,
+        "ordinary-static-trait-bound.test.voyd",
+      ),
+    );
+
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("allows unknown callback work declared by an explicit open trait row", () => {
+    const result = semanticsPipeline(
+      parse(
+        `obj Value { value: i32 }
+
+trait Provider<T>
+  fn provide(self, run: fn() : (open) -> T) : (open) -> T
+
+  fn documentation(self) -> Value
+    Value { value: 0 }
+
+impl Provider<Value> for Value
+  fn provide(self, run: fn() : (open) -> Value) : (open) -> Value
+    self
+    run()
+`,
+        "ordinary-explicit-open-trait-bound.test.voyd",
+      ),
+    );
+
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("keeps direct local allocations separate from owned inputs", () => {
     const source = `obj Store<T> { value: T }
 
@@ -158,6 +244,81 @@ fn invalid(~source: Child) -> i32
     expect(direct.diagnostics).toHaveLength(0);
     expect(analyzeAccess("read")).toThrow(/TY0048/);
     expect(analyzeAccess("write")).toThrow(/TY0048|TY0055/);
+  });
+
+  it("does not retain compiler-known stable slices through fresh wrappers", () => {
+    const stable = analyzeStd(`obj Backing { value: i32 }
+@intrinsic_type(type: "voyd.std.string-slice")
+obj StableSlice { source: Backing, start: i32, len: i32 }
+obj State { slice: StableSlice }
+obj Cursor { source: StableSlice, index: i32 }
+
+fn advance(~cursor: Cursor) -> void
+  cursor.index = cursor.index + 1
+
+fn valid(~state: State) -> i32
+  let ~cursor = Cursor { source: state.slice, index: 0 }
+  advance(~cursor)
+  state.slice.len
+
+fn advance_at(source: StableSlice, index: i32) -> i32
+  let ~cursor = Cursor { source, index }
+  advance(~cursor)
+  index
+`);
+    const lookalike = () =>
+      semanticsPipeline(
+        parse(
+          `obj Backing { value: i32 }
+obj SliceLookalike { source: Backing, start: i32, len: i32 }
+obj State { slice: SliceLookalike }
+obj Cursor { source: SliceLookalike, index: i32 }
+
+fn advance(~cursor: Cursor) -> void
+  cursor.index = cursor.index + 1
+
+fn invalid(~state: State) -> i32
+  let ~cursor = Cursor { source: state.slice, index: 0 }
+  advance(~cursor)
+  state.slice.len
+`,
+          "ordinary-slice-lookalike-wrapper.test.voyd",
+        ),
+      );
+
+    expect(stable.diagnostics).toHaveLength(0);
+    expect(lookalike).toThrow(/TY0048|TY0055/);
+  });
+
+  it("downgrades only the canonical std Array iterator cursor step", () => {
+    const iteratorSource = (iteratorName: string) => `@intrinsic_type(type: "voyd.std.array")
+obj Array<T> { item: T }
+obj ${iteratorName}<T> { source: Array<T>, index: i32 }
+
+impl<T> Array<T>
+  fn iter(self) -> ${iteratorName}<T>
+    ${iteratorName}<T> { source: self, index: 0 }
+
+impl<T> ${iteratorName}<T>
+  fn next(~self) -> T
+    self.index = self.index + 1
+    self.source.item
+
+fn read_after_step(~source: Array<i32>) -> i32
+  let ~cursor = source.iter()
+  cursor.next()
+  source.item
+`;
+
+    expect(
+      analyzeStdModule(
+        "std::array",
+        iteratorSource("ArrayIterator"),
+      ).diagnostics,
+    ).toHaveLength(0);
+    expect(() =>
+      analyzeStdModule("std::evil", iteratorSource("EvilIterator")),
+    ).toThrow(/TY0048|TY0055/);
   });
 
   it("keeps caller-local sibling paths precise and rejects the same projected path", () => {
@@ -989,7 +1150,12 @@ fn read_dynamic(reader: Reader) -> i32
       readDynamic?.kind === "function"
         ? result.borrowing.ordinaryMutationSummaries?.get(readDynamic.symbol)
         : undefined,
-    ).toEqual(summary([Access.Read], { maySuspend: true }));
+    ).toEqual(
+      summary([Access.Read], {
+        invokesUnknownCallback: true,
+        maySuspend: true,
+      }),
+    );
   });
 
   it("keeps explicit closed pure trait rows non-suspending", () => {

@@ -21,6 +21,12 @@ export const typeHasIntrinsicRole = ({
   if (typeof type !== "number") return false;
   const nominal = typing.arena.nominalComponent(type);
   if (typeof nominal !== "number") return false;
+  const registered = typing.intrinsicTypes.get(role);
+  const registeredNominal =
+    typeof registered === "number"
+      ? (typing.arena.nominalComponent(registered) ?? registered)
+      : undefined;
+  if (registeredNominal === nominal) return true;
   const descriptor = typing.arena.get(typing.arena.unfoldRecursive(nominal));
   if (
     descriptor.kind !== "nominal-object" &&
@@ -43,4 +49,28 @@ export const typeHasIntrinsicRole = ({
     | { intrinsicType?: unknown }
     | undefined;
   return metadata?.intrinsicType === role;
+};
+
+/** Matches one exact nominal declaration, including its defining module. */
+export const typeHasNominalIdentity = ({
+  type,
+  ownerModuleId,
+  ownerName,
+  typing,
+}: {
+  type: TypeId | undefined;
+  ownerModuleId: string;
+  ownerName: string;
+  typing: TypingResult;
+}): boolean => {
+  if (typeof type !== "number") return false;
+  const nominal = typing.arena.nominalComponent(type);
+  if (typeof nominal !== "number") return false;
+  const descriptor = typing.arena.get(typing.arena.unfoldRecursive(nominal));
+  return (
+    (descriptor.kind === "nominal-object" ||
+      descriptor.kind === "value-object") &&
+    descriptor.owner.moduleId === ownerModuleId &&
+    descriptor.name === ownerName
+  );
 };

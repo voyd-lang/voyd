@@ -271,7 +271,7 @@ pub fn main() -> i32
     const { optimized, moduleId } = compile(`
 obj Record { stable: i32, changing: i32 }
 trait Mutator
-  fn bump(self, ~value: Record) -> void
+  fn bump(self, ~value: Record): () -> void
 
 obj Increment {}
 impl Mutator for Increment

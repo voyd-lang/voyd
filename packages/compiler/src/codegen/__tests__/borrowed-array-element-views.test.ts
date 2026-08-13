@@ -514,7 +514,7 @@ pub fn run(right: i32) -> i32
 obj Box { value: i32 }
 
 trait Mutator
-  fn update(~self, ~left: Box, ~right: Box) -> i32
+  fn update(~self, ~left: Box, ~right: Box): () -> i32
 
 obj ConcreteMutator {}
 
@@ -545,7 +545,7 @@ pub fn main() -> i32
 obj Box { value: i32 }
 
 trait Bumper
-  fn bump(~self, ~other: Box) -> i32
+  fn bump(~self, ~other: Box): () -> i32
 
 impl Bumper for Box
   fn bump(~self, ~other: Box) -> i32
@@ -567,7 +567,7 @@ pub fn main() -> i32
   it("uses storage identity for root-rebinding open trait receivers", () => {
     const { instance, module } = compileProgram(`
 trait Replacer
-  fn replace(~self, ~other: Replacer) -> i32
+  fn replace(~self, ~other: Replacer): () -> i32
 
 obj Box {}
 

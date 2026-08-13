@@ -333,9 +333,7 @@ export const checkOrdinaryLocalMutationSafety = ({
                 ? displayPlace(argumentPlace, symbolTable)
                 : "an argument reachable from the exclusive parameter",
               existing:
-                access === OrdinaryParameterAccess.Write
-                  ? "mutable"
-                  : "shared",
+                access === OrdinaryParameterAccess.Write ? "mutable" : "shared",
             }),
           );
         }
@@ -798,11 +796,20 @@ export const checkOrdinaryLocalMutationSafety = ({
         argument.place !== undefined &&
         !index.parameterPlaces.has(argument.place.root) &&
         (argument.callerParameterOrigins?.length ?? 0) > 0;
+      const mutableAliasSource =
+        argument.place === undefined
+          ? undefined
+          : aliases.get(argument.place.root);
+      const argumentIsMutableReborrow =
+        argument.place !== undefined &&
+        mutableAliasSource !== undefined &&
+        (mutableAliasSource.root !== argument.place.root ||
+          mutableAliasSource.projections.length > 0);
       const placeIsBoundResult = placesForArgument.some((place) =>
         boundResultSymbols.has(place.root),
       );
       const retainedReachableAlias =
-        argumentIsReachableAlias && !placeIsBoundResult;
+        argumentIsReachableAlias && !argumentIsMutableReborrow;
       const originPlaces = placeIsBoundResult
         ? []
         : (() => {
@@ -826,22 +833,25 @@ export const checkOrdinaryLocalMutationSafety = ({
               .filter((parameter) => !preciseParameters.has(parameter))
               .map((parameter) => ({ parameter, path: [] }));
             return [...precise, ...coarse].flatMap(({ parameter, path }) => {
-            const source = index.parameters[parameter];
-            if (!source) return [];
-            if (
-              typeof argument.type === "number" &&
-              typeof source.type === "number" &&
-              !typesMayShareReachableIdentity(
-                argument.type,
-                source.type,
-                typing,
-              )
-            ) {
-              return [];
-            }
-            return [
-              { root: source.symbol, projections: path } satisfies BorrowPlace,
-            ];
+              const source = index.parameters[parameter];
+              if (!source) return [];
+              if (
+                typeof argument.type === "number" &&
+                typeof source.type === "number" &&
+                !typesMayShareReachableIdentity(
+                  argument.type,
+                  source.type,
+                  typing,
+                )
+              ) {
+                return [];
+              }
+              return [
+                {
+                  root: source.symbol,
+                  projections: path,
+                } satisfies BorrowPlace,
+              ];
             });
           })();
       return Array.from(
@@ -1031,7 +1041,10 @@ const collectAssignedCallerOrigins = ({
       case "method-call": {
         const callArguments =
           expression.exprKind === "method-call"
-            ? [expression.target, ...expression.args.map((argument) => argument.expr)]
+            ? [
+                expression.target,
+                ...expression.args.map((argument) => argument.expr),
+              ]
             : expression.args.map((argument) => argument.expr);
         return roots(callArguments);
       }
@@ -1070,7 +1083,10 @@ const collectAssignedCallerOrigins = ({
           hir,
           options: { skipLambdas: true },
           onEnterExpression: (_nestedId, nested) => {
-            if (nested.exprKind === "break" && typeof nested.value === "number") {
+            if (
+              nested.exprKind === "break" &&
+              typeof nested.value === "number"
+            ) {
               breakValues.push(nested.value);
             }
           },
@@ -1367,17 +1383,15 @@ const localResultAliasOriginsForExpression = ({
       if (!call) return [];
       const directOrigins = callOrigins(call);
       if (!callCanCarryOrigin(call)) return [];
-      return distinctResultAliasOrigins(
-        [
-          ...directOrigins,
-          ...call.arguments.flatMap((argument) =>
-            typeof argument.expression === "number" &&
-            callArgumentCanCarryOrigin(call, argument)
-              ? originsOf(argument.expression)
-              : [],
-          ),
-        ],
-      );
+      return distinctResultAliasOrigins([
+        ...directOrigins,
+        ...call.arguments.flatMap((argument) =>
+          typeof argument.expression === "number" &&
+          callArgumentCanCarryOrigin(call, argument)
+            ? originsOf(argument.expression)
+            : [],
+        ),
+      ]);
     }
     case "block":
       return typeof expression.value === "number"
@@ -1393,8 +1407,8 @@ const localResultAliasOriginsForExpression = ({
       ];
     case "match":
       return expression.arms.flatMap((arm) =>
-        originsOf(arm.value).map(({ scopeRoot: _scopeRoot, ...origin }) =>
-          origin,
+        originsOf(arm.value).map(
+          ({ scopeRoot: _scopeRoot, ...origin }) => origin,
         ),
       );
     case "effect-handler":
@@ -1560,6 +1574,9 @@ const localAccessForCallArgument = ({
     return argument.parameter === 0
       ? OrdinaryParameterAccess.Read
       : OrdinaryParameterAccess.Unused;
+  }
+  if (call.compilerArrayIteratorNext === true && argument.parameter === 0) {
+    return OrdinaryParameterAccess.Read;
   }
   return (
     summary?.parameterAccesses[argument.parameter] ??

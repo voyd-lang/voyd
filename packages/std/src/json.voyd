@@ -556,9 +556,9 @@ obj JsonParser {
   index: i32
 }
 
-obj JsonEscapeState {
-  out: Array<i32>,
-  parser: JsonParser
+obj JsonArrayCountStatus {
+  status: i32,
+  count: i32
 }
 
 /// Pull reader over one JSON source without constructing a `JsonValue` tree.
@@ -841,20 +841,16 @@ impl DataReader<JsonError> for JsonReader
     let begin_status = self.begin_container(kind: 0)
     if begin_status != 0:
       return json_reader_status_failure<i32>(begin_status)
-    let ~probe = JsonParser {
-      source: self.parser.source,
-      index: self.parser.index
-    }
-    match(count_json_array_values(
-      probe,
+    let count_status = count_json_array_values(
+      self.parser.source,
+      self.parser.index,
       depth: self.container_kinds.len(),
       limits: self.limits
-    ))
-      Err<JsonError> { error }:
-        self.failed = true
-        Err<JsonError> { error }
-      Ok<i32> { value }:
-        Ok<i32> { value }
+    )
+    if count_status.status != 0:
+      self.failed = true
+      return json_array_count_status_failure<i32>(count_status.status)
+    Ok<i32> { value: count_status.count }
 
   fn has_next_element(self) -> Result<bool, JsonError>
     if self.container_kinds.is_empty():
@@ -1006,6 +1002,15 @@ fn json_reader_status_failure<T>(status: i32) -> Result<T, JsonError>
 
 fn json_reader_failure<T>(message: String) -> Result<T, JsonError>
   Err<JsonError> { error: json_parse_error(message) }
+
+fn json_array_count_status_failure<T>(status: i32) -> Result<T, JsonError>
+  if status == 100:
+    return json_reader_failure<T>("json array exceeds configured collection limit")
+  if status == 101:
+    return json_reader_failure<T>("json reader expected ',' or ']' in array")
+  if status == 102:
+    return json_reader_failure<T>("json reader expected ']' in array")
+  json_skip_status_failure<T>(status)
 
 /// Parses UTF-8 JSON text into a `JsonValue`.
 ///
@@ -1853,27 +1858,29 @@ fn json_object_starts_variant(~parser: JsonParser) -> bool
       value == "$variant"
 
 fn count_json_array_values(
-  ~parser: JsonParser,
+  source: StringSlice,
+  index: i32,
   { depth: i32, limits: DecodeLimits }
-) -> Result<i32, JsonError>
+) -> JsonArrayCountStatus
+  let ~parser = JsonParser { source, index }
   skip_whitespace(parser)
   if consume_byte(parser, 93):
-    return Ok<i32> { value: 0 }
+    return JsonArrayCountStatus { status: 0, count: 0 }
   var count = 0
   while true:
     if count >= limits.max_collection_length:
-      return json_reader_failure<i32>("json array exceeds configured collection limit")
+      return JsonArrayCountStatus { status: 100, count }
     let skip_status = skip_json_value(parser, depth: depth, limits: limits)
     if skip_status != 0:
-      return json_skip_status_failure<i32>(skip_status)
+      return JsonArrayCountStatus { status: skip_status, count }
     count = count + 1
     skip_whitespace(parser)
     if consume_byte(parser, 93):
-      return Ok<i32> { value: count }
+      return JsonArrayCountStatus { status: 0, count }
     if consume_byte(parser, 44) == false:
-      return json_reader_failure<i32>("json reader expected ',' or ']' in array")
+      return JsonArrayCountStatus { status: 101, count }
     skip_whitespace(parser)
-  json_reader_failure<i32>("json reader expected ']' in array")
+  JsonArrayCountStatus { status: 102, count }
 
 fn skip_json_value(
   ~parser: JsonParser,
@@ -2056,7 +2063,6 @@ fn parse_string(~parser: JsonParser): () -> Result<String, JsonError>
     return Err<JsonError> { error: json_parse_error("json parse error: expected string") }
 
   let ~bytes = Array<i32>::with_capacity(16)
-  let ~escape = JsonEscapeState { out: bytes, parser: parser }
   while true:
     let byte = next_byte_or(parser, -1)
     if byte < 0:
@@ -2067,7 +2073,7 @@ fn parse_string(~parser: JsonParser): () -> Result<String, JsonError>
       let escaped = next_byte_or(parser, -1)
       if escaped < 0:
         return Err<JsonError> { error: json_parse_error("json parse error: unterminated escape") }
-      let append_result = append_escaped(escape, escaped)
+      let append_result = append_escaped(bytes, parser, escaped: escaped)
       if append_result != 0:
         return Err<JsonError> { error: json_parse_error("json parse error: invalid string escape") }
       continue
@@ -2115,13 +2121,20 @@ fn parse_object(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   while true:
     match(parse_string(parser))
       Ok<String> { value: key }:
+        let key_slice = key.as_slice()
+        let ~key_bytes = Array<i32>::with_capacity(key_slice.byte_len())
+        var key_index = 0
+        while key_index < key_slice.byte_len():
+          key_bytes.push(byte_at_or(key_slice, key_index, 0))
+          key_index = key_index + 1
+        let stable_key = new_string(key_bytes.to_fixed_array())
         skip_whitespace(parser)
         if not consume_byte(parser, 58):
           return Err<JsonError> { error: json_parse_error("json parse error: expected ':' after object key") }
         skip_whitespace(parser)
         match(parse_value(parser))
           Ok<JsonValue> { value }:
-            fields.set(key, value)
+            fields.set(stable_key, value)
           Err<JsonError> { error }:
             return Err<JsonError> { error: error }
       Err<JsonError> { error }:
@@ -2440,53 +2453,57 @@ fn consume_byte(~parser: JsonParser, expected: i32) -> bool
     None:
       false
 
-fn append_escaped(~state: JsonEscapeState, escaped: i32) -> i32
+fn append_escaped(
+  ~out: Array<i32>,
+  ~parser: JsonParser,
+  { escaped: i32 }
+) -> i32
   if escaped == 34:
-    state.out.push(34)
+    out.push(34)
     return 0
   if escaped == 92:
-    state.out.push(92)
+    out.push(92)
     return 0
   if escaped == 47:
-    state.out.push(47)
+    out.push(47)
     return 0
   if escaped == 98:
-    state.out.push(8)
+    out.push(8)
     return 0
   if escaped == 102:
-    state.out.push(12)
+    out.push(12)
     return 0
   if escaped == 110:
-    state.out.push(10)
+    out.push(10)
     return 0
   if escaped == 114:
-    state.out.push(13)
+    out.push(13)
     return 0
   if escaped == 116:
-    state.out.push(9)
+    out.push(9)
     return 0
   if escaped != 117:
     return -1
 
-  let lead = read_unicode_escape(state.parser)
+  let lead = read_unicode_escape(parser)
   if lead < 0:
     return -1
   if is_high_surrogate(lead):
-    let checkpoint = state.parser.index
-    if consume_byte(state.parser, 92):
-      if consume_byte(state.parser, 117):
-        let trail = read_unicode_escape(state.parser)
+    let checkpoint = parser.index
+    if consume_byte(parser, 92):
+      if consume_byte(parser, 117):
+        let trail = read_unicode_escape(parser)
         if is_low_surrogate(trail):
-          append_codepoint(state.out, decode_surrogate_pair(lead, trail))
+          append_codepoint(out, decode_surrogate_pair(lead, trail))
           return 0
-      state.parser.index = checkpoint
-    append_replacement(state.out)
+      parser.index = checkpoint
+    append_replacement(out)
     return 0
   if is_low_surrogate(lead):
-    append_replacement(state.out)
+    append_replacement(out)
     return 0
 
-  append_codepoint(state.out, lead)
+  append_codepoint(out, lead)
   0
 
 fn read_unicode_escape(~parser: JsonParser) -> i32

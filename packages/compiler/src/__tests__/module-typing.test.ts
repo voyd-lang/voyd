@@ -468,7 +468,6 @@ pub fn main() -> i32
     });
 
     const { diagnostics } = analyzeModules({ graph });
-    console.log("alias-shared", diagnostics);
     expect(diagnostics).toHaveLength(0);
   });
 
@@ -971,10 +970,10 @@ pub use std::iterator::{ Iterable, Iterator }
 `,
       [`${stdRoot}${sep}iterator.voyd`]: `
 pub trait Iterable
-  fn iterate(self) -> Iterator
+  fn iterate(self): () -> Iterator
 
 pub trait Iterator
-  fn next(~self) -> i32
+  fn next(~self): () -> i32
 `,
       [`${stdRoot}${sep}counter.voyd`]: `
 use std::iterator::all
@@ -1023,10 +1022,10 @@ pub use std::iterator::{ Iterable, Iterator }
 `,
       [`${stdRoot}${sep}iterator.voyd`]: `
 pub trait Iterable
-  fn iterate(self) -> Iterator
+  fn iterate(self): () -> Iterator
 
 pub trait Iterator
-  fn next(~self) -> i32
+  fn next(~self): () -> i32
 `,
       [`${stdRoot}${sep}counter.voyd`]: `
 use std::iterator::all
@@ -1060,7 +1059,6 @@ pub fn main() -> i32
     });
 
     const { diagnostics } = analyzeModulesWithIsolatedInterners({ graph });
-    console.log("alias-isolated", diagnostics);
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
 
@@ -1673,10 +1671,10 @@ pub use std::iterator::{ Iterable, Iterator, for }
 `,
       [`${stdRoot}${sep}iterator.voyd`]: `
 pub trait Iterable<T>
-  fn iterate(self) -> Iterator<T>
+  fn iterate(self): () -> Iterator<T>
 
 pub trait Iterator<T>
-  fn next(~self) -> i32
+  fn next(~self): () -> i32
 
 pub macro for(case)
   0
