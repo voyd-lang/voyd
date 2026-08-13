@@ -27,6 +27,11 @@ export const validateTypedProgram = (ctx: TypingContext): void => {
 };
 
 const validateBorrowTypePositions = (ctx: TypingContext): void => {
+  validateBorrowTypeExprPositions(ctx);
+  if (!ctx.arena.hasBorrowedTypes()) {
+    return;
+  }
+
   for (const [symbol, signature] of ctx.functions.signatures) {
     const record = ctx.symbolTable.getSymbol(symbol);
     const metadata = (record.metadata ?? {}) as {
@@ -139,18 +144,23 @@ const validateBorrowTypePositions = (ctx: TypingContext): void => {
   }
 
   for (const item of ctx.hir.items.values()) {
+    if (item.kind !== "module-let") continue;
+    const type = ctx.valueTypes.get(item.symbol) ?? item.typeAnnotation?.typeId;
+    if (typeof type === "number") {
+      validateBorrowType({
+        type,
+        allowBorrowRoot: false,
+        context: "module value",
+        ctx,
+        span: item.span,
+      });
+    }
+  }
+};
+
+const validateBorrowTypeExprPositions = (ctx: TypingContext): void => {
+  for (const item of ctx.hir.items.values()) {
     if (item.kind === "module-let") {
-      const type =
-        ctx.valueTypes.get(item.symbol) ?? item.typeAnnotation?.typeId;
-      if (typeof type === "number") {
-        validateBorrowType({
-          type,
-          allowBorrowRoot: false,
-          context: "module value",
-          ctx,
-          span: item.span,
-        });
-      }
       validateBorrowTypeExprSyntax(
         item.typeAnnotation,
         false,
@@ -158,9 +168,7 @@ const validateBorrowTypePositions = (ctx: TypingContext): void => {
         ctx,
         item.span,
       );
-      continue;
-    }
-    if (item.kind === "object") {
+    } else if (item.kind === "object") {
       item.fields.forEach((field) =>
         validateBorrowTypeExprSyntax(
           field.type,
@@ -170,9 +178,7 @@ const validateBorrowTypePositions = (ctx: TypingContext): void => {
           item.span,
         ),
       );
-      continue;
-    }
-    if (item.kind === "trait") {
+    } else if (item.kind === "trait") {
       item.methods.forEach((method) => {
         method.parameters.forEach((parameter, index) =>
           validateBorrowTypeExprSyntax(
@@ -191,9 +197,7 @@ const validateBorrowTypePositions = (ctx: TypingContext): void => {
           method.span,
         );
       });
-      continue;
-    }
-    if (item.kind === "effect") {
+    } else if (item.kind === "effect") {
       item.operations.forEach((operation) => {
         operation.parameters.forEach((parameter) => {
           if (typeExprContainsBorrow(parameter.type)) {

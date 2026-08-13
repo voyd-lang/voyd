@@ -176,6 +176,7 @@ export interface UnificationConflict {
 export interface TypeArena {
   get(id: TypeId): Readonly<TypeDescriptor>;
   containsTypeParams(id: TypeId): boolean;
+  hasBorrowedTypes(): boolean;
   getScheme(id: TypeSchemeId): Readonly<TypeScheme>;
   internPrimitive(name: string): TypeId;
   internBorrowed(inner: TypeId): TypeId;
@@ -220,6 +221,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
 
   const descriptors: TypeDescriptor[] =
     snapshot?.descriptors.map(cloneTypeDescriptor) ?? [];
+  let hasBorrowedTypes = descriptors.some(({ kind }) => kind === "borrowed");
   const descriptorCache = new Map<string, TypeId>();
   const schemes = new Map<TypeSchemeId, TypeScheme>(
     snapshot?.schemes.map((scheme) => [scheme.id, cloneTypeScheme(scheme)]) ??
@@ -465,8 +467,10 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
   const internPrimitive = (name: string): TypeId =>
     storeDescriptor({ kind: "primitive", name });
 
-  const internBorrowed = (inner: TypeId): TypeId =>
-    storeDescriptor({ kind: "borrowed", inner });
+  const internBorrowed = (inner: TypeId): TypeId => {
+    hasBorrowedTypes = true;
+    return storeDescriptor({ kind: "borrowed", inner });
+  };
 
   const internRecursive = (desc: Omit<RecursiveType, "kind">): TypeId =>
     storeDescriptor({
@@ -2081,6 +2085,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
   return {
     get,
     containsTypeParams: (id) => containedTypeParams(id).size > 0,
+    hasBorrowedTypes: () => hasBorrowedTypes,
     getScheme,
     internPrimitive,
     internBorrowed,

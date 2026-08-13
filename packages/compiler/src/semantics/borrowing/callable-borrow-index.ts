@@ -176,7 +176,6 @@ const MAX_LOCAL_ALIAS_TRAVERSAL = 4_096;
 const MAX_LOCAL_ALIAS_EDGES = 4_096;
 const STD_ARRAY_MODULE_ID = "std::array";
 const STD_ARRAY_TYPE_NAME = "Array";
-const STD_ARRAY_ITERATOR_TYPE_NAME = "ArrayIterator";
 
 const emptyFlags = (): MutableFlags => ({
   hasMutableParameter: false,
@@ -606,11 +605,10 @@ export const extractSingleCallableBorrowIndex = ({
         : undefined
       : context.dependencies.get(target.moduleId)?.callables.get(target.symbol)
           ?.name;
-  const isCanonicalStdArrayTarget = (
+  const isCanonicalStdArrayIteratorFactoryTarget = (
     target: SymbolRef,
-    name: "iter" | "next",
   ): boolean =>
-    target.moduleId === STD_ARRAY_MODULE_ID && targetNameFor(target) === name;
+    target.moduleId === STD_ARRAY_MODULE_ID && targetNameFor(target) === "iter";
   const isCanonicalStdArrayType = (type: TypeId | undefined): boolean =>
     typeHasIntrinsicRole({
       type,
@@ -626,15 +624,6 @@ export const extractSingleCallableBorrowIndex = ({
       ownerName: STD_ARRAY_TYPE_NAME,
       typing,
     });
-  const isCanonicalStdArrayIteratorType = (
-    type: TypeId | undefined,
-  ): boolean =>
-    typeHasNominalIdentity({
-      type,
-      ownerModuleId: STD_ARRAY_MODULE_ID,
-      ownerName: STD_ARRAY_ITERATOR_TYPE_NAME,
-      typing,
-    });
   const expressionIsCompilerArrayIteratorFactory = (
     expressionId: HirExprId,
   ): boolean => {
@@ -648,11 +637,9 @@ export const extractSingleCallableBorrowIndex = ({
     const receiverType = typeFor(expression.target, context);
     if (!isCanonicalStdArrayType(receiverType)) return false;
     const targets = callTargetsFor(expressionId);
-    const signature = targets.length === 1 ? targetSignatureFor(targets[0]!) : undefined;
     return (
       targets.length === 1 &&
-      isCanonicalStdArrayTarget(targets[0]!, "iter") &&
-      isCanonicalStdArrayIteratorType(signature?.returnType)
+      isCanonicalStdArrayIteratorFactoryTarget(targets[0]!)
     );
   };
   const targetMaySuspend = (target: SymbolRef): boolean =>
@@ -1915,14 +1902,13 @@ export const extractSingleCallableBorrowIndex = ({
               : {}),
           }) satisfies CallableBorrowIndexArgument,
       );
+      // `Array::iter` intentionally erases its concrete cursor to `Iterator<T>`.
+      // Keep the canonical factory marker through that erasure; target resolution
+      // may conservatively include other Iterator implementations.
       const compilerArrayIteratorNext =
         expression.exprKind === "method-call" &&
         expression.method === "next" &&
-        targets.length === 1 &&
-        isCanonicalStdArrayTarget(targets[0]!, "next") &&
-        arguments_[0]?.compilerArrayIterator === true &&
-        isCanonicalStdArrayIteratorType(arguments_[0]?.type) &&
-        isCanonicalStdArrayIteratorType(signature?.parameters[0]?.type);
+        arguments_[0]?.compilerArrayIterator === true;
       const returnsBorrowed =
         (signature !== undefined &&
           isBorrowedType(signature.returnType, typing)) ||

@@ -3340,18 +3340,18 @@ export const typeSatisfiesBorrowFormation = (
   ctx: TypingContext,
   state: TypingState,
 ): boolean => {
+  if (typeSatisfies(actual, expected, ctx, state)) {
+    return true;
+  }
   const expectedDesc = ctx.arena.get(expected);
   if (expectedDesc.kind === "borrowed") {
     const actualDesc = ctx.arena.get(actual);
-    const actualInner =
-      actualDesc.kind === "borrowed" ? actualDesc.inner : actual;
-    return typesMatchInvariant(actualInner, expectedDesc.inner, ctx, state);
+    return (
+      actualDesc.kind !== "borrowed" &&
+      typesMatchInvariant(actual, expectedDesc.inner, ctx, state)
+    );
   }
-  const actualDesc = ctx.arena.get(actual);
-  if (actualDesc.kind === "borrowed") {
-    return false;
-  }
-  return typeSatisfies(actual, expected, ctx, state);
+  return false;
 };
 
 const resolveTypeParameterConstraint = ({
