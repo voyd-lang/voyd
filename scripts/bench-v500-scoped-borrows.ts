@@ -872,19 +872,19 @@ pub fn main() -> i32
 };
 
 const nestedCallbackBody = (scale: number): string => {
-  const body: string[] = [];
-  for (let index = 0; index < scale; index += 1) {
-    const indent = "  ".repeat(index + 1);
-    body.push(
-      `${indent}cell_${index}.with((value_${index}) =>`,
-      `${indent}  let sum_${index} = ${index === 0 ? "0" : `sum_${index - 1}`} + value_${index}.value`,
-    );
-  }
-  body.push(`${"  ".repeat(scale + 1)}sum_${scale - 1}`);
-  for (let index = scale - 1; index >= 0; index -= 1) {
-    body.push(`${"  ".repeat(index + 1)})`);
-  }
-  return body.join("\n");
+  const callbackValue = (index: number, depth: number): string[] => {
+    const indent = "  ".repeat(depth);
+    if (index === scale - 1) return [`${indent}value_${index}.value`];
+    return [
+      `${indent}let nested_${index} = cell_0.with((value_${index + 1}) =>`,
+      ...callbackValue(index + 1, depth + 1),
+      `${indent})`,
+      `${indent}nested_${index} + value_${index}.value`,
+    ];
+  };
+  return [`  cell_0.with((value_0) =>`, ...callbackValue(0, 2), `  )`].join(
+    "\n",
+  );
 };
 
 const borrowCallbacksScenario = (scale: number): Scenario => {
@@ -893,7 +893,7 @@ const borrowCallbacksScenario = (scale: number): Scenario => {
 obj BorrowNode { value: i32 }
 
 pub fn main() -> i32
-${lines(scale, (index) => `  let cell_${index} = SharedCell(BorrowNode { value: ${index + 1} })`)}
+  let cell_0 = SharedCell(BorrowNode { value: 1 })
 ${nestedCallbackBody(scale)}
 `;
   return {
@@ -901,7 +901,7 @@ ${nestedCallbackBody(scale)}
     family: "borrow-callbacks",
     scale,
     source,
-    expected: (scale * (scale + 1)) / 2,
+    expected: scale,
     dimensions: {
       borrowAwareCallables: 1,
       projectionDepth: 1,
