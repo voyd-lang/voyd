@@ -13,6 +13,29 @@ import {
   parseCanonicalStdForBody,
 } from "./array-fast-paths.js";
 import { getFunctionMetadataForCall } from "../expressions/call/metadata.js";
+import { incrementCompilerPerfCounter } from "../../perf.js";
+import type { ExactIteratorFallbackReason } from "../../perf-counter-schema.js";
+
+type ExactIteratorTargetDecision =
+  | {
+      accepted: true;
+      target: ProgramSymbolId;
+      iteratorTypeId: TypeId;
+    }
+  | { accepted: false; reason: ExactIteratorFallbackReason };
+
+const recordExactIteratorDecision = (
+  decision:
+    | { accepted: true }
+    | { accepted: false; reason: ExactIteratorFallbackReason },
+): void => {
+  incrementCompilerPerfCounter("codegen.exact_iterator_for.requested");
+  incrementCompilerPerfCounter(
+    decision.accepted
+      ? "codegen.exact_iterator_for.accepted"
+      : `codegen.exact_iterator_for.fallback.${decision.reason}`,
+  );
+};
 
 export const withExactIteratorForCallTargets = <T>({
   block,
@@ -54,15 +77,23 @@ export const withExactIteratorForCallTargets = <T>({
     iteratorStmt.mutable ||
     iteratorStmt.pattern.kind !== "identifier" ||
     iterCall?.exprKind !== "method-call" ||
+    whileExpr?.exprKind !== "while"
+  ) {
+    return undefined;
+  }
+  if (
     !isCanonicalStdTraitMethodCall({
       expr: iterCall,
       traitName: "Sequence",
       methodName: "iter",
       allowExternalImplementations: true,
       ctx,
-    }) ||
-    whileExpr?.exprKind !== "while"
+    })
   ) {
+    recordExactIteratorDecision({
+      accepted: false,
+      reason: "noncanonical-iter-call",
+    });
     return undefined;
   }
   const body = parseCanonicalStdForBody({
@@ -72,6 +103,10 @@ export const withExactIteratorForCallTargets = <T>({
     ctx,
   });
   if (!body) {
+    recordExactIteratorDecision({
+      accepted: false,
+      reason: "noncanonical-body",
+    });
     return undefined;
   }
   const exactNext = exactIteratorNextTargetFor({
@@ -80,7 +115,8 @@ export const withExactIteratorForCallTargets = <T>({
     ctx,
     fnCtx,
   });
-  if (!exactNext) {
+  recordExactIteratorDecision(exactNext);
+  if (!exactNext.accepted) {
     return undefined;
   }
   const previousTargets = fnCtx.exactTraitDispatchTargets;
@@ -111,13 +147,13 @@ const exactIteratorNextTargetFor = ({
   nextCall: HirMethodCallExpr;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): { target: ProgramSymbolId; iteratorTypeId: TypeId } | undefined => {
+}): ExactIteratorTargetDecision => {
   if (!exactNominalExpressionType({ exprId: iterCall.target, ctx, fnCtx })) {
-    return undefined;
+    return { accepted: false, reason: "nonexact-receiver" };
   }
   const iterTarget = callTargetForContext({ callId: iterCall.id, ctx, fnCtx });
   if (typeof iterTarget !== "number") {
-    return undefined;
+    return { accepted: false, reason: "unresolved-iter-target" };
   }
   const iterRef = ctx.program.symbols.refOf(iterTarget);
   const iterMeta = getFunctionMetadataForCall({
@@ -128,7 +164,7 @@ const exactIteratorNextTargetFor = ({
     typeInstanceId: fnCtx.typeInstanceId ?? fnCtx.instanceId,
   });
   if (!iterMeta) {
-    return undefined;
+    return { accepted: false, reason: "missing-iter-metadata" };
   }
   const targetCtx = ctx.moduleContexts.get(iterRef.moduleId);
   const iterItem = targetCtx
@@ -137,7 +173,7 @@ const exactIteratorNextTargetFor = ({
       )
     : undefined;
   if (!targetCtx || iterItem?.kind !== "function") {
-    return undefined;
+    return { accepted: false, reason: "missing-iter-body" };
   }
   const iteratorTypeId = freshExactNominalResultType({
     exprId: iterItem.body,
@@ -145,7 +181,7 @@ const exactIteratorNextTargetFor = ({
     instanceId: iterMeta.instanceId,
   });
   if (typeof iteratorTypeId !== "number") {
-    return undefined;
+    return { accepted: false, reason: "nonfresh-iterator-result" };
   }
 
   const selectedNext = callTargetForContext({
@@ -158,7 +194,13 @@ const exactIteratorNextTargetFor = ({
       ? ctx.program.traits.getTraitMethodImpl(selectedNext)
       : undefined;
   if (!mapping) {
-    return undefined;
+    return {
+      accepted: false,
+      reason:
+        typeof selectedNext === "number"
+          ? "missing-next-trait-mapping"
+          : "unresolved-next-target",
+    };
   }
   const matches = ctx.program.traits
     .getImplsByNominal(iteratorTypeId)
@@ -170,8 +212,8 @@ const exactIteratorNextTargetFor = ({
     );
   const unique = [...new Set(matches)];
   return unique.length === 1
-    ? { target: unique[0]!, iteratorTypeId }
-    : undefined;
+    ? { accepted: true, target: unique[0]!, iteratorTypeId }
+    : { accepted: false, reason: "ambiguous-next-implementation" };
 };
 
 const exactNominalExpressionType = ({

@@ -14,7 +14,6 @@ import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
 import {
   compileWithLoader,
   createCompilerReuseCache,
-  exportCompilerReuseArtifact,
   type CompilerReuseCache,
 } from "./shared/compile.js";
 import {
@@ -56,7 +55,6 @@ export const createSdk = (options: CreateSdkOptions = {}): VoydSdk => {
     compile: (options) => compileSdk(options, compilerCache),
     run: runWithHandlers,
     serveWebApp: (options) => serveWebApp(options, compilerCache),
-    exportCompilerArtifact: () => exportCompilerReuseArtifact(compilerCache),
   };
 };
 

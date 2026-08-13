@@ -28,12 +28,14 @@ fn Button<Msg>({
   let size_class = match(size)
     ButtonSize::Default: "default"
     ButtonSize::IconSmall: "icon-small"
-  let ~attrs = [
-    vx::class(size_class),
-    vx::html_event_message(name: "click", message: on_press)
-  ]
-  if aria_label is Some:
-    attrs.push(vx::attr(name: "aria-label", value: aria_label.value))
+  let attrs = if aria_label is Some then: [
+      vx::class(size_class),
+      vx::html_event_message(name: "click", message: on_press),
+      vx::attr(name: "aria-label", value: aria_label.value)
+    ] else: [
+      vx::class(size_class),
+      vx::html_event_message(name: "click", message: on_press)
+    ]
   vx::html_element(tag: "button", attrs: attrs, children: children)
 
 fn DialogClose<Msg>({

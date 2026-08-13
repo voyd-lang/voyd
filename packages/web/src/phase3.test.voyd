@@ -8,7 +8,11 @@ use std::http::wire::self as wire
 use std::optional::types::all
 use std::result::types::all
 use std::shared_cell::SharedCell
-use std::string::type::String
+use std::string::type::{
+  String,
+  as_slice as borrowed_string_slice,
+  concat as concat_borrowed_string
+}
 use std::test::assertions::all
 
 obj StreamCapture {
@@ -25,17 +29,16 @@ test "SSE formats fields and multiline data into streamed chunks":
     None:
       Test::fail()
 
-  let expected_prefix = "event: update\nid: 42\nretry: 1500\ndata: first\ndata: second\ndata: third\n\n: alive\n\n".as_slice()
-  let has_expected_prefix = capture.with((value) =>
-    value.body.starts_with(expected_prefix)
+  let captured_body = capture.with((value) =>
+    borrowed_string_slice(value.body)
   )
+  let expected_prefix = "event: update\nid: 42\nretry: 1500\ndata: first\ndata: second\ndata: third\n\n: alive\n\n".as_slice()
+  let has_expected_prefix = captured_body.starts_with(expected_prefix)
   assert(has_expected_prefix, eq: true)
   let expected_suffix = "data: ".as_slice().to_string()
     .concat("x".as_slice().to_string().repeat(17000).as_slice())
     .concat("\n\n".as_slice())
-  let has_expected_suffix = capture.with((value) =>
-    value.body.ends_with(expected_suffix.as_slice())
-  )
+  let has_expected_suffix = captured_body.ends_with(expected_suffix.as_slice())
   assert(has_expected_suffix, eq: true)
 
 test "multipart parses field metadata and binary-safe bodies":
@@ -159,8 +162,9 @@ fn capture_sse(capture: SharedCell<StreamCapture>) -> Response
   server::ResponseWriter::write_chunk(tail, payload):
     match(Body::bytes(payload).as_text())
       Ok<String> { value }:
+        let chunk = value.as_slice()
         capture.with_mut((~current) =>
-          current.body = current.body.concat(value.as_slice())
+          current.body = concat_borrowed_string(current.body, chunk)
         )
       Err:
         void

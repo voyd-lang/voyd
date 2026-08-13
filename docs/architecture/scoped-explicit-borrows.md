@@ -1,6 +1,6 @@
 # Scoped Explicit Borrows
 
-Status: Proposed
+Status: Implemented
 
 Decision date: 2026-08-09
 

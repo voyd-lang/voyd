@@ -43,11 +43,11 @@ pub fn structural_intersections()
   sum_vec3({ x: 1, y: 2, z: 3 })
 
 trait Image
-  fn draw(self) -> Rgb
+  fn draw(self): () -> Rgb
 
 trait Movable
-  fn move(~self, x: i32, y: i32) -> void
-  fn coords(self) -> (i32, i32)
+  fn move(~self, x: i32, y: i32): () -> void
+  fn coords(self): () -> (i32, i32)
 
 type MovableImage = Movable & Image
 

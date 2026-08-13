@@ -149,9 +149,16 @@ fn static_read_ok_payload(): () -> FsResult<Bytes>
   bytes.push(107)
   fs_ok(bytes.as_bytes())
 
+obj PathCapture {
+  value: StringSlice
+}
+
+fn path_capture(): () -> SharedCell<PathCapture>
+  SharedCell(PathCapture { value: "".as_slice() })
+
 fn handle_static_with_fs(
-  exists_paths: SharedCell<Array<String>>,
-  read_paths: SharedCell<Array<String>>,
+  exists_paths: SharedCell<PathCapture>,
+  read_paths: SharedCell<PathCapture>,
   method: Method,
   path: String,
   read_payload: FsResult<Bytes>
@@ -163,10 +170,12 @@ fn handle_static_with_fs(
   try
     web_app.handle(request(method, path))
   Fs::exists(tail, path):
-    exists_paths.with_mut((~paths) => paths.push(path))
+    let path_snapshot = path.as_slice()
+    exists_paths.with_mut((~capture) => capture.value = path_snapshot)
     tail(true)
   Fs::read_bytes(tail, path):
-    read_paths.with_mut((~paths) => paths.push(path))
+    let path_snapshot = path.as_slice()
+    read_paths.with_mut((~capture) => capture.value = path_snapshot)
     tail(read_payload)
   Fs::read_string(tail, _path):
     tail(fs_error(String::init()))
@@ -182,13 +191,6 @@ fn handle_static_with_fs(
     tail(fs_error(Unit {}))
   Fs::rename(tail, _payload):
     tail(fs_error(Unit {}))
-
-fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
-  match(value)
-    Some<String> { value: present }:
-      present
-    None:
-      fallback.to_string()
 
 fn fs_ok<T>(value: T) -> FsResult<T>
   FsResult<T> {
@@ -1047,8 +1049,8 @@ test "static files middleware accepts string roots":
   assert(true, eq: true)
 
 test "static files middleware returns mocked file responses":
-  let exists_paths = SharedCell(Array<String>::init())
-  let read_paths = SharedCell(Array<String>::init())
+  let exists_paths = path_capture()
+  let read_paths = path_capture()
   let get_response = handle_static_with_fs(
     exists_paths,
     read_paths,
@@ -1063,12 +1065,12 @@ test "static files middleware returns mocked file responses":
       assert(value.equals("application/json"), eq: true)
     None:
       assert(false, eq: true)
-  assert(exists_paths.with((paths) => optional_string_or(paths.get(0), "missing".as_slice()).equals("/site/public/asset.json")), eq: true)
-  assert(read_paths.with((paths) => optional_string_or(paths.get(0), "missing".as_slice()).equals("/site/public/asset.json")), eq: true)
+  assert(exists_paths.with((capture) => capture.value) == "/site/public/asset.json".as_slice(), eq: true)
+  assert(read_paths.with((capture) => capture.value) == "/site/public/asset.json".as_slice(), eq: true)
 
 test "static files middleware falls through when mocked read fails":
-  let exists_paths = SharedCell(Array<String>::init())
-  let read_paths = SharedCell(Array<String>::init())
+  let exists_paths = path_capture()
+  let read_paths = path_capture()
   let response = handle_static_with_fs(
     exists_paths,
     read_paths,
@@ -1078,12 +1080,12 @@ test "static files middleware falls through when mocked read fails":
   )
   assert(response.status.code(), eq: 404)
   assert(response_text(response).equals("next"), eq: true)
-  assert(exists_paths.with((paths) => optional_string_or(paths.get(0), "missing".as_slice()).equals("/site/public/asset.json")), eq: true)
-  assert(read_paths.with((paths) => optional_string_or(paths.get(0), "missing".as_slice()).equals("/site/public/asset.json")), eq: true)
+  assert(exists_paths.with((capture) => capture.value) == "/site/public/asset.json".as_slice(), eq: true)
+  assert(read_paths.with((capture) => capture.value) == "/site/public/asset.json".as_slice(), eq: true)
 
 test "static files middleware gives get and head status parity":
-  let get_exists_paths = SharedCell(Array<String>::init())
-  let get_read_paths = SharedCell(Array<String>::init())
+  let get_exists_paths = path_capture()
+  let get_read_paths = path_capture()
   let get_response = handle_static_with_fs(
     get_exists_paths,
     get_read_paths,
@@ -1092,8 +1094,8 @@ test "static files middleware gives get and head status parity":
     static_read_ok_payload()
   )
 
-  let head_exists_paths = SharedCell(Array<String>::init())
-  let head_read_paths = SharedCell(Array<String>::init())
+  let head_exists_paths = path_capture()
+  let head_read_paths = path_capture()
   let head_response = handle_static_with_fs(
     head_exists_paths,
     head_read_paths,
@@ -1110,11 +1112,11 @@ test "static files middleware gives get and head status parity":
       assert(value.equals("application/json"), eq: true)
     None:
       assert(false, eq: true)
-  assert(head_read_paths.with((paths) => optional_string_or(paths.get(0), "missing".as_slice()).equals("/site/public/asset.json")), eq: true)
+  assert(head_read_paths.with((capture) => capture.value) == "/site/public/asset.json".as_slice(), eq: true)
 
 test "static files middleware keeps absolute-looking paths under root":
-  let exists_paths = SharedCell(Array<String>::init())
-  let read_paths = SharedCell(Array<String>::init())
+  let exists_paths = path_capture()
+  let read_paths = path_capture()
   let response = handle_static_with_fs(
     exists_paths,
     read_paths,
@@ -1124,8 +1126,8 @@ test "static files middleware keeps absolute-looking paths under root":
   )
 
   assert(response.status.code(), eq: 200)
-  assert(exists_paths.with((paths) => optional_string_or(paths.get(0), "missing".as_slice()).equals("/site/public/absolute-looking/path.txt")), eq: true)
-  assert(read_paths.with((paths) => optional_string_or(paths.get(0), "missing".as_slice()).equals("/site/public/absolute-looking/path.txt")), eq: true)
+  assert(exists_paths.with((capture) => capture.value) == "/site/public/absolute-looking/path.txt".as_slice(), eq: true)
+  assert(read_paths.with((capture) => capture.value) == "/site/public/absolute-looking/path.txt".as_slice(), eq: true)
 
 test "html rendering turns vx nodes into a text html response":
   let page: Html<void> =

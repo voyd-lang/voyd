@@ -11,6 +11,7 @@ import { semanticsPipeline } from "../semantics/pipeline.js";
 import type { ModuleGraph, ModuleNode, ModulePath } from "../modules/types.js";
 import {
   DTO_DATA_CONTRACT_IDS,
+  HOST_TRANSPORT_PROVIDER_CONTRACT_ID,
   STD_INTRINSIC_TYPE,
 } from "../compiler-contracts/index.js";
 
@@ -77,6 +78,128 @@ obj ${typeName} {}`;
 };
 
 describe("ProgramSymbolArena", () => {
+  it("preserves compiler trait identity while cyclic exports stabilize", async () => {
+    const srcRoot = resolve("/compiler-contract-cycle/src");
+    const stdRoot = resolve("/compiler-contract-cycle/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: `use std::transport::Provider
+
+pub fn main() -> i32
+  0`,
+      [`${stdRoot}${sep}provider.voyd`]: `use std::transport::transport_marker
+
+@compiler_contract(id: "${HOST_TRANSPORT_PROVIDER_CONTRACT_ID}")
+pub trait HostTransportProvider<Reader, Writer>
+  fn create_reader(ptr: i32, len: i32) -> Reader
+  fn reader_complete(reader: Reader) -> bool
+  fn create_writer(ptr: i32, len: i32) -> Writer
+  fn finish_writer(writer: Writer) -> i32
+
+pub fn provider_marker() -> i32
+  transport_marker()`,
+      [`${stdRoot}${sep}transport.voyd`]: `use std::provider::HostTransportProvider
+
+pub obj Reader {}
+pub obj Writer {}
+pub obj Provider {}
+
+pub fn transport_marker() -> i32
+  0
+
+@compiler_impl(id: "example.cyclic-transport", version: 1)
+impl HostTransportProvider<Reader, Writer> for Provider
+  fn create_reader(ptr: i32, len: i32) -> Reader
+    Reader {}
+  fn reader_complete(reader: Reader) -> bool
+    true
+  fn create_writer(ptr: i32, len: i32) -> Writer
+    Writer {}
+  fn finish_writer(writer: Writer) -> i32
+    0`,
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    expect(
+      [...graph.diagnostics, ...diagnostics].map(({ code, message }) => ({
+        code,
+        message,
+      })),
+    ).toEqual([]);
+
+    const transport = semantics.get("std::transport");
+    expect(transport).toBeDefined();
+    if (!transport) return;
+    const implementation = getSymbolTable(transport)
+      .snapshot()
+      .symbols.find(
+        (record) =>
+          record?.kind === "impl" &&
+          transport.symbols.getCompilerImplementation(record.id) !== undefined,
+      );
+    expect(implementation).toBeDefined();
+    if (!implementation) return;
+    expect(
+      transport.symbols.getCompilerImplementation(implementation.id),
+    ).toEqual({ id: "example.cyclic-transport", version: 1 });
+  });
+
+  it("does not mask an unavailable compiler trait import with TY9999", async () => {
+    const srcRoot = resolve("/unavailable-compiler-contract/src");
+    const stdRoot = resolve("/unavailable-compiler-contract/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: `use std::transport::Provider
+
+pub fn main() -> i32
+  0`,
+      [`${stdRoot}${sep}provider.voyd`]: `use std::missing::Missing
+
+@compiler_contract(id: "${HOST_TRANSPORT_PROVIDER_CONTRACT_ID}")
+pub trait HostTransportProvider<Reader, Writer>
+  fn create_reader(ptr: i32, len: i32) -> Reader
+  fn reader_complete(reader: Reader) -> bool
+  fn create_writer(ptr: i32, len: i32) -> Writer
+  fn finish_writer(writer: Writer) -> i32
+
+pub fn broken_provider(_value: Missing) -> i32
+  0`,
+      [`${stdRoot}${sep}transport.voyd`]: `use std::provider::HostTransportProvider
+
+pub obj Reader {}
+pub obj Writer {}
+pub obj Provider {}
+
+@compiler_impl(id: "example.unavailable-transport", version: 1)
+impl HostTransportProvider<Reader, Writer> for Provider
+  fn create_reader(ptr: i32, len: i32) -> Reader
+    Reader {}
+  fn reader_complete(reader: Reader) -> bool
+    true
+  fn create_writer(ptr: i32, len: i32) -> Writer
+    Writer {}
+  fn finish_writer(writer: Writer) -> i32
+    0`,
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combined = [...graph.diagnostics, ...diagnostics];
+    expect(combined.some((diagnostic) => diagnostic.code === "BD0001")).toBe(
+      true,
+    );
+    expect(combined.some((diagnostic) => diagnostic.code === "TY9999")).toBe(
+      false,
+    );
+  });
+
   it("assigns deterministic ids independent of module order", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

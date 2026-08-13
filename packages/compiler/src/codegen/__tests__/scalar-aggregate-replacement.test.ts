@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolve, sep } from "node:path";
 import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
 import { parse } from "../../parser/index.js";
@@ -12,6 +12,15 @@ import { createNodePathAdapter } from "../../modules/node-path-adapter.js";
 import { buildModuleGraph } from "../../modules/graph.js";
 import { analyzeModules } from "../../pipeline-shared.js";
 import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
+
+const perf = vi.hoisted(() => ({ increment: vi.fn() }));
+vi.mock("../../perf.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../perf.js")>()),
+  incrementCompilerPerfCounter: perf.increment,
+}));
+
+const recordedCounters = (): string[] =>
+  perf.increment.mock.calls.map(([name]) => String(name));
 
 const compileOptimized = (
   source: string,
@@ -187,6 +196,9 @@ pub fn increment(~state: State, amount: i32) -> void
     ).toBe(75);
     expect(emitted.module.emitText()).toMatch(
       /increment[^\s]*__scalar_agg_0_mutable/,
+    );
+    expect(recordedCounters()).toContain(
+      "codegen.mutable_scalar_aggregate_lane_abi.accepted",
     );
   });
 
@@ -1019,7 +1031,7 @@ pub fn main() -> i32
   });
 
   it("does not scalarize heap-object parameters mutated through local aliases", () => {
-    const { optimizedCodegen } = compileOptimized(`
+    const { optimized, optimizedCodegen } = compileOptimized(`
 obj Box {
   value: i32
 }
@@ -1038,6 +1050,26 @@ pub fn main() -> i32
     expect(optimizedCodegen.module.emitText()).not.toMatch(
       /mutate_alias[\s\S]*__scalar_agg__param/,
     );
+    expect(
+      optimized.program.exactCallOptimizations.getMetrics().fallbacks,
+    ).toBeGreaterThan(0);
+  });
+
+  it("materializes mutable value aliases into addressable storage", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+val Counter {
+  value: i32
+}
+
+pub fn main() -> i32
+  var value = Counter { value: 1 }
+  let ~alias = value
+  alias.value = 9
+  value.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(9);
+    expect(runMain(optimizedCodegen.module)()).toBe(9);
   });
 
   it("reads current materialized values for later scalar call arguments", () => {

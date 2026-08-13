@@ -1,11 +1,20 @@
 import { resolve } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createVoydHost } from "@voyd-lang/js-host";
 import { monomorphizeProgram } from "../../semantics/linking.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import { optimizeProgram } from "../../optimize/pipeline.js";
 import { codegenProgram } from "../index.js";
 import { compileEffectFixture } from "./support/effects-harness.js";
+
+const perf = vi.hoisted(() => ({ increment: vi.fn() }));
+vi.mock("../../perf.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../perf.js")>()),
+  incrementCompilerPerfCounter: perf.increment,
+}));
+
+const recordedCounters = (): string[] =>
+  perf.increment.mock.calls.map(([name]) => String(name));
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -158,6 +167,7 @@ describe("exact standard iterator for-loop specialization", () => {
     );
     expect(releaseCount).not.toContain("call_ref");
     expect(releaseCount).not.toMatch(/struct\.(?:new|get|set)\b/);
+    expect(recordedCounters()).toContain("codegen.exact_iterator_for.accepted");
   });
 
   it("keeps dynamically unknown and noncanonical iterators on general dispatch", async () => {
@@ -174,5 +184,10 @@ describe("exact standard iterator for-loop specialization", () => {
       "call_ref",
     );
     expect(watForExport(wat, "noncanonical_fallback")).toContain("call_ref");
+    expect(
+      recordedCounters().some((name) =>
+        name.startsWith("codegen.exact_iterator_for.fallback."),
+      ),
+    ).toBe(true);
   });
 });

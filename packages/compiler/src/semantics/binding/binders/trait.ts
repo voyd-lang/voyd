@@ -60,14 +60,6 @@ export const bindTraitDecl = (
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
   rememberSyntax(decl.body, ctx);
-  decl.regions.forEach((region) => {
-    rememberSyntax(region.form, ctx);
-    rememberSyntax(region.name, ctx);
-  });
-  decl.disjoint.forEach((entry) => {
-    rememberSyntax(entry.form, ctx);
-    entry.regions.forEach((region) => rememberSyntax(region, ctx));
-  });
   reportInvalidTypeDeclarationName({
     declarationKind: "trait",
     name: decl.name,
@@ -107,6 +99,9 @@ export const bindTraitDecl = (
     typeParameters = bindTypeParameters(decl.typeParameters, ctx);
 
     decl.methods.forEach((method) => {
+      const compilerMethod = compilerTraitContract?.methods.find(
+        (entry) => entry.name === method.signature.name.value,
+      );
       methods.push(
         bindTraitMethod({
           decl: method,
@@ -114,9 +109,9 @@ export const bindTraitDecl = (
           tracker,
           traitScope,
           traitSymbol: symbol,
-          compilerTraitMethodRole: compilerTraitContract?.methods.find(
-            (entry) => entry.name === method.signature.name.value,
-          )?.role,
+          compilerTraitMethodRole: compilerMethod?.role,
+          ordinaryMutationInvokesUnknownCallback:
+            compilerMethod?.ordinaryMutation?.invokesUnknownCallback,
         }),
       );
     });
@@ -128,14 +123,6 @@ export const bindTraitDecl = (
     visibility: decl.visibility,
     symbol,
     typeParameters,
-    regions: decl.regions.map((region) => ({
-      name: region.name.value,
-      ast: region.form,
-    })),
-    disjoint: decl.disjoint.map((entry) => ({
-      regions: entry.regions.map((region) => region.value),
-      ast: entry.form,
-    })),
     methods,
     scope: traitScope,
     moduleIndex: ctx.nextModuleIndex++,
@@ -169,12 +156,6 @@ const resolveCompilerTraitContract = ({
       `@compiler_contract '${id}' on ${decl.name.value} expects ${spec.expectedTypeParameters} type parameter(s), but the trait declares ${decl.typeParameters.length}`,
     );
   }
-  if (decl.regions.length > 0 || decl.disjoint.length > 0) {
-    throw new Error(
-      `@compiler_contract '${id}' on ${decl.name.value} does not permit region declarations`,
-    );
-  }
-
   const expectedMethods = new Map(
     spec.methods.map((method) => [method.name, method]),
   );
@@ -222,6 +203,7 @@ const bindTraitMethod = ({
   traitScope,
   traitSymbol,
   compilerTraitMethodRole,
+  ordinaryMutationInvokesUnknownCallback,
 }: {
   decl: ParsedTraitMethod;
   ctx: BindingContext;
@@ -229,6 +211,7 @@ const bindTraitMethod = ({
   traitScope: ScopeId;
   traitSymbol: SymbolId;
   compilerTraitMethodRole?: CompilerTraitMethodRole;
+  ordinaryMutationInvokesUnknownCallback?: true;
 }): TraitMethodDeclInput => {
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.body, ctx);
@@ -238,6 +221,9 @@ const bindTraitMethod = ({
     entity: "trait-method",
     trait: traitSymbol,
     ...(compilerTraitMethodRole ? { compilerTraitMethodRole } : {}),
+    ...(ordinaryMutationInvokesUnknownCallback
+      ? { ordinaryMutationInvokesUnknownCallback: true }
+      : {}),
   };
 
   if (intrinsicMetadata) {
@@ -290,7 +276,6 @@ const bindTraitMethod = ({
     effectTypeExpr: decl.signature.effectType,
     defaultBody: decl.body,
     intrinsic: decl.intrinsic,
-    borrowContract: decl.borrowContract,
     documentation: declarationDocForSyntax(decl.signature.name, ctx),
   };
 };

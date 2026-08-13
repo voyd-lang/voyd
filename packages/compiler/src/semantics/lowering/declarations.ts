@@ -20,7 +20,6 @@ import type {
 } from "../binding/binding.js";
 import type { Syntax } from "../../parser/index.js";
 import { isPackageVisible, type HirVisibility } from "../hir/index.js";
-import { displayContractPlace, lowerContractPlace } from "./contract-places.js";
 
 export const getModuleDeclarations = (
   binding: BindingResult,
@@ -190,7 +189,6 @@ export const lowerFunctionDecl = (
     ...(effectType ? { effectType } : {}),
     body: bodyId,
     ...(fn.intrinsic ? { intrinsic: fn.intrinsic } : {}),
-    ...(fn.borrowContract ? { borrowContract: fn.borrowContract } : {}),
   });
 
   if (isPackageVisible(fn.visibility)) {
@@ -379,9 +377,6 @@ export const lowerTraitDecl = (trait: BoundTrait, ctx: LowerContext): void => {
       returnType: lowerTypeExpr(method.returnTypeExpr, ctx, methodScope),
       ...(effectType ? { effectType } : {}),
       defaultBody,
-      ...(method.borrowContract
-        ? { borrowContract: method.borrowContract }
-        : {}),
     };
   });
 
@@ -398,14 +393,6 @@ export const lowerTraitDecl = (trait: BoundTrait, ctx: LowerContext): void => {
       scope: traitScope,
     }),
     requirements: undefined,
-    regions: (trait.regions ?? []).map((region) => ({
-      name: region.name,
-      span: toSourceSpan(region.ast),
-    })),
-    disjoint: (trait.disjoint ?? []).map((entry) => ({
-      regions: entry.regions,
-      span: toSourceSpan(entry.ast),
-    })),
     methods,
   });
 
@@ -458,12 +445,6 @@ export const lowerImplDecl = (impl: BoundImpl, ctx: LowerContext): void => {
     target,
     trait,
     with: undefined,
-    regionMappings: (impl.regionMappings ?? []).map((mapping) => ({
-      name: mapping.name,
-      place: lowerContractPlace(mapping.place),
-      display: displayContractPlace(mapping.place),
-      span: toSourceSpan(mapping.ast),
-    })),
     members,
   });
 

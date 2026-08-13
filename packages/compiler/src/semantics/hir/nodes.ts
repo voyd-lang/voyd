@@ -14,7 +14,6 @@ import type {
   TypeAliasDeclId,
 } from "../ids.js";
 import type { IntrinsicAttribute } from "../../parser/attributes.js";
-import type { BorrowContractAttribute } from "../../parser/attributes.js";
 
 export type HirVisibilityLevel = "object" | "module" | "package" | "public";
 
@@ -234,7 +233,6 @@ export interface HirFunction extends HirItemBase {
   body: HirExprId;
   effectRow?: EffectRowId;
   intrinsic?: IntrinsicAttribute;
-  borrowContract?: BorrowContractAttribute;
 }
 
 export interface HirModuleLet extends HirItemBase {
@@ -334,36 +332,6 @@ export interface HirTraitMethod {
   returnType?: HirTypeExpr;
   effectType?: HirTypeExpr;
   defaultBody?: HirExprId;
-  borrowContract?: BorrowContractAttribute;
-}
-
-export interface HirRegionDeclaration {
-  name: string;
-  span: SourceSpan;
-}
-
-export interface HirDisjointRegionDeclaration {
-  regions: readonly string[];
-  span: SourceSpan;
-}
-
-export type HirContractPlaceProjection =
-  | { kind: "field"; name: string }
-  | { kind: "tuple"; index: number }
-  | { kind: "index"; constant: number }
-  | { kind: "dereference" };
-
-export interface HirContractPlace {
-  root: "self";
-  projections: readonly HirContractPlaceProjection[];
-  span: SourceSpan;
-}
-
-export interface HirRegionMapping {
-  name: string;
-  place?: HirContractPlace;
-  display: string;
-  span: SourceSpan;
 }
 
 export interface HirMethodParameter {
@@ -380,8 +348,6 @@ export interface HirTraitDecl extends HirItemBase {
   symbol: SymbolId;
   typeParameters?: readonly HirTypeParameter[];
   requirements?: readonly HirTypeExpr[];
-  regions?: readonly HirRegionDeclaration[];
-  disjoint?: readonly HirDisjointRegionDeclaration[];
   methods: readonly HirTraitMethod[];
 }
 
@@ -392,7 +358,6 @@ export interface HirImplDecl extends HirItemBase {
   target: HirTypeExpr;
   trait?: HirTypeExpr;
   with?: readonly HirImplWithEntry[];
-  regionMappings?: readonly HirRegionMapping[];
   members: readonly HirItemId[];
 }
 

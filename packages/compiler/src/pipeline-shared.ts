@@ -26,13 +26,10 @@ import {
   type SemanticsTypingState,
 } from "./modules/semantic-analysis.js";
 import type { ReusableDependencySemanticsSnapshot } from "./modules/semantic-analysis.js";
-import type { BorrowingResult } from "./semantics/borrowing/index.js";
 import {
   commitDependencySnapshot,
   createCompilerDependencySnapshotCache,
-  exportCompilerDependencyBorrowArtifact,
   prepareDependencySnapshotReuse,
-  type CompilerDependencyBorrowArtifact,
   type CompilerDependencySnapshotCache,
 } from "./modules/dependency-snapshot-cache.js";
 import { formatTestExportName } from "./tests/exports.js";
@@ -51,8 +48,6 @@ import { isOptimizationEnabled } from "./optimization-policy.js";
 
 export {
   createCompilerDependencySnapshotCache,
-  exportCompilerDependencyBorrowArtifact,
-  type CompilerDependencyBorrowArtifact,
   type CompilerDependencySnapshotCache,
 };
 export type { OptimizationLevel } from "./optimization-policy.js";
@@ -74,9 +69,6 @@ export type AnalyzeModulesOptions = {
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
   changedModuleIds?: ReadonlySet<string>;
   typingState?: SemanticsTypingState;
-  reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
-  /** Retain borrowing incremental data for a caller-owned reuse cache. */
-  retainBorrowingIncrementalData?: boolean;
   isCancelled?: () => boolean;
 };
 
@@ -154,8 +146,6 @@ export const analyzeModules = ({
   previousSemantics,
   changedModuleIds,
   typingState,
-  reusableBorrowing,
-  retainBorrowingIncrementalData,
   isCancelled,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
   const {
@@ -172,8 +162,6 @@ export const analyzeModules = ({
     previousSemantics,
     changedModuleIds,
     typingState,
-    reusableBorrowing,
-    retainBorrowingIncrementalData,
     isCancelled,
   });
 
@@ -851,9 +839,6 @@ export const compileProgramWithLoader = async (
     captureDependencySnapshot: Boolean(dependencySnapshotReuse.key),
     previousSemantics: dependencySnapshotReuse.previousSemantics,
     typingState: dependencySnapshotReuse.typingState,
-    reusableBorrowing: dependencySnapshotReuse.reusableBorrowing,
-    retainBorrowingIncrementalData:
-      options.dependencySnapshotCache?.artifactEnabled === true,
   });
   markCompilerPerfPhaseDuration("analyzeModules", analyzeStartedAt);
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];

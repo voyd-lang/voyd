@@ -118,7 +118,7 @@ const measureMode = async (optimize: boolean) => {
   const summaryDemandWorklistIterations: number[] = [];
   const summaryEvaluations: number[] = [];
   const summaryDemandReasons = new Map<string, number[]>();
-  const borrowingContractComputationMs: number[] = [];
+  const borrowingFiniteLocalMs: number[] = [];
   const borrowingFactExtractionMs: number[] = [];
   const borrowingInferenceMs: number[] = [];
   const borrowingValidationMs: number[] = [];
@@ -205,8 +205,10 @@ const measureMode = async (optimize: boolean) => {
         samples.push(value);
         summaryDemandReasons.set(reason, samples);
       });
-    borrowingContractComputationMs.push(
-      summary.phasesMs["analyzeBorrowing.computeContracts"] ?? 0,
+    borrowingFiniteLocalMs.push(
+      summary.phasesMs["analyzeBorrowing.finiteLocal"] ??
+        summary.phasesMs["analyzeBorrowing.computeContracts"] ??
+        0,
     );
     borrowingFactExtractionMs.push(
       summary.phasesMs["analyzeBorrowing.extractFacts"] ?? 0,
@@ -323,9 +325,9 @@ const measureMode = async (optimize: boolean) => {
           { samples, median: median(samples) },
         ]),
       ),
-      contractComputationMs: {
-        samples: borrowingContractComputationMs,
-        median: median(borrowingContractComputationMs),
+      finiteLocalMs: {
+        samples: borrowingFiniteLocalMs,
+        median: median(borrowingFiniteLocalMs),
       },
       factExtractionMs: {
         samples: borrowingFactExtractionMs,

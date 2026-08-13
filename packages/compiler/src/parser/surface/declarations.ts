@@ -8,7 +8,6 @@ import {
   isIdentifierAtom,
 } from "../ast/index.js";
 import type {
-  BorrowContractAttribute,
   CompilerContractAttribute,
   CompilerImplementationAttribute,
   EffectAttribute,
@@ -50,7 +49,6 @@ export interface ParsedFunctionDecl {
   body: Expr;
   intrinsic?: IntrinsicAttribute;
   compilerContract?: CompilerContractAttribute;
-  borrowContract?: BorrowContractAttribute;
 }
 
 export interface ParsedModuleLetDecl {
@@ -93,17 +91,6 @@ export interface ParsedTraitMethod {
   signature: ParsedFunctionSignature;
   body?: Expr;
   intrinsic?: IntrinsicAttribute;
-  borrowContract?: BorrowContractAttribute;
-}
-
-export interface ParsedRegionDeclaration {
-  form: Form;
-  name: IdentifierAtom;
-}
-
-export interface ParsedDisjointDeclaration {
-  form: Form;
-  regions: readonly IdentifierAtom[];
 }
 
 export interface ParsedTraitDecl {
@@ -112,16 +99,8 @@ export interface ParsedTraitDecl {
   name: IdentifierAtom;
   body: Form;
   typeParameters: readonly ParsedTypeParameter[];
-  regions: readonly ParsedRegionDeclaration[];
-  disjoint: readonly ParsedDisjointDeclaration[];
   methods: readonly ParsedTraitMethod[];
   compilerContract?: CompilerContractAttribute;
-}
-
-export interface ParsedRegionMapping {
-  form: Form;
-  name: IdentifierAtom;
-  place: Expr;
 }
 
 export interface ParsedImplDecl {
@@ -131,7 +110,6 @@ export interface ParsedImplDecl {
   trait?: Expr;
   typeParameters: readonly ParsedTypeParameter[];
   body: Form;
-  regionMappings: readonly ParsedRegionMapping[];
   methods: readonly ParsedFunctionDecl[];
   compilerImplementation?: CompilerImplementationAttribute;
 }
@@ -259,9 +237,6 @@ export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
     compilerContract: form.attributes?.compilerContract as
       | CompilerContractAttribute
       | undefined,
-    borrowContract: form.attributes?.borrowContract as
-      | BorrowContractAttribute
-      | undefined,
   };
 };
 
@@ -309,9 +284,6 @@ const parseTraitMethod = (form: Form): ParsedTraitMethod => {
       form.attributes?.intrinsic as IntrinsicAttribute | undefined,
       signature.name.value,
     ),
-    borrowContract: form.attributes?.borrowContract as
-      | BorrowContractAttribute
-      | undefined,
   };
 };
 
@@ -516,25 +488,13 @@ export const parseTraitDecl = (form: Form): ParsedTraitDecl | null => {
     throw new ParserSyntaxError("trait body must be a block", body.location);
   }
 
-  const regions: ParsedRegionDeclaration[] = [];
-  const disjoint: ParsedDisjointDeclaration[] = [];
   const methods: ParsedTraitMethod[] = [];
   body.rest.forEach((entry) => {
     if (!isForm(entry)) {
       throw new ParserSyntaxError(
-        "trait body supports only region, disjoint, and function declarations",
+        "trait body supports only function declarations",
         entry.location,
       );
-    }
-    const region = parseRegionDeclaration(entry);
-    if (region) {
-      regions.push(region);
-      return;
-    }
-    const disjointDeclaration = parseDisjointDeclaration(entry);
-    if (disjointDeclaration) {
-      disjoint.push(disjointDeclaration);
-      return;
     }
     methods.push(parseTraitMethod(entry));
   });
@@ -545,8 +505,6 @@ export const parseTraitDecl = (form: Form): ParsedTraitDecl | null => {
     name,
     body,
     typeParameters,
-    regions,
-    disjoint,
     methods,
     compilerContract: form.attributes?.compilerContract as
       | CompilerContractAttribute
@@ -598,24 +556,18 @@ export const parseImplDecl = (form: Form): ParsedImplDecl | null => {
   }
 
   const { target, trait, typeParameters } = parseImplHead(headEntries);
-  const regionMappings: ParsedRegionMapping[] = [];
   const methods: ParsedFunctionDecl[] = [];
   body.rest.forEach((entry) => {
     if (!isForm(entry)) {
       throw new ParserSyntaxError(
-        "impl body supports only region mappings and function declarations",
+        "impl body supports only function declarations",
         entry.location,
       );
-    }
-    const mapping = parseRegionMapping(entry);
-    if (mapping) {
-      regionMappings.push(mapping);
-      return;
     }
     const method = parseFunctionDecl(entry);
     if (!method) {
       throw new ParserSyntaxError(
-        "impl body supports only region mappings and function declarations",
+        "impl body supports only function declarations",
         entry.location,
       );
     }
@@ -629,75 +581,11 @@ export const parseImplDecl = (form: Form): ParsedImplDecl | null => {
     trait,
     typeParameters,
     body,
-    regionMappings,
     methods,
     compilerImplementation: form.attributes?.compilerImplementation as
       | CompilerImplementationAttribute
       | undefined,
   };
-};
-
-const parseRegionDeclaration = (form: Form): ParsedRegionDeclaration | null => {
-  if (!isIdentifierWithValue(form.at(0), "region")) {
-    return null;
-  }
-  const name = form.at(1);
-  if (!isIdentifierAtom(name) || form.length !== 2) {
-    throw new ParserSyntaxError(
-      "region declaration expects exactly one identifier",
-      name?.location ?? form.location,
-    );
-  }
-  return { form, name };
-};
-
-const parseDisjointDeclaration = (
-  form: Form,
-): ParsedDisjointDeclaration | null => {
-  if (!isIdentifierWithValue(form.at(0), "disjoint")) {
-    return null;
-  }
-  const entries = form.rest;
-  const valid =
-    entries.length >= 3 &&
-    entries.length % 2 === 1 &&
-    entries.every((entry, index) =>
-      index % 2 === 0
-        ? isIdentifierAtom(entry) && entry.value !== ","
-        : isIdentifierAtom(entry) && entry.value === ",",
-    );
-  if (!valid) {
-    throw new ParserSyntaxError(
-      "disjoint declaration expects at least two comma-separated region identifiers",
-      form.location,
-    );
-  }
-  return {
-    form,
-    regions: entries.filter((_, index) => index % 2 === 0) as IdentifierAtom[],
-  };
-};
-
-const parseRegionMapping = (form: Form): ParsedRegionMapping | null => {
-  if (!isIdentifierWithValue(form.at(0), "region")) {
-    return null;
-  }
-  const assignment = form.at(1);
-  if (!isForm(assignment) || !assignment.calls("=")) {
-    throw new ParserSyntaxError(
-      "impl region mapping expects 'region name = place'",
-      assignment?.location ?? form.location,
-    );
-  }
-  const name = assignment.at(1);
-  const place = assignment.at(2);
-  if (!isIdentifierAtom(name) || !place) {
-    throw new ParserSyntaxError(
-      "impl region mapping expects an identifier and place",
-      assignment.location,
-    );
-  }
-  return { form, name, place };
 };
 
 const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {

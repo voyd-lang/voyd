@@ -1,8 +1,8 @@
 trait SubscriptRead<Index, Output>
-  fn subscript_get(self, index: Index) -> Output
+  fn subscript_get(self, index: Index): () -> Output
 
 trait SubscriptWrite<Index, Value>
-  fn subscript_set(~self, index: Index, value: Value) -> void
+  fn subscript_set(~self, index: Index, value: Value): () -> void
 
 obj Some<T> {
   value: T

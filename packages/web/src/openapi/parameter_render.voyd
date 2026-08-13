@@ -7,7 +7,7 @@ use std::meta::{ RecordShape, Shape }
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
 use super::identity::schema_identity_prefix
-use super::schema::{ schema_for, schema_node }
+use super::schema::{ schema_components, schema_node }
 
 pub fn render_parameters(
   shape: Option<Shape>,
@@ -43,25 +43,40 @@ pub fn render_parameters(
     None:
       void
     Some<Shape> { value }:
-      let _ = schema_for(value, prefix: prefix, components: components, include_doc_comments: include_doc_comments)
-      let stable_prefix = schema_identity_prefix(value, fallback: prefix)
-      value.root.match(root)
-        RecordShape:
-          var index = 0
-          while index < root.fields.len():
-            let field = root.fields.at(index)
-            let ~parameter = Dict<String, JsonValue>::init()
-            parameter.set("name", JsonString { value: field.name })
-            parameter.set("in", JsonString { value: location })
-            let parameter_required = required or not field.optional
-            parameter.set("required", JsonBool { value: parameter_required })
-            if include_doc_comments:
-              set_optional_string(parameter, "description", field.documentation)
-            parameter.set("schema", schema_node(field.shape, prefix: stable_prefix, components: components))
-            out.push(JsonObject { value: parameter })
-            index = index + 1
-        else:
-          void
+      return render_shape_parameters(value, location: location, required: required, prefix: prefix, components: components, include_doc_comments: include_doc_comments)
+  out
+
+fn render_shape_parameters(
+  shape: Shape,
+  {
+    location: String,
+    required: bool,
+    prefix: String,
+    ~components: Dict<String, JsonValue>,
+    include_doc_comments: bool
+  }
+) -> Array<JsonValue>
+  let ~out = Array<JsonValue>::init()
+  let rendered_components = schema_components(shape, prefix: prefix, include_doc_comments: include_doc_comments)
+  let stable_prefix = schema_identity_prefix(shape, fallback: prefix)
+  shape.root.match(root)
+    RecordShape:
+      var index = 0
+      while index < root.fields.len():
+        let field = root.fields.at(index)
+        let ~parameter = Dict<String, JsonValue>::init()
+        parameter.set("name", JsonString { value: field.name })
+        parameter.set("in", JsonString { value: location })
+        let parameter_required = required or not field.optional
+        parameter.set("required", JsonBool { value: parameter_required })
+        if include_doc_comments:
+          set_optional_string(parameter, "description", field.documentation)
+        parameter.set("schema", schema_node(field.shape, prefix: stable_prefix))
+        out.push(JsonObject { value: parameter })
+        index = index + 1
+    else:
+      void
+  components.extend(rendered_components)
   out
 
 fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> void

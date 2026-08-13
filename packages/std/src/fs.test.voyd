@@ -4,19 +4,8 @@ use std::error::{ IoAlreadyExists, IoError }
 use std::optional::types::all
 use std::path::Path
 use std::result::types::all
-use std::string::type::{ String, StringSlice }
+use std::string::type::String
 use std::test::assertions::all
-
-obj StringWriteCapture {
-  paths: Array<String>,
-  values: Array<String>
-}
-
-obj AtomicWriteCapture {
-  paths: Array<String>,
-  kinds: Array<String>,
-  values: Array<String>
-}
 
 test "fs reads typed string and byte payloads":
   match(read_string_with_payload(fs_ok("hello")))
@@ -37,23 +26,15 @@ test "fs reads typed string and byte payloads":
       assert(false, eq: true)
 
 test "fs writes typed paths, strings, and bytes":
-  let ~strings = StringWriteCapture {
-    paths: Array<String>::init(),
-    values: Array<String>::init()
-  }
-  match(write_string_with_capture(strings))
+  match(write_string_with_assertions())
     Ok<Unit>:
-      assert(optional_string_or(strings.paths.get(0), "missing".as_slice()).equals("/tmp/app.log"), eq: true)
-      assert(optional_string_or(strings.values.get(0), "missing".as_slice()).equals("line"), eq: true)
+      void
     Err<IoError>:
       assert(false, eq: true)
 
-  let ~captured = Array<i32>::init()
-  match(write_bytes_with_capture(captured))
+  match(write_bytes_with_assertions())
     Ok<Unit>:
-      assert(captured.len(), eq: 2)
-      assert(captured.at(0), eq: 7)
-      assert(captured.at(1), eq: 8)
+      void
     Err<IoError>:
       assert(false, eq: true)
 
@@ -92,18 +73,11 @@ test "fs preserves portable error categories":
           assert(false, eq: true)
 
 test "fs atomic writes preserve semantic content":
-  let ~capture = AtomicWriteCapture {
-    paths: Array<String>::init(),
-    kinds: Array<String>::init(),
-    values: Array<String>::init()
-  }
-  match(write_atomic_with_capture(capture))
+  match(write_atomic_with_assertions())
     Err<IoError>:
       assert(false, eq: true)
     Ok<Unit>:
-      assert(optional_string_or(capture.paths.get(0), "missing".as_slice()).equals("/tmp/state.json"), eq: true)
-      assert(optional_string_or(capture.kinds.get(0), "missing".as_slice()).equals("string"), eq: true)
-      assert(optional_string_or(capture.values.get(0), "missing".as_slice()).equals("complete"), eq: true)
+      void
 
 fn read_string_with_payload(payload: FsResult<String>): () -> Result<String, IoError>
   try
@@ -157,7 +131,7 @@ fn read_bytes_with_payload(payload: FsResult<Bytes>): () -> Result<Bytes, IoErro
   Fs::create_exclusive(tail, _request):
     tail(unit_error())
 
-fn write_string_with_capture(~capture: StringWriteCapture): () -> Result<Unit, IoError>
+fn write_string_with_assertions(): Test -> Result<Unit, IoError>
   try
     write_string(Path::new("/tmp/app.log"), "line")
   Fs::read_string(tail, _path):
@@ -167,8 +141,8 @@ fn write_string_with_capture(~capture: StringWriteCapture): () -> Result<Unit, I
   Fs::write_bytes(tail, _request):
     tail(unit_error())
   Fs::write_string(tail, request):
-    capture.paths.push(request.path)
-    capture.values.push(request.value)
+    assert(request.path.equals("/tmp/app.log"), eq: true)
+    assert(request.value.equals("line"), eq: true)
     tail(fs_ok(Unit {}))
   Fs::exists(tail, _path):
     tail(false)
@@ -185,7 +159,7 @@ fn write_string_with_capture(~capture: StringWriteCapture): () -> Result<Unit, I
   Fs::create_exclusive(tail, _request):
     tail(unit_error())
 
-fn write_bytes_with_capture(~captured: Array<i32>): () -> Result<Unit, IoError>
+fn write_bytes_with_assertions(): Test -> Result<Unit, IoError>
   let ~buffer = ByteBuffer::init()
   buffer.push(7)
   buffer.push(8)
@@ -196,10 +170,10 @@ fn write_bytes_with_capture(~captured: Array<i32>): () -> Result<Unit, IoError>
   Fs::read_bytes(tail, _path):
     tail(bytes_error())
   Fs::write_bytes(tail, request):
-    var index = 0
-    while index < request.bytes.len():
-      captured.push(request.bytes.at(index))
-      index = index + 1
+    assert(request.path.equals("/tmp/data.bin"), eq: true)
+    assert(request.bytes.len(), eq: 2)
+    assert(request.bytes.at(0), eq: 7)
+    assert(request.bytes.at(1), eq: 8)
     tail(fs_ok(Unit {}))
   Fs::write_string(tail, _request):
     tail(unit_error())
@@ -270,7 +244,7 @@ fn create_exclusive_with_payload(payload: FsResult<Unit>): () -> Result<Unit, Io
   Fs::create_exclusive(tail, _request):
     tail(payload)
 
-fn write_atomic_with_capture(~capture: AtomicWriteCapture): () -> Result<Unit, IoError>
+fn write_atomic_with_assertions(): Test -> Result<Unit, IoError>
   try
     write_atomic(Path::new("/tmp/state.json"), "complete")
   Fs::read_string(tail, _path):
@@ -292,11 +266,13 @@ fn write_atomic_with_capture(~capture: AtomicWriteCapture): () -> Result<Unit, I
   Fs::rename(tail, _request):
     tail(unit_error())
   Fs::write_atomic(tail, request):
-    capture.paths.push(request.path)
-    capture.kinds.push(request.kind)
+    assert(request.path.equals("/tmp/state.json"), eq: true)
+    assert(request.kind.equals("string"), eq: true)
     match(request.value)
-      Some<String> { value }: capture.values.push(value)
-      None: void
+      Some<String> { value }:
+        assert(value.equals("complete"), eq: true)
+      None:
+        assert(false, eq: true)
     tail(fs_ok(Unit {}))
   Fs::create_exclusive(tail, _request):
     tail(unit_error())
@@ -340,8 +316,3 @@ fn paths_error() -> FsResult<Array<String>>
     code: -1,
     message: "unused"
   )
-
-fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
-  match(value)
-    Some<String> { value: present }: present
-    None: fallback.to_string()

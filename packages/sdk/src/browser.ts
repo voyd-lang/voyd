@@ -4,7 +4,6 @@ import { isCompilerPerfEnabled } from "@voyd-lang/compiler/perf.js";
 import {
   compileWithLoader,
   createCompilerReuseCache,
-  exportCompilerReuseArtifact,
   type CompilerReuseCache,
 } from "./shared/compile.js";
 import { runWithHandlers } from "./shared/host.js";
@@ -38,7 +37,6 @@ export const createSdk = (options: CreateSdkOptions = {}): VoydSdk => {
     compile: (options) => compileSdk(options, compilerCache),
     run: runWithHandlers,
     serveWebApp,
-    exportCompilerArtifact: () => exportCompilerReuseArtifact(compilerCache),
   };
 };
 

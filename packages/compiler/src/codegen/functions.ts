@@ -100,7 +100,6 @@ import {
   type CallShapeSpecialization,
 } from "./call-shape-specialization.js";
 import {
-  getOrCreateDefaultIdentityGuardEntry,
   markDefaultIdentityGuardEntryCompiled,
   takePendingDefaultIdentityGuardEntries,
   type DefaultIdentityGuardEntry,
@@ -219,6 +218,78 @@ const shouldConsiderBoundaryExport = ({
   if (options.mode === "off") return false;
   if (options.include && !options.include.has(exportName)) return false;
   if (options.mode === "only") return options.include?.has(exportName) ?? false;
+  return true;
+};
+
+const typeContainsSourceBorrow = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+  active = new Set<TypeId>(),
+): boolean => {
+  if (active.has(typeId)) return false;
+  active.add(typeId);
+  if (ctx.program.types.getBorrowedInner(typeId) !== undefined) return true;
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  switch (desc.kind) {
+    case "recursive":
+      return typeContainsSourceBorrow(desc.body, ctx, active);
+    case "trait":
+    case "nominal-object":
+    case "value-object":
+      return desc.typeArgs.some((type) =>
+        typeContainsSourceBorrow(type, ctx, active),
+      );
+    case "structural-object":
+      return desc.fields.some((field) =>
+        typeContainsSourceBorrow(field.type, ctx, active),
+      );
+    case "function":
+      return (
+        desc.parameters.some((parameter) =>
+          typeContainsSourceBorrow(parameter.type, ctx, active),
+        ) || typeContainsSourceBorrow(desc.returnType, ctx, active)
+      );
+    case "union":
+      return desc.members.some((type) =>
+        typeContainsSourceBorrow(type, ctx, active),
+      );
+    case "intersection":
+      return [desc.nominal, desc.structural, ...(desc.traits ?? [])]
+        .filter((type): type is TypeId => typeof type === "number")
+        .some((type) => typeContainsSourceBorrow(type, ctx, active));
+    case "fixed-array":
+      return typeContainsSourceBorrow(desc.element, ctx, active);
+    case "primitive":
+    case "type-param-ref":
+      return false;
+  }
+};
+
+const reportSourceBorrowExport = ({
+  ctx,
+  entry,
+  meta,
+  exportName,
+}: {
+  ctx: CodegenContext;
+  entry: HirExportEntry;
+  meta: FunctionMetadata;
+  exportName: string;
+}): boolean => {
+  const containsBorrow = [...meta.paramTypeIds, meta.resultTypeId].some(
+    (typeId) => typeContainsSourceBorrow(typeId, ctx),
+  );
+  if (!containsBorrow) return false;
+  ctx.diagnostics.report(
+    diagnosticFromCode({
+      code: "CG0001",
+      params: {
+        kind: "codegen-error",
+        message: `Wasm export ${exportName} cannot use Borrow<T> in its signature`,
+      },
+      span: entry.span,
+    }),
+  );
   return true;
 };
 
@@ -1278,20 +1349,6 @@ export const compileFunctions = ({
     if (!hasPendingMeta) {
       continue;
     }
-    const publishesDefaultIdentityGuardEntry =
-      ctx.module.callableRuntimeProtocols.get(item.symbol)
-        ?.defaultIdentityGuardProtocol === "presence-conflict-bit-v1" &&
-      (getModuleExportEntries(ctx).some(
-        (entry) => entry.symbol === item.symbol,
-      ) ||
-        item.memberVisibility?.api === true ||
-        (item.memberVisibility !== undefined &&
-          isPackageVisible(item.memberVisibility)));
-    if (publishesDefaultIdentityGuardEntry) {
-      metas.forEach((meta) => {
-        getOrCreateDefaultIdentityGuardEntry({ ctx, meta });
-      });
-    }
     walkFunctionReachabilityExpressions({
       item,
       ctx,
@@ -1617,6 +1674,16 @@ export const emitModuleExports = (
             testId: baseExportName,
           })
         : baseExportName;
+      if (
+        reportSourceBorrowExport({
+          ctx: exportCtx,
+          entry,
+          meta,
+          exportName,
+        })
+      ) {
+        return;
+      }
       if (!exportCtx.programHelpers.registerExportName(exportName)) {
         return;
       }

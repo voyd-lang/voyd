@@ -131,9 +131,7 @@ impl Operation
     }
 
   api fn tagged(self, tag: StringSlice) -> Operation
-    let ~tags = self.tags.copied(1)
-    tags.push(tag.to_string())
-    copy_operation(self, tags: tags)
+    copy_operation(self, tags: self.tags.pushed(tag.to_string()))
 
   api fn tagged(self, tag: String) -> Operation
     self.tagged(tag.as_slice())

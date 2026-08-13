@@ -1,0 +1,9 @@
+obj Box {
+  value: i32
+}
+
+fn read_plain(value: Box) -> i32
+  value.value
+
+fn pass_borrow_to_plain(value: Borrow<Box>) -> i32
+  read_plain(value)

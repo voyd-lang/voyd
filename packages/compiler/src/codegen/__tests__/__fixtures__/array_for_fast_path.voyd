@@ -2,10 +2,10 @@ use std::array::Array
 use std::optional::all
 
 trait CustomSequence<T>
-  fn iter(self) -> CustomIterator<T>
+  fn iter(self): () -> CustomIterator<T>
 
 trait CustomIterator<T>
-  fn next(~self) -> Option<T>
+  fn next(~self): () -> Option<T>
 
 fn add_to(~total: i32, value: i32) -> void
   total = total + value
@@ -51,11 +51,11 @@ obj CounterIterator {
 }
 
 impl CustomSequence<i32> for CounterSequence
-  fn iter(self) -> CustomIterator<i32>
+  fn iter(self): () -> CustomIterator<i32>
     CounterIterator { current: 0, end: self.end }
 
 impl CustomIterator<i32> for CounterIterator
-  fn next(~self) -> Option<i32>
+  fn next(~self): () -> Option<i32>
     if self.current >= self.end:
       return None {}
     let value = self.current

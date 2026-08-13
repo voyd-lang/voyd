@@ -1,9 +1,8 @@
-use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
 use std::error::{ HostError, IoError }
 use std::optional::types::all
 use std::result::types::all
-use std::string::type::{ String, StringSlice }
+use std::string::type::String
 use std::test::assertions::all
 
 test "input request init accepts string":
@@ -15,9 +14,7 @@ test "input request init accepts string":
       assert(false, eq: true)
 
 test "input read_line forwards prompt and decodes line":
-  let ~prompts = Array<String>::init()
-  let result = read_line_with_capture(prompts)
-  assert(optional_string_or(prompts.get(0), "missing".as_slice()).equals("Name: "), eq: true)
+  let result = read_line_with_assertions()
   match(result)
     Ok<Option<String>> { value }:
       match(value)
@@ -47,9 +44,7 @@ test "input read_line decodes end and errors":
       assert(false, eq: true)
 
 test "input read_bytes forwards limit and decodes bytes":
-  let ~max_values = Array<i32>::init()
-  let result = read_bytes_with_capture(max_values)
-  assert(optional_i32_or(max_values.get(0), -1), eq: 3)
+  let result = read_bytes_with_assertions()
   match(result)
     Ok<Option<Bytes>> { value }:
       match(value)
@@ -95,26 +90,26 @@ fn read_line_with_result(result: InputLineResult): () -> Result<Option<String>, 
   Input::is_tty_op(tail):
     tail(false)
 
-fn read_line_with_capture(~prompts: Array<String>): () -> Result<Option<String>, HostError>
+fn read_line_with_assertions(): Test -> Result<Option<String>, HostError>
   try
     read_line("Name: ".as_slice().to_string())
   Input::read_line(tail, request):
     match(request.prompt)
       Some<String> { value }:
-        prompts.push(value)
+        assert(value.equals("Name: "), eq: true)
       None:
-        void
+        assert(false, eq: true)
     tail(line_result(true, "voyd", 0))
   Input::read_bytes_op(tail, _request):
     tail(bytes_error())
   Input::is_tty_op(tail):
     tail(false)
 
-fn read_bytes_with_capture(~max_values: Array<i32>): () -> Result<Option<Bytes>, IoError>
+fn read_bytes_with_assertions(): Test -> Result<Option<Bytes>, IoError>
   try
     read_bytes(3)
   Input::read_bytes_op(tail, request):
-    max_values.push(request.max_bytes)
+    assert(request.max_bytes, eq: 3)
     let ~bytes = ByteBuffer::with_capacity(3)
     bytes.push(7)
     bytes.push(8)
@@ -140,13 +135,6 @@ fn is_tty_with_payload(value: bool): () -> bool
     tail(line_result(false, "", 1))
   Input::read_bytes_op(tail, _request):
     tail(bytes_error())
-
-fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
-  match(value)
-    Some<String> { value: present }:
-      present
-    None:
-      fallback.to_string()
 
 fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
   match(value)

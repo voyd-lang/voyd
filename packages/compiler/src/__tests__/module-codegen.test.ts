@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolve, sep } from "node:path";
 import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
+import { createCompilerDependencySnapshotCache } from "../modules/dependency-snapshot-cache.js";
 import { createMemoryModuleHost } from "../modules/memory-host.js";
 import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleHost } from "../modules/types.js";
@@ -242,6 +243,195 @@ pub fn sub(a: i32, b: i32) -> i32
     expect((exports.delta as () => number)()).toBe(5);
   });
 
+  it("runs package identity guards after dependency snapshot reuse", async () => {
+    const root = resolve("/imported-default-guard/src");
+    const packages = resolve("/imported-default-guard/packages");
+    const mainPath = `${root}${sep}main.voyd`;
+    const files = {
+      [mainPath]: `#!no_prelude
+use pkg::guarded::all
+
+fn guarded(~left: Box, ~right: Box) -> i32
+  mutate_both(~left, ~right)
+
+fn relay(value: Box) -> Box
+  value
+
+obj Holder { value: Box }
+
+pub fn distinct() -> i32
+  let ~left = Box { value: 1 }
+  let ~right = Box { value: 10 }
+  guarded(~left, ~right)
+
+pub fn direct_distinct() -> i32
+  let ~left = Box { value: 1 }
+  let ~right = Box { value: 10 }
+  mutate_both(~left, ~right)
+
+pub fn overlapping() -> i32
+  let ~left = Box { value: 1 }
+  let ~right = Box { value: 10 }
+  right = left
+  guarded(~left, ~right)
+
+pub fn direct_overlapping() -> i32
+  let ~left = Box { value: 1 }
+  let ~right = Box { value: 10 }
+  right = left
+  mutate_both(~left, ~right)
+
+pub fn direct_initial_alias() -> i32
+  let ~left = Box { value: 1 }
+  var right = left
+  mutate_both(~left, ~right)
+
+pub fn relay_alias() -> i32
+  let ~left = Box { value: 1 }
+  let alias = relay(left)
+  mutate_both(~left, ~alias)
+
+pub fn holder_alias() -> i32
+  let ~left = Box { value: 1 }
+  let holder = Holder { value: left }
+  mutate_both(~left, ~holder.value)
+
+pub fn holder_write_alias() -> i32
+  let ~left = Box { value: 1 }
+  let ~holder = Holder { value: Box { value: 10 } }
+  holder.value = left
+  mutate_both(~left, ~holder.value)
+
+pub fn tuple_alias() -> i32
+  let ~left = Box { value: 1 }
+  let pair = (left, Box { value: 10 })
+  mutate_both(~left, ~pair.0)
+
+pub fn branch_alias() -> i32
+  let ~left = Box { value: 1 }
+  let ~right = Box { value: 10 }
+  let alias = if true then: left else: right
+  mutate_both(~left, ~alias)
+`,
+      [`${packages}${sep}guarded${sep}src${sep}pkg.voyd`]: `#!no_prelude
+pub use src::mutate::all
+`,
+      [`${packages}${sep}guarded${sep}src${sep}mutate.voyd`]: `#!no_prelude
+pub obj Box { api value: i32 }
+
+pub fn mutate_both(
+  ~left: Box,
+  ~right: Box,
+  increment: i32 = 2
+) -> i32
+  left.value = left.value + increment
+  right.value = right.value + increment
+  left.value + right.value
+`,
+    };
+    const dependencySnapshotCache = createCompilerDependencySnapshotCache();
+    const first = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root, pkgDirs: [packages] },
+        host: createMemoryHost(files),
+        dependencySnapshotCache,
+      }),
+    );
+    const firstPackageInterface = first.semantics?.get("pkg:guarded::mutate")
+      ?.exports.packageSemanticInterface;
+    const firstDeclaration = firstPackageInterface?.exports.find(
+      (entry) => entry.name === "mutate_both",
+    )?.declarations[0];
+    expect(firstDeclaration?.ordinaryMutationSummaryId).toBeDefined();
+    expect(firstDeclaration?.defaultIdentityGuardProtocol).toBe(
+      "presence-conflict-bit-v1",
+    );
+    expect(Object.keys(firstDeclaration ?? {}).sort()).toEqual([
+      "defaultIdentityGuardProtocol",
+      "key",
+      "ordinaryMutationSummaryId",
+      "signature",
+      "value",
+    ]);
+    expect(firstDeclaration).not.toHaveProperty("borrowContract");
+    expect(firstPackageInterface).not.toHaveProperty("borrowContracts");
+    expect(JSON.stringify(firstPackageInterface)).not.toContain(
+      "borrow_contract",
+    );
+    const firstInstance = getWasmInstance(first.wasm!);
+    expect((firstInstance.exports.distinct as () => number)()).toBe(15);
+    expect((firstInstance.exports.direct_distinct as () => number)()).toBe(15);
+    expect(
+      first.semantics?.get("src::main")?.borrowing.runtimeIdentityGuards.size,
+    ).toBeGreaterThan(0);
+    expect(() =>
+      (firstInstance.exports.overlapping as () => number)(),
+    ).toThrow();
+    expect(() =>
+      (firstInstance.exports.direct_overlapping as () => number)(),
+    ).toThrow();
+    expect(() =>
+      (firstInstance.exports.direct_initial_alias as () => number)(),
+    ).toThrow();
+    [
+      "relay_alias",
+      "holder_alias",
+      "holder_write_alias",
+      "tuple_alias",
+      "branch_alias",
+    ].forEach((name) =>
+      expect(() => (firstInstance.exports[name] as () => number)()).toThrow(),
+    );
+    const dependencySnapshot = dependencySnapshotCache.dependency;
+    expect(dependencySnapshot).toBeDefined();
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root, pkgDirs: [packages] },
+        host: createMemoryHost({
+          ...files,
+          [mainPath]: `${files[mainPath]}\nfn edit_marker() -> i32\n  0\n`,
+        }),
+        dependencySnapshotCache,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+
+    expect((instance.exports.distinct as () => number)()).toBe(15);
+    expect((instance.exports.direct_distinct as () => number)()).toBe(15);
+    expect(() => (instance.exports.overlapping as () => number)()).toThrow();
+    expect(() =>
+      (instance.exports.direct_overlapping as () => number)(),
+    ).toThrow();
+    expect(() =>
+      (instance.exports.direct_initial_alias as () => number)(),
+    ).toThrow();
+    [
+      "relay_alias",
+      "holder_alias",
+      "holder_write_alias",
+      "tuple_alias",
+      "branch_alias",
+    ].forEach((name) =>
+      expect(() => (instance.exports[name] as () => number)()).toThrow(),
+    );
+    expect(dependencySnapshotCache.dependency).toBe(dependencySnapshot);
+
+    const packageInterface = result.semantics?.get("pkg:guarded::mutate")
+      ?.exports.packageSemanticInterface;
+    const declaration = packageInterface?.exports.find(
+      (entry) => entry.name === "mutate_both",
+    )?.declarations[0];
+    expect(declaration?.defaultIdentityGuardProtocol).toBe(
+      "presence-conflict-bit-v1",
+    );
+    expect(declaration).not.toHaveProperty("borrowContract");
+    expect(packageInterface).not.toHaveProperty("borrowContracts");
+    expect(JSON.stringify(packageInterface)).not.toContain("borrow_contract");
+  });
+
   it("supports dot calls to imported instance methods without importing the member", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");
@@ -304,7 +494,7 @@ impl Sequence for Array
     self.value
 `,
       [`${std}${sep}traits${sep}sequence.voyd`]: `pub trait Sequence
-  fn measure(~self) -> i32
+  fn measure(~self): () -> i32
 `,
     });
 

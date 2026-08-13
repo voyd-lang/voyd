@@ -47,7 +47,7 @@ pub obj IoError {
 }
 
 pub trait Error<T>
-  fn message(self) -> String
+  fn message(self): () -> String
 
 @intrinsic(name: "__panic_trap")
 fn panic_trap(ptr: i32, len: i32): () -> void __panic_trap(ptr, len)

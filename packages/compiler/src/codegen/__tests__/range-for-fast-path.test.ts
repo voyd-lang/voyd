@@ -1,11 +1,20 @@
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createVoydHost } from "@voyd-lang/js-host";
 import { monomorphizeProgram } from "../../semantics/linking.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import { optimizeProgram } from "../../optimize/pipeline.js";
 import { codegenProgram } from "../index.js";
 import { compileEffectFixture } from "./support/effects-harness.js";
+
+const perf = vi.hoisted(() => ({ increment: vi.fn() }));
+vi.mock("../../perf.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../perf.js")>()),
+  incrementCompilerPerfCounter: perf.increment,
+}));
+
+const recordedCounters = (): string[] =>
+  perf.increment.mock.calls.map(([name]) => String(name));
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -88,6 +97,9 @@ describe("intrinsic Range<i32> for-loop fast path", () => {
     expect(generatedWat).not.toContain("call_ref");
     expect(generatedWat.match(/\(struct\.get\b/g)?.length ?? 0).toBeLessThan(
       baselineWat.match(/\(struct\.get\b/g)?.length ?? 0,
+    );
+    expect(recordedCounters()).toContain(
+      "codegen.intrinsic_range_for.accepted",
     );
   });
 });

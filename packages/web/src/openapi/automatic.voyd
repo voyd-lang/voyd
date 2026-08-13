@@ -9,13 +9,17 @@ use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
 use super::contract::OpenApiConfig
-use super::json_copy::{ copy_json_array, copy_json_object }
 use super::operation_render::operation_json
 use super::types::RecordedOpenApiRoute
 
 obj PreparedRoute {
   path: String,
   operation: JsonValue
+}
+
+obj UniqueOperation {
+  operation: JsonValue,
+  seen: Dict<String, bool>
 }
 
 /// Renders an OpenAPI 3.1 document from an app's concrete routes.
@@ -33,7 +37,7 @@ pub fn render_openapi(
   root.set("info", info_json(api_config))
   let ~paths = Dict<String, JsonValue>::init()
   let ~components = Dict<String, JsonValue>::init()
-  let ~operation_ids = Dict<String, bool>::init()
+  var operation_ids = Dict<String, bool>::init()
   let ~runtime_routes = Dict<String, bool>::init()
   var index = 0
   while index < routes.len():
@@ -58,8 +62,9 @@ pub fn render_openapi(
           match(prepare_route(route.path, rendered))
             Some<PreparedRoute> { value: prepared }:
               if path_method_available(paths, prepared.path, method):
-                let unique_operation = unique_operation_id(operation_ids, prepared.operation)
-                append_route(paths, prepared.path, method, unique_operation)
+                let unique = unique_operation_id(operation_ids, prepared.operation)
+                operation_ids = unique.seen
+                append_route(paths, prepared.path, method, unique.operation)
                 merge_components(components, route_components)
             None:
               void
@@ -141,33 +146,34 @@ fn append_route(
   method: String,
   operation: JsonValue
 ) -> void
-  let ~path_item = match(paths.get(path))
-    Some<JsonValue> { value }: copy_json_object(object_entries(value))
+  let path_item = match(paths.get(path))
+    Some<JsonValue> { value }: object_entries(value)
     None: Dict<String, JsonValue>::init()
-  path_item.set(method, operation)
-  paths.set(path, JsonObject { value: path_item })
+  let updated_path_item = path_item.setting(method, operation)
+  paths.set(path, JsonObject { value: updated_path_item })
 
 fn merge_components(~target: Dict<String, JsonValue>, source: Dict<String, JsonValue>) -> void
   let entries = source.entries()
   var index = 0
   while index < entries.len():
     let entry = entries.at(index)
-    target.set(entry.0, entry.1)
+    target.set(entry.0.as_slice().to_string(), entry.1)
     index = index + 1
 
 fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
   var fields = object_entries(operation)
-  let ~parameters = match(fields.get("parameters"))
+  let existing_parameters = match(fields.get("parameters"))
     Some<JsonValue> { value }:
       value.match(active)
-        JsonArray: copy_json_array(active.value)
+        JsonArray: active.value
         else: Array<JsonValue>::init()
     None:
       Array<JsonValue>::init()
+  let ~added_parameters = Array<JsonValue>::init()
   let ~documented = Dict<String, bool>::init()
   var parameter_index = 0
-  while parameter_index < parameters.len():
-    let parameter = object_entries(parameters.at(parameter_index))
+  while parameter_index < existing_parameters.len():
+    let parameter = object_entries(existing_parameters.at(parameter_index))
     if string_field(parameter, "in").equals("path"):
       let parameter_name = string_field(parameter, "name").as_slice().to_string()
       documented.set(parameter_name, true)
@@ -183,37 +189,44 @@ fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
         Some<bool>:
           void
         None:
+          let ~schema = Dict<String, JsonValue>::init()
+          schema.set("type", JsonString { value: "string".to_string() })
           let ~parameter = Dict<String, JsonValue>::init()
           parameter.set("name", JsonString { value: name })
           parameter.set("in", JsonString { value: "path".to_string() })
           parameter.set("required", JsonBool { value: true })
-          let ~schema = Dict<String, JsonValue>::init()
-          schema.set("type", JsonString { value: "string".to_string() })
           parameter.set("schema", JsonObject { value: schema })
-          parameters.push(JsonObject { value: parameter })
+          added_parameters.push(JsonObject { value: parameter })
     segment_index = segment_index + 1
-  if not parameters.is_empty():
-    fields = fields.setting("parameters", JsonArray { value: parameters })
+  if added_parameters.is_empty():
+    return operation
+  let parameters = existing_parameters.extended(added_parameters)
+  fields = fields.setting("parameters", JsonArray { value: parameters })
   JsonObject { value: fields }
 
 /// Operation IDs are optional. The first occurrence keeps a duplicate ID;
 /// later operations remain documented without that ID.
-fn unique_operation_id(~seen: Dict<String, bool>, operation: JsonValue) -> JsonValue
+fn unique_operation_id(seen: Dict<String, bool>, operation: JsonValue) -> UniqueOperation
   var fields = object_entries(operation)
+  var updated_seen = seen
   match(fields.get("operationId"))
     Some<JsonValue> { value }:
       value.match(active)
         JsonString:
-          match(seen.get(active.value))
+          let operation_id = active.value.as_slice().to_string()
+          match(seen.get(operation_id))
             Some<bool>:
               fields = fields.removing("operationId")
             None:
-              seen.set(active.value, true)
+              updated_seen = seen.setting(operation_id, true)
         else:
           void
     None:
       void
-  JsonObject { value: fields }
+  UniqueOperation {
+    operation: JsonObject { value: fields },
+    seen: updated_seen
+  }
 
 fn valid_path_parameters(path: String, operation: JsonValue) -> bool
   let fields = object_entries(operation)

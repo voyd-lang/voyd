@@ -38,6 +38,7 @@
     "bench:iterator-for": "node --import tsx --conditions=development scripts/bench-general-iterator-specialization.ts",
     "bench:mutable-result": "node --import tsx --conditions=development scripts/bench-mutable-result-specialization.ts",
     "bench:v439": "node --import tsx --conditions=development scripts/bench-v439-checked-access.ts",
+    "bench:v500": "node --import tsx --conditions=development scripts/bench-v500-scoped-borrows.ts",
     "bench:web-openapi": "npm run --workspace @voyd-lang/performance-tests bench:web-openapi --",
     "test:web-compile-gate": "node scripts/testing/run-web-compile-gate.mjs",
     "typecheck": "turbo run typecheck --affected",

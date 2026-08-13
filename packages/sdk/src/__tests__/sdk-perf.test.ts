@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { COMPILER_PERF_ZERO_PRESENCE_COUNTERS } from "@voyd-lang/compiler/perf-counter-schema.js";
 
-const SOURCE = `fn answer() -> i32
+const SOURCE = `#!no_prelude
+fn answer() -> i32
   42
 
 pub fn main() -> i32
@@ -44,6 +46,15 @@ describe("SDK compiler perf instrumentation", () => {
     expect(summary.success).toBe(true);
     expect(summary.phasesMs.loadModuleGraph).toBeGreaterThanOrEqual(0);
     expect(summary.phasesMs.analyzeModules).toBeGreaterThanOrEqual(0);
+    expect(
+      summary.phasesMs["analyzeBorrowing.ordinaryMutation"],
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      summary.phasesMs["analyzeBorrowing.explicitBorrow"],
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      summary.phasesMs["analyzeBorrowing.finiteLocal"],
+    ).toBeGreaterThanOrEqual(0);
     expect(summary.phasesMs.optimizeProgram).toBeGreaterThanOrEqual(0);
     expect(summary.phasesMs.codegen).toBeGreaterThanOrEqual(0);
     expect(summary.phasesMs["binaryen.optimize"]).toBeGreaterThanOrEqual(0);
@@ -59,5 +70,27 @@ describe("SDK compiler perf instrumentation", () => {
         "optimize.pass.4.whole-program-specialization-pruning.ms"
       ],
     ).toBeGreaterThanOrEqual(0);
+    // The SDK compiles the selected std package graph as well as SOURCE. That
+    // graph intentionally contains Borrow-aware String helpers, so this
+    // boundary asserts schema presence while compiler-local/benchmark tests
+    // own the zero-fact guarantee for an isolated ordinary module.
+    expect(
+      summary.counters["borrowing.explicitBorrowFacts"],
+    ).toBeGreaterThanOrEqual(0);
+    expect(summary.counters["borrowing.ordinary.callables"]).toBeGreaterThan(0);
+    expect(summary.counters["borrowing.ordinary.projectionFamilies"]).toBe(0);
+    expect(summary.counters["borrowing.ordinary.widenings"]).toBe(0);
+    expect(
+      summary.counters["optimize.pass.stable-field-load-forwarding.candidates"],
+    ).toBe(0);
+    expect(new Set(COMPILER_PERF_ZERO_PRESENCE_COUNTERS).size).toBe(
+      COMPILER_PERF_ZERO_PRESENCE_COUNTERS.length,
+    );
+    COMPILER_PERF_ZERO_PRESENCE_COUNTERS.forEach((counter) => {
+      expect(
+        Object.hasOwn(summary.counters, counter),
+        `missing zero-presence counter ${counter}`,
+      ).toBe(true);
+    });
   });
 });

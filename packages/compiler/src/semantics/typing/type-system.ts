@@ -3166,6 +3166,24 @@ const functionTypeSatisfies = ({
   }).ok;
 };
 
+const typesMatchInvariant = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+  state: TypingState,
+): boolean =>
+  unifyWithBudget({
+    actual,
+    expected,
+    options: {
+      location: ctx.hir.module.ast,
+      reason: "Borrow inner type compatibility",
+      variance: "invariant",
+      allowUnknown: state.mode === "relaxed",
+    },
+    ctx,
+  }).ok;
+
 // Satisfaction layers nominal gates over structural comparison and unification:
 // unknown short-circuits according to mode, structural expectations normalize through the arena, and nominal expectations gate structural fallbacks.
 export const typeSatisfies = (
@@ -3211,7 +3229,7 @@ export const typeSatisfies = (
   if (expectedDesc.kind === "borrowed") {
     return (
       actualDesc.kind === "borrowed" &&
-      typeSatisfies(actualDesc.inner, expectedDesc.inner, ctx, state)
+      typesMatchInvariant(actualDesc.inner, expectedDesc.inner, ctx, state)
     );
   }
   if (actualDesc.kind === "borrowed") {
@@ -3327,15 +3345,11 @@ export const typeSatisfiesBorrowFormation = (
   }
   const expectedDesc = ctx.arena.get(expected);
   if (expectedDesc.kind === "borrowed") {
-    return typeSatisfies(actual, expectedDesc.inner, ctx, state);
-  }
-  const actualDesc = ctx.arena.get(actual);
-  if (
-    actualDesc.kind === "borrowed" &&
-    ctx.arena.get(actualDesc.inner).kind === "primitive" &&
-    typeSatisfies(actualDesc.inner, expected, ctx, state)
-  ) {
-    return true;
+    const actualDesc = ctx.arena.get(actual);
+    return (
+      actualDesc.kind !== "borrowed" &&
+      typesMatchInvariant(actual, expectedDesc.inner, ctx, state)
+    );
   }
   return false;
 };
@@ -3542,9 +3556,54 @@ export const ensureTypeMatches = (
   expected: TypeId,
   ctx: TypingContext,
   state: TypingState,
-  _reason: string,
+  reason: string,
   span?: SourceSpan,
-): void => {
+): void =>
+  ensureTypeMatchesWithPolicy({
+    actual,
+    expected,
+    ctx,
+    state,
+    reason,
+    span,
+    allowBorrowFormation: true,
+  });
+
+export const ensureTypeMatchesWithoutBorrowFormation = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+  state: TypingState,
+  reason: string,
+  span?: SourceSpan,
+): void =>
+  ensureTypeMatchesWithPolicy({
+    actual,
+    expected,
+    ctx,
+    state,
+    reason,
+    span,
+    allowBorrowFormation: false,
+  });
+
+const ensureTypeMatchesWithPolicy = ({
+  actual,
+  expected,
+  ctx,
+  state,
+  reason,
+  span,
+  allowBorrowFormation,
+}: {
+  actual: TypeId;
+  expected: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+  reason: string;
+  span?: SourceSpan;
+  allowBorrowFormation: boolean;
+}): void => {
   const valueWidening = disallowedValueTraitObjectWidening({
     actual,
     expected,
@@ -3576,10 +3635,29 @@ export const ensureTypeMatches = (
       ],
     });
   }
+  const satisfiesExpected = allowBorrowFormation
+    ? typeSatisfiesBorrowFormation(actual, expected, ctx, state)
+    : typeSatisfies(actual, expected, ctx, state);
+  if (satisfiesExpected || liftedVxPlanTypeSatisfies(actual, expected, ctx)) {
+    return;
+  }
+
+  const actualDescriptor = ctx.arena.get(ctx.arena.unfoldRecursive(actual));
+  const expectedDescriptor = ctx.arena.get(ctx.arena.unfoldRecursive(expected));
   if (
-    typeSatisfiesBorrowFormation(actual, expected, ctx, state) ||
-    liftedVxPlanTypeSatisfies(actual, expected, ctx)
+    actualDescriptor.kind === "borrowed" &&
+    expectedDescriptor.kind !== "borrowed"
   ) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0051",
+      params: {
+        kind: "explicit-borrow-escape",
+        binding: typeIdToDiagnosticString(actual, ctx),
+        through: reason,
+      },
+      span: span ?? ctx.hir.module.span,
+    });
     return;
   }
 

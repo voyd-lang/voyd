@@ -142,6 +142,19 @@ pub fn safe_for_sum() -> i32
     total = total + values.at(index)
   total
 
+fn append_marker(~values: Array<i32>) -> void
+  values.push(9)
+
+pub fn safe_for_helper_mutation_sum() -> i32
+  let ~values = Array<i32>::with_capacity(4)
+  values.push(1)
+  values.push(2)
+  var total = 0
+  for index in 0..values.len():
+    total = total + values.at(index)
+    append_marker(values)
+  total
+
 pub fn while_non_zero_start_sum() -> i32
   let values = build_ints()
   var index = 1
@@ -182,9 +195,6 @@ pub fn while_mutates_array_sum() -> i32
     values.push(9)
     index = index + 1
   total
-
-fn append_marker(~values: Array<i32>) -> void
-  values.push(9)
 
 pub fn while_helper_mutation_sum() -> i32
   let ~values = Array<i32>::with_capacity(4)

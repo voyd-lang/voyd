@@ -20,43 +20,44 @@ test("parses fn with return type and =", (t) => {
   ]);
 });
 
-test("parses borrowed types in direct and nested positions", (t) => {
+test("parses Borrow with the standard generic type syntax", (t) => {
   const code = `
-fn view(value: borrow Box) -> Option<borrow Box>
-  let direct: borrow Box = value
-  Some<borrow Box> { value: direct }`;
+fn view(value: Borrow<Box>) -> i32
+  1`;
 
   const ast = toPlain(code);
   t.expect(ast).toContainEqual([
     "fn",
     [
       "->",
-      ["view", [":", "value", ["borrow", "Box"]]],
-      ["Option", ["generics", ["borrow", "Box"]]],
+      ["view", [":", "value", ["Borrow", ["generics", "Box"]]]],
+      "i32",
     ],
-    [
-      "block",
-      ["let", ["=", [":", "direct", ["borrow", "Box"]], "value"]],
-      [
-        "Some",
-        ["generics", ["borrow", "Box"]],
-        ["object_literal", [":", "value", "direct"]],
-      ],
-    ],
+    ["block", "1"],
   ]);
 });
 
-test("binds borrow around a generic-applied inner type", (t) => {
-  t.expect(toPlain("type X = Some<borrow Option<i32>>")).toEqual([
+test("parses a nested generic Borrow inner type without special handling", (t) => {
+  t.expect(toPlain("type X = Borrow<Option<i32>>")).toEqual([
     "ast",
     [
       "type",
       [
         "=",
         "X",
-        ["Some", ["generics", ["borrow", ["Option", ["generics", "i32"]]]]],
+        [
+          "Borrow",
+          ["generics", ["Option", ["generics", "i32"]]],
+        ],
       ],
     ],
+  ]);
+});
+
+test("does not parse lowercase borrow as a prefix operator", (t) => {
+  t.expect(toPlain("type X = borrow Box")).toEqual([
+    "ast",
+    ["type", ["=", "X", ["borrow", "Box"]]],
   ]);
 });
 
@@ -202,43 +203,21 @@ trait T
   ]);
 });
 
-test("parses named regions, disjointness, and borrow contracts", (t) => {
+test("rejects removed trait region declarations", (t) => {
   const ast = parse(`
-trait ViewIterator<T>
+trait Invalid<T>
   region cursor
-  region source
-  disjoint cursor, source
-
-  @borrow_contract(
-    reads: source,
-    mutates: cursor,
-    returns_from: [source, cursor]
-  )
-  fn next(~self) -> Option<borrow T>
 `);
   const declaration = ast.rest.find(
     (entry) => isForm(entry) && entry.calls("trait"),
   );
   t.expect(isForm(declaration)).toBe(true);
-  const parsed = isForm(declaration) ? parseTraitDecl(declaration) : null;
-
-  t.expect(parsed?.regions.map((region) => region.name.value)).toEqual([
-    "cursor",
-    "source",
-  ]);
-  t.expect(
-    parsed?.disjoint.map((entry) =>
-      entry.regions.map((region) => region.value),
-    ),
-  ).toEqual([["cursor", "source"]]);
-  t.expect(parsed?.methods[0]?.borrowContract).toEqual({
-    reads: ["source"],
-    mutates: ["cursor"],
-    returnsFrom: ["source", "cursor"],
-  });
+  t.expect(() =>
+    isForm(declaration) ? parseTraitDecl(declaration) : null,
+  ).toThrow(/only function declarations|must start with 'fn'/);
 });
 
-test("parses an empty borrow contract", (t) => {
+test("rejects removed borrow_contract attributes", (t) => {
   const ast = parse(`
 trait PureView
   @borrow_contract()
@@ -248,66 +227,37 @@ trait PureView
     (entry) => isForm(entry) && entry.calls("trait"),
   );
   t.expect(isForm(declaration)).toBe(true);
-  const parsed = isForm(declaration) ? parseTraitDecl(declaration) : null;
-
-  t.expect(parsed?.methods[0]?.borrowContract).toEqual({});
+  t.expect(() =>
+    isForm(declaration) ? parseTraitDecl(declaration) : null,
+  ).toThrow();
 });
 
-test("rejects malformed disjoint separators", (t) => {
-  const parseTrait = (declaration: string) => {
-    const ast = parse(declaration);
-    const trait = ast.rest.find(
-      (entry) => isForm(entry) && entry.calls("trait"),
-    );
-    if (!isForm(trait)) {
-      throw new Error("expected trait declaration");
-    }
-    return parseTraitDecl(trait);
-  };
-
-  [
-    "disjoint left right",
-    "disjoint left,, right",
-    "disjoint , left, right",
-    "disjoint left, right,",
-  ].forEach((declaration) => {
-    t.expect(() =>
-      parseTrait(`
-trait Invalid
-  region left
-  region right
-  ${declaration}
-`),
-    ).toThrow(/comma-separated/);
-  });
-});
-
-test("parses impl region mappings including deref places", (t) => {
+test("rejects removed impl region mappings and deref contract places", (t) => {
   const ast = parse(`
-impl ViewIterator<T> for ArrayViewIterator<T>
-  region cursor = self.cursor
+impl Box
   region source = deref(self.items)
-
-  api fn next(~self) -> Option<borrow T>
-    None {}
 `);
   const declaration = ast.rest.find(
     (entry) => isForm(entry) && entry.calls("impl"),
   );
   t.expect(isForm(declaration)).toBe(true);
-  const parsed = isForm(declaration) ? parseImplDecl(declaration) : null;
+  t.expect(() =>
+    isForm(declaration) ? parseImplDecl(declaration) : null,
+  ).toThrow(/only function declarations/);
+});
 
-  t.expect(parsed?.regionMappings.map((mapping) => mapping.name.value)).toEqual(
-    ["cursor", "source"],
+test("rejects removed disjoint declarations", (t) => {
+  const ast = parse(`
+trait Invalid<T>
+  disjoint left, right
+`);
+  const declaration = ast.rest.find(
+    (entry) => isForm(entry) && entry.calls("trait"),
   );
-  t.expect(
-    parsed?.regionMappings.map((mapping) =>
-      JSON.parse(JSON.stringify(mapping.place.toJSON())),
-    ),
-  ).toEqual([
-    [".", "self", "cursor"],
-    ["deref", [".", "self", "items"]],
-  ]);
+  t.expect(isForm(declaration)).toBe(true);
+  t.expect(() =>
+    isForm(declaration) ? parseTraitDecl(declaration) : null,
+  ).toThrow(/only function declarations|must start with 'fn'/);
 });
 
 test("ignores inline line comments in function bodies", (t) => {

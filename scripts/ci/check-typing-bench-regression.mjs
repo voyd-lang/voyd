@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const DEFAULT_MAX_REGRESSION_PCT = 15;
+const DEFAULT_ROUNDS = 3;
 
 const parseArgs = () => {
   const args = process.argv.slice(2);
@@ -18,6 +19,8 @@ const parseArgs = () => {
   const maxRegressionRaw =
     get("--max-regression-pct") ?? process.env.TYPING_BENCH_MAX_REGRESSION_PCT;
   const maxRegression = Number(maxRegressionRaw ?? DEFAULT_MAX_REGRESSION_PCT);
+  const roundsRaw = get("--rounds") ?? process.env.TYPING_BENCH_ROUNDS;
+  const rounds = Number(roundsRaw ?? DEFAULT_ROUNDS);
 
   if (!base || !head) {
     throw new Error(
@@ -27,8 +30,11 @@ const parseArgs = () => {
   if (!Number.isFinite(maxRegression) || maxRegression < 0) {
     throw new Error("max regression percent must be a non-negative number.");
   }
+  if (!Number.isInteger(rounds) || rounds < 1) {
+    throw new Error("rounds must be a positive integer.");
+  }
 
-  return { base, head, maxRegression };
+  return { base, head, maxRegression, rounds };
 };
 
 const run = (cmd, argv, label) => {
@@ -101,6 +107,36 @@ const runBenchAtRef = ({ ref, outputPath }) => {
   return parseBenchmarkMeans(outputPath);
 };
 
+const median = (values) => {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+};
+
+const medianBenchmarkResults = (roundResults) => {
+  const names = [...roundResults[0].keys()];
+  return new Map(
+    names.map((name) => {
+      const results = roundResults.map((result) => {
+        const benchmark = result.get(name);
+        if (!benchmark) {
+          throw new Error(`Benchmark output is missing case: ${name}`);
+        }
+        return benchmark;
+      });
+      return [
+        name,
+        {
+          mean: median(results.map(({ mean }) => mean)),
+          hz: median(results.map(({ hz }) => hz)),
+        },
+      ];
+    })
+  );
+};
+
 const compare = ({ baseResults, headResults, maxRegression }) => {
   const names = [...baseResults.keys()].sort();
   const missing = names.filter((name) => !headResults.has(name));
@@ -150,17 +186,40 @@ const compare = ({ baseResults, headResults, maxRegression }) => {
 };
 
 const main = () => {
-  const { base, head, maxRegression } = parseArgs();
+  const { base, head, maxRegression, rounds } = parseArgs();
   ensureSafeCheckout();
   const originalRef = runCapture("git", ["rev-parse", "--verify", "HEAD"], "git rev-parse");
   const tmpRoot = mkdtempSync(join(tmpdir(), "typing-bench-"));
-  const baseOutput = join(tmpRoot, "base.json");
-  const headOutput = join(tmpRoot, "head.json");
 
   try {
-    console.log(`Comparing typing benchmark: base=${base} head=${head}`);
-    const baseResults = runBenchAtRef({ ref: base, outputPath: baseOutput });
-    const headResults = runBenchAtRef({ ref: head, outputPath: headOutput });
+    console.log(
+      `Comparing typing benchmark: base=${base} head=${head} rounds=${rounds}`
+    );
+    const baseRounds = [];
+    const headRounds = [];
+    for (let round = 0; round < rounds; round += 1) {
+      console.log(`Typing benchmark round ${round + 1}/${rounds}`);
+      const orderedRuns =
+        round % 2 === 0
+          ? [
+              { label: "base", ref: base, results: baseRounds },
+              { label: "head", ref: head, results: headRounds },
+            ]
+          : [
+              { label: "head", ref: head, results: headRounds },
+              { label: "base", ref: base, results: baseRounds },
+            ];
+      orderedRuns.forEach(({ label, ref, results }) => {
+        results.push(
+          runBenchAtRef({
+            ref,
+            outputPath: join(tmpRoot, `${label}-${round}.json`),
+          })
+        );
+      });
+    }
+    const baseResults = medianBenchmarkResults(baseRounds);
+    const headResults = medianBenchmarkResults(headRounds);
     compare({ baseResults, headResults, maxRegression });
   } finally {
     try {

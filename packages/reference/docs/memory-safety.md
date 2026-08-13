@@ -28,9 +28,9 @@ iterator results, and accidental reuse of mutable buffers.
 3. A plain `T` is a value, never a hidden source-level borrow.
 4. Copying an object handle preserves object identity without borrowing the
    slot from which the handle was read.
-5. A genuine storage view uses `borrow T` and carries its origin.
-6. Advanced APIs can describe access and borrowed results with checked regions
-   and `@borrow_contract`.
+5. `Borrow<T>` lends shared access only for the duration of a call.
+6. A scoped borrow cannot be returned, stored, captured, suspended, or hidden
+   inside another type.
 
 ## Lifetime and access are separate
 
@@ -174,10 +174,11 @@ merge_sessions(~session, ~session)
 Multiple shared reads may coexist. Mutation is allowed again when the earlier
 access has ended.
 
-## Borrows end after their final use
+## Mutable reborrows end after their final use
 
-Voyd infers borrow duration from use rather than from the surrounding lexical
-block. This is often called non-lexical lifetime analysis.
+Voyd infers the duration of a local mutable reborrow from its uses rather than
+from the surrounding lexical block. This is often called non-lexical lifetime
+analysis.
 
 ```voyd
 obj RequestContext {
@@ -207,7 +208,9 @@ draft.set_body("still in use")
 ```
 
 This protects against a common invalid-reference bug while avoiding artificial
-scope blocks or explicit lifetime annotations.
+scope blocks or explicit lifetime annotations. A `Borrow<T>` call parameter is
+different: it remains active for the complete invocation, including any nested
+calls made with that parameter.
 
 ## Plain values and object aliases
 
@@ -251,7 +254,7 @@ session.authenticated = true
 print(middleware_session.authenticated) // true
 ```
 
-The ordinary alias does not freeze `session`. Only an active access or explicit
+The ordinary alias does not freeze `session`. Only an active access or scoped
 borrow can conflict with mutation.
 
 The compiler may represent a plain value with an internal readonly borrow as
@@ -359,17 +362,15 @@ Indexed elements are conservative when their relationship is unknown. Voyd
 either proves them disjoint, inserts the bounded runtime check described below,
 or rejects the operation.
 
-## Owned results and borrowed views
+## Owned results and scoped borrows
 
-Most application APIs should return ordinary values. An ordinary iterator, for
-example, returns values that remain valid when the cursor advances:
+Every callable result is an ordinary value. An iterator, for example, returns
+values that remain valid when the cursor advances:
 
 ```voyd
 trait Iterator<T>
   fn next(~self) -> Option<T>
 ```
-
-This pattern is safe:
 
 ```voyd
 let first = iterator.next()
@@ -377,104 +378,91 @@ let second = iterator.next()
 use(first)
 ```
 
-Advancing the iterator cannot invalidate `first`. This avoids the familiar bug
-where a cursor returns a pointer into a buffer that is overwritten on the next
-iteration.
-
-Use `borrow T` when an API intentionally returns a zero-copy view into storage
-owned elsewhere:
+Advancing the iterator cannot invalidate `first`. Voyd does not have borrowed
+results or borrow-carrying containers. An API that needs zero-copy access lends
+that access to a bounded call instead:
 
 ```voyd
-obj Header {
-  name: String,
-  value: String
-}
+fn checksum(bytes: Borrow<Bytes>) -> i32
+  // Read `bytes` during this invocation.
+  // ...
 
-fn header_at(request: Request, index: i32) -> borrow Header
-  // Returns a view into the request's parsed-header storage.
+checksum(packet.body)
+```
+
+`Borrow<T>` is a compiler-known type constructor with exactly one argument. It
+may be the complete type of a callable input, including an input of a nested
+function type:
+
+```voyd
+fn with_value<T, R>(
+  value: T,
+  { body: fn(value: Borrow<T>) : () -> R }
+): () -> R
+  body(value)
+```
+
+Passing a plain `T` to a `Borrow<T>` input implicitly forms shared access for
+the complete invocation. Passing an existing `Borrow<T>` forms a nested shared
+reborrow. `Borrow` is invariant, so its inner type must match exactly after
+alias expansion. A borrowed value cannot be passed to a plain `T` input.
+
+A local binding may name the same borrow when it is initialized from an active
+borrowed parameter or one of its projections. The local binding cannot extend
+the invocation scope.
+
+`Borrow<T>` is rejected as a result, field, tuple or union member, module value,
+ordinary generic argument, or nested borrow. A function value whose input is
+`Borrow<T>` may be stored or returned: the borrow becomes active only when that
+function is called.
+
+### Exclusive scoped access
+
+`~value: Borrow<T>` grants exclusive access to borrowed storage for a callback:
+
+```voyd
+fn edit(body: fn(~value: Borrow<Document>) : () -> void) -> void
   // ...
 ```
 
-The result carries its origin. Mutation that could invalidate the view is
-rejected until the view's final use:
+Exclusive scoped access can be formed from an exclusive `~T` place, another
+`~Borrow<T>`, or a successful `SharedCell<T>` guard. Shared access cannot be
+upgraded to exclusive access. An exclusive reborrow suspends its parent until
+the nested call returns.
+
+## Scoped data cannot escape into later work
+
+An active `Borrow<T>` cannot be returned, stored, captured by a closure, passed
+through a plain parameter, sent to an effect or host boundary, or kept across a
+suspension. These rules apply even when the compiler could prove a closure runs
+immediately; use a direct helper with an explicit `Borrow<T>` input instead.
 
 ```voyd
-let ~request = parse_request(raw_request)
-let authorization = header_at(request, 0)
-request.reuse_parser_buffer()
-// error: `authorization` still views request storage
-authenticate(authorization)
+fn schedule_audit(header: Borrow<Header>) -> void
+  let _ = task::detach(() => audit(header))
+  // error: a closure cannot capture `header`
 ```
 
-Consume the view first and the mutation becomes valid:
+Copy the required data into an ordinary value before scheduling later work:
 
 ```voyd
-let ~request = parse_request(raw_request)
-let authorization = header_at(request, 0)
-authenticate(authorization)
-request.reuse_parser_buffer()
+fn schedule_audit(header: Borrow<Header>) -> void
+  let owned_value = header.value.to_string()
+  let _ = task::detach(() => audit(owned_value))
 ```
 
-Borrowed values compose through optionals, results, tuples, structural values,
-nominal values, generic wrappers, and pattern matching:
+A borrow also cannot cross a suspension:
 
 ```voyd
-fn find_header(request: Request, name: String) -> Option<borrow Header>
-  // ...
-```
-
-`borrow` applies to the next type, so these have different meanings:
-
-```voyd
-Option<borrow Header> // an owned Option whose Some payload is borrowed
-borrow Option<Header> // a borrowed view of an Option stored elsewhere
-```
-
-A borrowed value cannot be stored somewhere that outlives its origin or passed
-through a boundary that erases its origin.
-
-## Borrowed data cannot escape into later work
-
-Request handlers commonly start callbacks or tasks that outlive the current
-operation. Voyd prevents those callbacks from retaining a view into temporary
-request storage:
-
-```voyd
-use std::task
-
-let authorization = header_at(request, 0)
-
-let _ = task::detach(() =>
-  audit(authorization)
-)
-// error: the borrowed header would escape into a task
-```
-
-Copy the needed data into an ordinary value before scheduling the work:
-
-```voyd
-let authorization = header_at(request, 0).value.to_string()
-
-let _ = task::detach(() =>
-  audit(authorization)
-)
-```
-
-An explicit borrow or mutable reborrow also cannot cross a suspension that may
-resume later:
-
-```voyd
-use std::time
-
-let body = request.borrow_body()
-let _ = time::sleep(10)
-parse(body)
-// error: `body` remains live across suspension
+fn parse_later(body: Borrow<Bytes>) : Async -> Document
+  let _ = time::sleep(10)
+  parse(body)
+  // error: `body` would remain active across suspension
 ```
 
 Parse or copy the data before suspending. Ordinary object handles may be
-captured normally; their allocations remain alive through garbage collection,
-and accesses made when a callback runs follow the usual access rules.
+captured normally; garbage collection keeps their allocations alive, and
+accesses made when a callback runs follow the usual access rules.
 
 ## Runtime checks for dynamic element access
 
@@ -499,9 +487,9 @@ panic, so the function never receives two mutable references to the same
 entry.
 
 The guard is deliberately call-scoped. It does not install a persistent loan
-record or depend on garbage collection for release. Escaping, unstable, or
-suspending accesses require a static contract or an explicit safe dynamic
-abstraction instead.
+record or depend on garbage collection for release. Access that cannot remain
+bounded is rejected or must use an explicit safe abstraction such as
+`SharedCell<T>`.
 
 ## Calls and evaluation order
 
@@ -513,7 +501,7 @@ Voyd evaluates calls in a defined order:
 4. Static checks and required runtime identity guards run.
 5. Shared and mutable call accesses are activated.
 6. The callable runs.
-7. Non-retained call accesses end when the callable returns.
+7. Parameter accesses end when the callable returns.
 
 This means a default can safely read application state before a mutable call
 access begins, and every argument or default runs exactly once:
@@ -530,48 +518,33 @@ append_trace(~response.headers)
 
 Optimized and unoptimized code preserve the same order and conflict behavior.
 
-## Borrow contracts for reusable APIs
+## Bounded call summaries
 
-Concrete functions usually need no annotations; the compiler infers their
-caller-visible access. Traits and other representation-hiding boundaries may
-declare regions and a `@borrow_contract`.
+Voyd checks ordinary calls with small whole-parameter summaries. Each parameter
+is classified as unused, read, or written. The summary also records whether the
+callable accesses ambient object state, invokes an unknown callback, or may
+suspend. It contains no field paths, generic projections, regions, or returned
+origins.
 
-Consider a cache that updates statistics while returning a zero-copy view of a
-stored response:
-
-```voyd
-trait CacheView<K, V>
-  region entries
-  region statistics
-  disjoint entries, statistics
-
-  @borrow_contract(
-    mutates: statistics,
-    returns_from: entries
-  )
-  fn get(~self, key: K) -> Option<borrow V>
-```
-
-An implementation maps those public regions to its private representation:
+For example, this function publishes only that it writes its first parameter:
 
 ```voyd
-impl CacheView<String, Response> for MemoryCache
-  region entries = deref(self.entries)
-  region statistics = self.hit_count
-
-  api fn get(~self, key: String) -> Option<borrow Response>
-    // ...
+fn update(~state: State) -> void
+  state.profile.count = state.profile.count + 1
 ```
 
-`deref(place)` names the allocation referenced by a handle slot; it is a
-compile-time contract expression, not a runtime function.
+A plain `T` parameter permits at most reading, while `~T` permits writing. Trait
+declarations provide the upper bound used for dynamic dispatch, and every
+implementation is checked against that bound.
 
-The compiler verifies that implementations stay within the declared reads,
-writes, returned-borrow origins, and disjointness rules. Calls through a trait
-use the declaration contract as their authoritative caller-visible behavior.
+Any callable with a `~T` parameter must also prove that it does not perform
+potentially overlapping ambient access, call an unknown callback, or suspend.
+This keeps a dynamic mutable call safe without exposing private representation
+details. A statically known helper is allowed only when its bounded summary is
+compatible with every active exclusive access.
 
-Contracts make zero-copy abstractions possible without exposing private fields
-or asking every caller to understand the implementation.
+The compiler may keep field- and stable-index detail inside one callable for
+local checking. That detail is never part of the public callable summary.
 
 ## Shared application state with SharedCell
 
@@ -599,8 +572,8 @@ let request_count = stats.with((value) => value.requests)
 The callback parameter is an explicit scoped borrow:
 
 ```voyd
-fn with<R>(self, body: fn(value: borrow T) : () -> R): () -> R
-fn with_mut<R>(self, body: fn(~value: borrow T) : () -> R): () -> R
+fn with<R>(self, body: fn(value: Borrow<T>) : () -> R): () -> R
+fn with_mut<R>(self, body: fn(~value: Borrow<T>) : () -> R): () -> R
 ```
 
 Multiple shared callbacks may coexist. A mutable callback requires exclusive
@@ -643,25 +616,24 @@ Mutating `path` replaces its backing handle. Existing slices continue to see
 their original bytes and do not block later mutation of the source string.
 
 `StringSlice` is therefore an ordinary stable value, not a hidden source loan.
-An API that intentionally exposes a mutable or reusable parsing buffer must use
-an explicit borrowed type instead.
+An API that intentionally exposes a mutable or reusable parsing buffer must
+lend it through a scoped `Borrow<T>` callback instead.
 
 ## Choosing the right form
 
-| Need                                                        | Use                            |
-| ----------------------------------------------------------- | ------------------------------ |
-| Reassign a local name                                       | `var`                          |
-| Temporarily mutate an object with a clear owner             | `~T`                           |
-| Pass or return an ordinary independent value                | `T`                            |
-| Share the identity of a GC-managed object                   | an ordinary object handle      |
-| Return a zero-copy view into another value's storage        | `borrow T`                     |
-| Share mutable state among long-lived single-threaded owners | `SharedCell<T>`                |
-| Describe borrowed behavior through a trait                  | regions and `@borrow_contract` |
-| Keep an immutable view of text across source mutation       | `StringSlice`                  |
+| Need                                                        | Use                       |
+| ----------------------------------------------------------- | ------------------------- |
+| Reassign a local name                                       | `var`                     |
+| Temporarily mutate an object with a clear owner             | `~T`                      |
+| Pass or return an ordinary independent value                | `T`                       |
+| Share the identity of a GC-managed object                   | an ordinary object handle |
+| Lend zero-copy shared access for one call                   | `Borrow<T>`               |
+| Lend zero-copy exclusive access for one callback            | `~value: Borrow<T>`        |
+| Share mutable state among long-lived single-threaded owners | `SharedCell<T>`           |
+| Keep an immutable view of text across source mutation       | `StringSlice`             |
 
-Prefer ordinary values and handles for application code. Reach for explicit
-borrows and contracts when a zero-copy or representation-hiding API genuinely
-needs them.
+Prefer ordinary values and handles for application code. Reach for scoped
+borrows only when an API genuinely needs bounded zero-copy access.
 
 ## Current scope
 

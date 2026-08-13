@@ -264,25 +264,26 @@ fn data_value_to_msgpack(value: DataValue) -> MsgPack
     DataBytes:
       make_binary(Binary { bytes: decoded.value.to_array() })
     DataArray:
-      let ~values = Array<MsgPack>::with_capacity(decoded.values.len())
+      var values = Array<MsgPack>::with_capacity(decoded.values.len())
       var index = 0
       while index < decoded.values.len():
-        values.push(data_value_to_msgpack(decoded.values.at(index)))
+        values = values.pushed(data_value_to_msgpack(decoded.values.at(index)))
         index = index + 1
       make_array(values)
     DataObject:
       make_map(data_fields_to_msgpack(decoded.fields))
     DataVariant:
-      let ~map = data_fields_to_msgpack(decoded.fields)
-      map.set("$variant", make_string(decoded.name))
-      make_map(map)
+      make_map(data_fields_to_msgpack(decoded.fields).setting(
+        "$variant",
+        make_string(decoded.name)
+      ))
 
 fn data_fields_to_msgpack(fields: Array<DataField>) -> Dict<String, MsgPack>
-  let ~out = Dict<String, MsgPack>::init()
+  var out = Dict<String, MsgPack>::init()
   var index = 0
   while index < fields.len():
     let field = fields.at(index)
-    out.set(field.name, data_value_to_msgpack(field.value))
+    out = out.setting(field.name, data_value_to_msgpack(field.value))
     index = index + 1
   out
 
