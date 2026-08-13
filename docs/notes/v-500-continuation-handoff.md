@@ -11,19 +11,17 @@ worktree.
 - Worktree: `/Users/drewy/.codex/worktrees/4ffe/voyd`
 - Branch: `drew/v-500-implement-scoped-explicit-borrows-proposal`
 - Required benchmark base: `b2a35155fca53d1e93e1465a3a4fde2a3f7bd2b0`.
-- The complete V-500 checkpoint is committed as
-  `06bfff63d42c3848de59388c257f4d514dca3e11` (`Implement scoped explicit
-  borrows`). This handoff update is a separate documentation commit on top of
-  that checkpoint.
-- The checkpoint includes known failing release gates and the unverified hunk
-  documented below. Continue from these commits; do not reset or discard them.
+- The validated V-500 implementation is committed and pushed as
+  `74227f4d` (`Finish scoped borrow integration`), on top of the original
+  implementation checkpoint `06bfff63` and handoff checkpoint `4c28805b`.
+- Continue from these commits; do not reset or discard them.
 - Linear V-500 is already **In Progress** and assigned to Drew.
 - Required PR title: `[V-500] Implement scoped explicit borrows`
 - Required PR state: ready for review, not draft.
-- The high-assurance review loop has run. Its most recent verifier found no
-  unresolved material design/correctness finding in the last inspected
-  compiler snapshot, but the latest std fallout hunk remains unverified and the
-  full-suite release gate has not passed.
+- The high-assurance review and final repair verification are clean. The last
+  accepted finding tightened the Array iterator exception to the canonical
+  `std::array::Array` / `ArrayIterator` factory and step identities; its hostile
+  lookalike regression is green.
 
 All subagents were stopped before this handoff. No debug logging remains under
 `packages/compiler/src/semantics/borrowing`.
@@ -87,173 +85,28 @@ The verifier checked these observable cases in the current architecture:
 - a fresh intrinsic Array containing an aliased child: rejected;
 - missing/cyclic/budget-exhausted origin analysis: widened conservatively.
 
-The last completed focused safety run was 84/84, and compiler TypeScript
-typechecking passed at that point.
+The final focused safety run passed 90/90, and compiler TypeScript typechecking
+passed.
 
-## Critical unverified state
+## Current validated state
 
-Do not describe the implementation as green yet.
+The correctness implementation is green and pushed. Final validation completed
+on 2026-08-12:
 
-The latest edit in
-`packages/compiler/src/semantics/borrowing/ordinary-mutation-local.ts` is around
-`placeIsBoundResult` / `retainedReachableAlias` (currently near lines 801–876).
-It excludes a bound result from the blanket retained-reachable-alias path so the
-dedicated local result-alias solver can own it. This edit was made immediately
-before the stop request and has **not** been typechecked or tested.
+- `npm test`: passed all release lanes;
+- `npm run check`: passed all 18 typechecks, lint, and test inventory;
+- compiler focused borrowing/ordinary mutation: 90/90;
+- compiler codegen: 358/358;
+- std: 290/290;
+- Web: 129/129;
+- conformance: 217/217;
+- integration: 143/143 (the localhost HTTP cases require execution outside the
+  desktop sandbox);
+- `git diff --check`: passed.
 
-Run these first:
-
-```sh
-git diff --check
-npm run typecheck -w @voyd-lang/compiler
-npx vitest run --config vitest.config.ts \
-  packages/compiler/src/semantics/borrowing/__tests__/borrowing.test.ts \
-  packages/compiler/src/semantics/borrowing/__tests__/ordinary-mutation-summary.test.ts \
-  --reporter=dot
-```
-
-If the new exclusion accepts an unsafe retained result, revert or narrow only
-that exclusion. Do not reintroduce callee result provenance or freshness facts.
-
-## Current known failing layer
-
-The std suite is currently failing. At the last exact checkpoint, the primary
-residual diagnostics were:
-
-- JSON: 8 `TY0055`
-  - `JsonDtoReader.is_complete`, `kind`, `has_next_element`;
-  - `JsonReader.is_complete`, `kind`, `has_next_element`;
-  - two decode-options overload bounds.
-- JSON: 6 `TY0048`
-  - the `begin_array` probe pair;
-  - the `begin_variant` probe pair;
-  - `append_escaped(escape, escaped)`;
-  - `fields.set(key, value)`.
-- MsgPack: 2 `TY0048`
-  - `active.bytes.len()` in `Decoder.can_read`;
-  - `active.bytes.at()` in `read_u8`.
-
-The last two MsgPack rewrites were identified but not applied.
-
-The intended repair policy is:
-
-1. preserve whole-parameter coarsening at every call boundary;
-2. preserve projected precision only inside the same callable;
-3. use direct local projections/intrinsics or independently allocated local
-   storage at concrete std fallout sites;
-4. do not add compiler-known body/name freshness exceptions;
-5. do not add public APIs or change public signatures merely to silence the
-   checker;
-6. do not broadly rewrite JSON/Web until the precise primary diagnostic has
-   been confirmed after the latest compiler hunk.
-
-Array, String, Dict, and Data were already migrated through the conservative
-checker. The latest work kept Array fields package-visible (`pub`) rather than
-cross-package API-visible (`api`). Recheck this boundary when reviewing the
-final diff.
-
-Run std after the three initial commands:
-
-```sh
-npm test -w @voyd-lang/std
-```
-
-Then address only the primary, non-cascade diagnostics and rerun until 290/290
-passes.
-
-## Original full-suite regressions to rerun
-
-Before the final origin work, `npm test` found four real compiler codegen
-regressions. The trait/effect implementation was repaired, but the final tree
-has not rerun all four together:
-
-```sh
-npx vitest run --config vitest.config.ts \
-  packages/compiler/src/codegen/__tests__/array-for-fast-path.test.ts \
-  packages/compiler/src/codegen/__tests__/codegen.test.ts \
-  packages/compiler/src/codegen/__tests__/effects-perform.test.ts \
-  --reporter=dot
-```
-
-The exact cases were:
-
-- `intrinsic Array<T> for-loop fast path` (`first` was falsely summarized as a
-  write through the fresh ArrayIterator cursor);
-- `dispatches trait objects with mixed pure/effectful impl ABIs`;
-- `preserves local tail continuations through value construction and control
-  flow`;
-- `specializes locally handled tail effects through value construction and
-  control flow`.
-
-Do not change read-only `first<T>(source: Array<T>, ...)` to `~source`; that
-workaround was explicitly rejected and reverted.
-
-Also rerun the earlier focused compiler set:
-
-```sh
-npx vitest run --config vitest.config.ts \
-  packages/compiler/src/compiler-contracts/__tests__/function-contracts.test.ts \
-  packages/compiler/src/__tests__/diagnostic-spans.test.ts \
-  packages/compiler/src/__tests__/program-symbol-arena.test.ts \
-  packages/compiler/src/semantics/__tests__/compiler-function-contracts.test.ts \
-  packages/compiler/src/semantics/typing/__tests__/operator-overloads-external.test.ts \
-  packages/compiler/src/semantics/typing/__tests__/trait-impls.test.ts \
-  --reporter=dot
-```
-
-## Web and integration validation
-
-After std and the original codegen cases are green:
-
-```sh
-npm test -w @voyd-lang/web
-VOYD_USE_SRC=1 node scripts/voyd test \
-  packages/web/src/openapi/openapi_app.test.voyd \
-  --fail-empty-tests
-npm test -w @voyd-lang/conformance-tests
-npx vitest run --config vitest.config.ts \
-  tests/integration/src/runtime-trap-diagnostics.test.ts \
-  tests/integration/src/task-runtime.test.ts \
-  --reporter=dot
-```
-
-Prior green signals before the last review repairs included std 290/290, Web
-129/129, conformance 217/217, task runtime 30/30, runtime trap diagnostics 8/8,
-and the Vtrace/Orbit focused performance fixtures. They must be treated as
-historical confidence, not validation of the latest hunk.
-
-## Full release gates
-
-Run these only after the focused suites are green:
-
-```sh
-npm test
-npm run check
-git diff --check
-```
-
-The first full `npm test` in this desktop sandbox produced `tsx` IPC failures
-(`listen EPERM .../tsx-501/*.pipe`) in 17 CLI source e2e cases. Those were
-sandbox failures, not product diagnostics. Rerun `npm test` with escalated
-execution/outside the sandbox if the same IPC denial appears. That same run also
-found the real semantic failures documented above.
-
-Before committing, audit for deleted compatibility state and debug code:
-
-```sh
-rg -n \
-  'freshResultSymbols|provenanceFreeFreshResult|localCallResult|CallableBorrowContract|CallableAccessIndex|getFootprint|callableAccesses|callableRuntimeProtocols' \
-  packages apps tests scripts
-
-rg -n \
-  'DEBUG_|v500-debug|ordinary-unknown-call|console\.(log|error|warn)' \
-  packages/compiler/src/semantics/borrowing
-
-npm run check:test-inventory
-```
-
-Historical/spec prose mentioning removed APIs is allowed. Live compatibility
-adapters or debug output are not.
+The implementation is committed and pushed. Remaining work is performance
+measurement, completing `v-500-scoped-borrows-results.md`, publishing a durable
+artifact, and opening the ready PR.
 
 ## Review-loop state
 
@@ -271,29 +124,25 @@ findings repaired during the loop included:
 - runtime guard propagation across installed-package re-exports and cache reuse;
 - conservative ambient, callback, suspension, and retained-child boundaries.
 
-The final verifier’s current-snapshot verdict was clean, with one explicit
-caveat: final full-suite results remain the release gate because the std fallout
-agent was still editing when work stopped.
+The final verifier accepted the canonical Array iterator identity repair and
+reported a clean verdict. Full release gates then passed.
 
 If further fixes materially change the origin/path model, run one fresh
 read-only correctness reviewer over only that changed lens before publishing.
 
 ## Commit and benchmark sequence
 
-Do not benchmark the current checkpoint as a completed implementation. After
-all correctness gates pass, create a new clean implementation commit (or amend
-the checkpoint only if it has not been shared further), then:
+The implementation commit is `74227f4d` and is already pushed. Continue with:
 
-1. Record the final implementation commit on the current branch.
-2. Create a clean detached head checkout at
+1. Create a clean detached head checkout at
    `/private/tmp/v500-bench-final/head` from that commit.
-3. Run `npm install` in the head checkout so workspace links resolve into that
+2. Run `npm install` in the head checkout so workspace links resolve into that
    checkout.
-4. Keep the already-prepared clean base checkout at
+3. Keep the already-prepared clean base checkout at
    `/private/tmp/v500-bench-final/base` on
    `b2a35155fca53d1e93e1465a3a4fde2a3f7bd2b0`.
-5. Write raw output under `/private/tmp/v500-bench-final/results`.
-6. Run benchmarks sequentially on AC power with no concurrent build/test work.
+4. Write raw output under `/private/tmp/v500-bench-final/results`.
+5. Run benchmarks sequentially on AC power with no concurrent build/test work.
 
 The base checkout was already verified clean with local dependencies installed.
 Machine recorded for the final report: Mac mini Mac16,11, M4 Pro, 14 cores
