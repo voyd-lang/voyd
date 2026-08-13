@@ -98,7 +98,7 @@ fn write_stderr_with_assertions(): Test -> Result<Unit, IoError>
 
 fn write_line_with_assertions(): Test -> Result<Unit, IoError>
   try
-    write_line("hi".as_slice().to_string())
+    write_line("_hi_".as_slice().slice(bytes: 1, len: 2))
   Output::write_op(tail, payload):
     assert(payload.target.equals("stdout"), eq: true)
     let bytes = payload.value.to_utf8()

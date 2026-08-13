@@ -29,6 +29,30 @@ compressed artifacts and raw hashes are listed in
 | Historical V-499 controls              | Not run; release tests cover correctness                             | —                                                   |
 | Accepted optimization suite            | Focused behavior/shape tests passed; companion timing matrix not run | —                                                   |
 
+### Post-review JSON and OpenAPI cleanup checks
+
+The final API review found avoidable runtime work in two migrated call paths:
+whole-source JSON stabilization and repeated persistent updates while building
+OpenAPI values. The cleanup removes all four JSON stabilization layers, uses
+in-place mutation for fresh builders, and retains persistent updates only when
+an existing input container must remain unchanged.
+
+Two small same-machine runtime checks compared the pre-cleanup V-500 snapshot
+`6dfde641` with the cleanup candidate. Each check used one unmeasured warmup and
+nine retained samples from one unoptimized Wasm host. These are directional
+microchecks rather than general performance gates:
+
+| Workload                            |       Observable result | Pre-cleanup median | Cleanup median | Change |
+| ----------------------------------- | ----------------------: | -----------------: | -------------: | -----: |
+| Typed JSON decode, 2,000 iterations |       checksum `100000` |          53.522 ms |      48.077 ms | -10.2% |
+| Automatic OpenAPI render            | identical 895-byte JSON |           1.009 ms |       0.950 ms |  -5.9% |
+
+The JSON regression suite also covers parse and typed decode from a non-zero
+`StringSlice` window, so removing stabilization does not accidentally parse the
+slice's surrounding bytes. The OpenAPI suite retains its input-isolation and
+deterministic-rendering checks. No performance conclusion beyond these two
+paths is inferred from the microchecks.
+
 ## Generated benchmark command
 
 The V-500 runner generates one canonical scenario in the controlling checkout

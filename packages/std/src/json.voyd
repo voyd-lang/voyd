@@ -45,7 +45,6 @@ use std::data::{
   write as write_dto
 }
 use std::dict::Dict
-use std::fixed_array::fns::new_fixed_array
 use std::meta::{
   ArrayShape,
   BoolShape,
@@ -325,17 +324,8 @@ impl JsonDtoReader
     JsonDtoReader::init(source, limits: default_decode_limits())
 
   fn init(source: StringSlice, { limits: DecodeLimits }) -> JsonDtoReader
-    let source_count = source.byte_count
-    let source_bytes = new_fixed_array<i32>(source_count)
-    __array_copy(source_bytes, {
-      from: source.source.bytes,
-      to_index: 0,
-      from_index: source.start,
-      count: source_count
-    })
-    let stable_source = new_string(source_bytes).as_slice()
     JsonDtoReader {
-      reader: JsonReader::init(stable_source, limits: limits),
+      reader: JsonReader::init(source, limits: limits),
       path: "$".to_string(),
       parents: Array<String>::init(),
       limits: limits
@@ -578,17 +568,8 @@ impl JsonReader
     JsonReader::init(source, limits: default_decode_limits())
 
   fn init(source: StringSlice, { limits: DecodeLimits }) -> JsonReader
-    let source_count = source.byte_count
-    let source_bytes = new_fixed_array<i32>(source_count)
-    __array_copy(source_bytes, {
-      from: source.source.bytes,
-      to_index: 0,
-      from_index: source.start,
-      count: source_count
-    })
-    let stable_source = new_string(source_bytes).as_slice()
     JsonReader {
-      parser: JsonParser { source: stable_source, index: 0 },
+      parser: JsonParser { source: source, index: 0 },
       container_kinds: Array<i32>::init(),
       consumed_values: Array<i32>::init(),
       pending_fields: Array<i32>::init(),
@@ -1031,16 +1012,7 @@ pub fn parse(source: String) -> Result<JsonValue, JsonError>
   parse(source.as_slice())
 
 pub fn parse(source: StringSlice) -> Result<JsonValue, JsonError>
-  let source_count = source.byte_count
-  let source_bytes = new_fixed_array<i32>(source_count)
-  __array_copy(source_bytes, {
-    from: source.source.bytes,
-    to_index: 0,
-    from_index: source.start,
-    count: source_count
-  })
-  let stable_source = new_string(source_bytes).as_slice()
-  let ~parser = JsonParser { source: stable_source, index: 0 }
+  let ~parser = JsonParser { source: source, index: 0 }
   skip_whitespace(parser)
   let value_result = parse_value(parser)
   match(value_result)
@@ -1150,16 +1122,7 @@ pub fn decode<T>(
       "$",
       "json source exceeds configured limits"
     )
-  let source_count = source.byte_count
-  let source_bytes = new_fixed_array<i32>(source_count)
-  __array_copy(source_bytes, {
-    from: source.source.bytes,
-    to_index: 0,
-    from_index: source.start,
-    count: source_count
-  })
-  let stable_source = new_string(source_bytes).as_slice()
-  let ~reader = JsonDtoReader::init(stable_source, limits: options.limits)
+  let ~reader = JsonDtoReader::init(source, limits: options.limits)
   match(read_dto<T, JsonDecodeError, JsonDtoReader>(
     reader,
     rejects_unknown_fields(options.unknown_fields)

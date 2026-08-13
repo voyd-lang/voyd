@@ -144,6 +144,27 @@ pub fn concat(value: Borrow<String>, other: StringSlice): () -> String
 pub fn concat(value: Borrow<String>, other: String): () -> String
   concat(value, other.as_slice())
 
+/// Returns an owned string with one line-feed byte appended.
+///
+/// This is a package helper for line-oriented std APIs. It keeps raw storage
+/// access inside the string module and normalizes any partial UTF-8 sequence
+/// in `value` through the usual owned-string constructor.
+pub fn appending_line_feed(value: StringSlice): () -> String
+  let byte_count = value.byte_count
+  let bytes = new_fixed_array<i32>(byte_count + 1)
+  __array_copy(bytes, {
+    from: value.source.raw_bytes(),
+    to_index: 0,
+    from_index: value.start,
+    count: byte_count
+  })
+  __array_set(bytes, byte_count, 10)
+  new_string(bytes)
+
+/// Returns an owned string with one line-feed byte appended.
+pub fn appending_line_feed(value: String): () -> String
+  appending_line_feed(value.as_slice())
+
 impl StringSlice
   /// Returns the number of UTF-8 bytes.
   api fn byte_len(self) -> i32

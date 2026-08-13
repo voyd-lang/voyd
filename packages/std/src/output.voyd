@@ -6,11 +6,10 @@
 
 use std::bytes::Bytes
 use std::error::{ IoError, IoOther }
-use std::fixed_array::fns::new_fixed_array
 use std::number::to_string
 use std::optional::types::all
 use std::result::types::all
-use std::string::type::{ String, StringSlice, new_string }
+use std::string::type::{ String, StringSlice, appending_line_feed }
 
 pub obj StdOut {}
 pub obj StdErr {}
@@ -84,7 +83,7 @@ pub fn write_line(value: String): Output -> Result<Unit, IoError>
 /// This is the canonical line-oriented write API for this module. It always
 /// appends `\n` and does not inspect whether `value` already ends with one.
 pub fn write_line(value: StringSlice, target: OutputTarget): Output -> Result<Unit, IoError>
-  let line = line_string(value)
+  let line = appending_line_feed(value)
   write(line.as_slice(), target)
 
 /// Shorthand for `write_line(value.as_slice(), target)`.
@@ -151,20 +150,6 @@ pub fn is_tty(target: OutputTarget): Output -> bool
 
 fn encode_write_payload(value: String, target: OutputTarget): () -> OutputWriteRequest
   OutputWriteRequest { value: value, target: encode_output_target(target) }
-
-fn line_string(value: StringSlice): () -> String
-  let byte_count = value.byte_len()
-  let line_bytes = new_fixed_array<i32>(byte_count + 1)
-  var index = 0
-  while index < byte_count:
-    match(value.get_byte(index))
-      Some<i32> { value: byte }:
-        __array_set(line_bytes, index, byte)
-      None:
-        __array_set(line_bytes, index, 0)
-    index = index + 1
-  __array_set(line_bytes, byte_count, 10)
-  new_string(line_bytes)
 
 fn encode_write_bytes_payload(bytes: Bytes, target: OutputTarget): () -> OutputWriteBytesRequest
   OutputWriteBytesRequest { bytes: bytes, target: encode_output_target(target) }

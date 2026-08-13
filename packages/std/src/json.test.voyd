@@ -146,6 +146,27 @@ test "typed JSON decode composes nested arrays optional fields and enum payloads
         else:
           assert(false, eq: true)
 
+test "borrowed JSON APIs honor slice windows":
+  let document = "xx{\"version\":1,\"name\":\"orbit\"}yy".as_slice()
+    .slice(bytes: 2, len: 28)
+
+  match(parse(document))
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonObject:
+          assert(root.value.contains("name"), eq: true)
+        else:
+          assert(false, eq: true)
+
+  match(decode<VersionedName>(document))
+    Err<JsonDecodeError>:
+      assert(false, eq: true)
+    Ok<VersionedName> { value }:
+      assert(value.version, eq: 1)
+      assert(value.name, eq: "orbit")
+
 test "typed JSON decode reports precise nested paths and strict unknown fields":
   let mistyped = "{\"version\":1,\"profiles\":[{\"age\":7},{\"age\":\"old\"}],\"event\":\"DecodeStopped\"}"
   match(decode<DecodeRequest>(mistyped))
