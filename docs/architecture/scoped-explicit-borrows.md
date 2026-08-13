@@ -109,11 +109,72 @@ bounded runtime identity guard, or rejected. `~T` does not imply whole-program
 uniqueness. An optimizer may use no-alias facts only for the bounded access that
 the safety analysis proves.
 
-Ordinary `~T` duration remains local and non-lexical. It begins when exclusive
-access is activated and may end after the final local use. This requires only
-local control-flow analysis. A nested callable receives a bounded reborrow for
-its invocation; the compiler does not infer that duration through the call
-graph.
+### End ordinary exclusive access at its final local use
+
+Ordinary `~T` duration is local and non-lexical. It begins when exclusive
+access is activated and ends once the capability and every local alias derived
+from it have no possible later use on the current control-flow path.
+
+The checker must determine this from the current callable's control-flow graph.
+It must not inspect callers, recursively inspect callees, or propagate
+projection provenance through the call graph to find the end of an ordinary
+exclusive access. Branches and loops join conservatively when any continuing
+path may use the capability again.
+
+A call made after the final local use is not constrained by the ended
+capability:
+
+```voyd
+fn update(~state: State, notify: () : () -> void) -> void
+  state.count = state.count + 1
+  // state and its derived aliases have no later use.
+  notify() // allowed even when notify is opaque
+```
+
+The exclusive capability remains live across a call when it may be used later:
+
+```voyd
+fn update(~state: State, notify: () : () -> void) -> void
+  state.count = state.count + 1
+  notify() // requires a compatible bounded summary or guard
+  state.updated = true
+```
+
+For a live capability, call compatibility is determined only from the callee's
+finite ordinary summary. The safety checker must not recursively inspect the
+callee or construct arbitrary alias or projection provenance to prove the call
+safe. If the summary is insufficient, the compiler must use an allowed bounded
+runtime guard or reject the call.
+
+A nested callable that receives `~T` gets a bounded reborrow. When the caller
+uses the parent capability after the nested call, the parent remains suspended
+for the full nested invocation. The nested callable ending its own local use
+early does not resume the caller's parent capability early. Hazards published
+by the nested callable therefore describe its full invocation, including work
+performed after its own parameter's final local use.
+
+When passing `~T` is the caller's final use, the caller may end or transfer its
+capability at the call. There is then no parent capability to resume. The nested
+callable still determines the final use of its own parameter with local
+control-flow analysis.
+
+```voyd
+fn inner(~state: State, notify: () : () -> void) -> void
+  state.count = state.count + 1
+  notify() // after inner's final local use
+
+fn outer(~state: State, notify: () : () -> void) -> void
+  inner(~state, notify) // rejected if notify is opaque
+  state.updated = true // the parent would resume here
+
+fn finish(~state: State, notify: () : () -> void) -> void
+  inner(~state, notify) // allowed: passing state is finish's final use
+```
+
+`inner` publishes the reentrant-control hazard for its full invocation even
+though its own exclusive use ends before `notify`. `outer` must account for
+that hazard because its parent capability resumes. `finish` can transfer its
+final capability into the call, so no suspended parent remains.
 
 For an object, `~obj` covers the handle place and referenced allocation. For a
 `val`, `~value` is bounded inout access with logical copy-in and copy-out
@@ -138,10 +199,24 @@ normalized signature must never create explicit-borrow provenance facts.
 
 An ordinary callable summary contains only:
 
-- one access mode per parameter: `unused`, `read`, or `write`;
-- whether the callable accesses ambient object state;
-- whether it invokes an unknown callback; and
+- one direct access mode per parameter: `unused`, `read`, or `write`;
+- one reachable access mode per parameter: `unused`, `read`, or `write`;
+- one ambient reference-bearing access mode: `unused`, `read`, or `write`;
+- whether the callable invokes unknown or reentrant control; and
 - whether it may suspend.
+
+Direct access touches the parameter place, an object allocation named directly
+by the parameter, or inline data stored in the parameter. Reachable access
+follows an object handle stored in that data and touches another allocation.
+For example, rebinding `parent.child` is a direct write to `parent`, while
+mutating `parent.child.count` is a direct read plus a reachable write through
+`parent`. A `val` that contains an object handle uses the same distinction.
+
+Two access modes conflict when they may touch the same place or allocation and
+at least one is `write`. Direct access can use exact local place disjointness or
+exact root identity. Reachable access may touch any allocation reached after
+following a stored object handle. When either side relies on reachable access,
+different root identities are insufficient proof of disjointness.
 
 The summary has no field, tuple, index, dereference, region, result, or generic
 projection paths. Its number of states must not depend on object field count,
@@ -149,28 +224,53 @@ projection depth, generic nesting, returned aggregate shape, call-path count,
 or trait implementation count.
 
 Local analysis may distinguish fields and stable indices inside one callable.
-At an ordinary call or package boundary, access collapses to the whole
-parameter or allocation. A function such as this publishes only that it writes
-parameter zero:
+At an ordinary call or package boundary, access collapses to the parameter's
+direct and reachable modes. A function such as this publishes a direct read and
+reachable write for parameter zero:
 
 ```voyd
 fn update(~state: State) -> void
   state.profile.count = state.profile.count + 1
 ```
 
-Ordinary signatures provide access upper bounds: plain `T` permits at most
-`read`, and `~T` permits at most `write`. A concrete body may refine an unused
-parameter to `unused`. Every trait implementation is checked against the
-declared upper bound, and a dynamic caller uses that bound. Dynamic dispatch
-must not join field-sensitive implementation contracts.
+Ordinary signatures provide access upper bounds for both modes: plain `T`
+permits at most `read`, and `~T` permits at most `write`. A concrete body may
+refine either mode to `unused`. Every trait implementation is checked against
+the declared parameter upper bounds, and a dynamic caller uses those bounds.
+Dynamic dispatch must not join field-sensitive implementation contracts.
 
-Every callable with a `~T` parameter must prove that it does not perform
-potentially aliasing ambient object access, invoke an unknown callback, or
-suspend. This is a signature-level implementation obligation for ordinary
-functions, trait methods, and every trait implementation. It makes dynamic
-`~T` dispatch safe without joining implementation-specific provenance. A
-statically resolved helper may access state only when local analysis proves it
-disjoint from every active exclusive capability.
+Call compatibility also uses the callable's normalized effect row. The effect
+row comes from ordinary effect typing and is not inferred or widened by the
+mutation-summary solver. A non-empty, unknown, or polymorphic effect row is
+treated as reentrant control while an overlapping exclusive capability or
+scoped borrow is active. Allowing a checked non-reentrant effect requires a
+separate contract decision.
+
+An open trait declaration is the authoritative contract for dynamic calls. In
+the initial model, source syntax provides no promise that an open implementation
+avoids ambient reference-bearing state or reentrant control. Those hazards
+therefore default to `write` and `true` for an open dynamic call. Suspension
+also defaults to `true` unless the normalized declaration excludes it. The
+declaration's effect row is authoritative; an unknown or polymorphic row is
+hazardous. Implementations must fit the declared parameter modes, suspension,
+and effect row. A closed or statically resolved call may use its concrete finite
+summary. Future syntax may publish tighter ambient or reentrancy bounds, but an
+implementation must never be inspected transitively to tighten an open call.
+
+Every callable with a `~T` parameter must prove that, while one of its exclusive
+capabilities remains locally live, it does not perform potentially aliasing
+ambient object access, invoke incompatible reentrant control, perform an
+effect, or suspend. This is a local body obligation for ordinary functions,
+trait methods, and every trait implementation. Calls made after the
+capability's final local use are not restricted by that capability. This makes
+dynamic `~T` dispatch safe without joining implementation-specific provenance.
+A statically resolved helper may access state while a capability is live only
+when local analysis proves it disjoint.
+
+The published ambient, reentrant-control, suspension, and effect hazards cover
+the callable's full invocation, including code after its own parameter's final
+local use. This full-call contract protects a caller whose parent capability is
+suspended and later resumes.
 
 While an exclusive capability is active:
 
@@ -183,6 +283,13 @@ While an exclusive capability is active:
 
 The last rule is local to the caller. It is not a returned-origin contract
 published by the callee.
+
+Direct and reachable modes are separate safety facts. A runtime identity guard
+can prove that two exact object handles name different allocations. Comparing
+two root handles cannot prove that their reachable object graphs are disjoint.
+When a reachable access may overlap through different roots, the compiler must
+prove disjointness locally without traversing the object graph at runtime or
+reject the program.
 
 ### Prevent exclusive-capability laundering
 
@@ -310,6 +417,26 @@ parameters, overloads, defaults, imports, and callable adaptation. A callable
 with a plain `T` input cannot satisfy a callable type with a `Borrow<T>` input,
 and the reverse adaptation is also rejected.
 
+### Check ordinary aliases during scoped access
+
+Scoped access must remain compatible with ordinary aliases for its full
+invocation:
+
+- active `Borrow<T>` permits overlapping shared reads and forbids potentially
+  overlapping writes; and
+- active `~Borrow<T>` forbids potentially overlapping reads and writes.
+
+The checker applies these rules to direct arguments, local aliases, callback
+captures, module state, dynamic calls, and effects. A call inside the scope is
+checked from its direct and reachable parameter modes, ambient access mode,
+reentrant-control and suspension bits, and normalized effect row. The checker
+must not recursively inspect the callee to recover a better contract.
+
+A known exact root alias may use a bounded identity guard. Different root
+identities do not prove that reachable allocations are disjoint. Unknown
+reference-bearing ambient access, reentrant control, suspension, or effects are
+rejected when they could conflict with the active scoped access.
+
 ### Form exclusive scoped borrows
 
 `~value: Borrow<T>` means exclusive scoped access to the borrowed place. It is
@@ -361,6 +488,42 @@ impl<T> SharedCell<T>
 The runtime guard begins before the callback and ends after it returns. Shared
 callbacks may nest. Any overlap involving an exclusive callback fails through
 the existing panic or `Result` behavior.
+
+The runtime guard protects access made through the `SharedCell` API. It cannot
+observe access through an ordinary alias of the stored object or of an object
+reachable from it. Static compatibility rules therefore also apply for the
+full callback invocation:
+
+- while `Borrow<T>` is active, a potentially overlapping ordinary write is
+  forbidden;
+- while `~Borrow<T>` is active, a potentially overlapping ordinary read or
+  write is forbidden; and
+- the rules cover callback captures, parameters, module state, dynamic calls,
+  effects, and transitive calls through their finite published summaries.
+
+For example, keeping an ordinary alias before putting an object in a cell does
+not bypass exclusive access:
+
+```voyd
+let state = State { count: 0 }
+let cell = SharedCell<State>::init(state)
+
+cell.with_mut((~borrowed) =>
+  inspect(state) // rejected or guarded: state may be the stored object
+  borrowed.count = borrowed.count + 1
+)
+```
+
+The compiler may compare an explicit ordinary object handle with the guarded
+cell value using a bounded identity guard. Unequal root handles prove only that
+the roots differ. They do not prove that objects reachable through those roots
+are disjoint. Potentially overlapping reachable access requires a local proof
+or rejection; the compiler must not walk the object graph at runtime.
+
+Unknown reference-bearing ambient access is incompatible with an active cell
+borrow. A known finite summary may admit shared reads during `with`, but no
+ordinary access that could conflict with `with_mut`. Borrow non-escape and the
+cell's runtime guard remain separate required protections.
 
 An exclusive callback may rebind the stored value. When it returns, the cell
 writes the updated `val` or object handle back to its slot before ending the
@@ -547,8 +710,10 @@ cannot call an exclusive helper.
 Ordinary methods, callable adaptation, and dynamic or open-trait dispatch are
 rejected for a borrowed receiver. A trait method may accept an explicit
 `Borrow<T>` non-receiver parameter; every implementation is checked against
-that parameter type. Borrow-aware receiver syntax may be considered later, but
-this decision does not require it.
+that parameter type and the finite call hazards above. An open dynamic call
+uses the declaration's conservative ambient, reentrancy, suspension, and
+effect contract. Borrow-aware receiver syntax may be considered later, but this
+decision does not require it.
 
 ### Reject closure, effect, and host boundaries
 
@@ -621,13 +786,19 @@ The following rules are required for safety:
 - plain `T` never hides a source-level borrow;
 - `~T` remains exclusive for its active scope, including against reentrant
   access through ordinary aliases;
-- ordinary mutation summaries conservatively describe whole-parameter access,
-  ambient object access, unknown callbacks, and suspension;
+- ordinary mutation summaries conservatively distinguish direct and reachable
+  whole-parameter access and describe ambient access, reentrant control, and
+  suspension;
+- open dynamic calls use their declared parameter and effect bounds plus
+  conservative ambient, reentrancy, and unknown-suspension defaults;
 - uncertain ordinary call results are treated locally as possible aliases of
   their reference-bearing arguments;
 - an active exclusive capability cannot be stored, captured, returned,
   suspended, or erased as plain `T` at an unknown call;
 - `Borrow<T>` cannot escape, be stored, or be erased by generics;
+- an active `Borrow<T>` forbids potentially overlapping ordinary writes, and
+  an active `~Borrow<T>` forbids potentially overlapping ordinary reads and
+  writes, including access outside the `SharedCell` API;
 - shared access cannot be upgraded to exclusive access;
 - source-derived projections keep their scoped origin unless an independent
   copy is proven;
@@ -636,6 +807,8 @@ The following rules are required for safety:
 - active borrows cannot be captured or cross effect, suspension, task, or
   continuation boundaries;
 - uncertain overlap is guarded or rejected;
+- a root identity guard is never used as proof that reachable object graphs are
+  disjoint;
 - internal physical borrows materialize before ownership becomes observable;
 - host and Wasm imports, host and Wasm exports, FFI, and host boundaries cannot
   receive a source borrow.
@@ -648,24 +821,32 @@ synchronization.
 
 Most current application code in this repository is expected to keep working.
 Applications use ordinary values, `~`, and `SharedCell` callbacks rather than
-borrowed results. Code that invokes unknown callbacks during exclusive mutation
-must be restructured.
+borrowed results. An opaque callback is allowed after the final local use of an
+exclusive capability.
 
-Some safe callback-heavy mutation APIs may require restructuring. An unknown
-callback cannot run while `~T` is active because it could reenter through an
-ordinary alias:
+Some callback-heavy mutation APIs may require restructuring when an exclusive
+capability remains live across the callback:
 
 ```voyd
 fn update(~state: State, log: fn(String) : () -> void) -> void
   state.count = state.count + 1
-  log("updated") // rejected while log has unknown captured access
+  log("updated")
+  state.updated = true // keeps state live across log
 ```
 
-The initial alternatives are to finish exclusive mutation before invoking the
-callback, pass an independent value to a statically resolved helper, or use an
-explicit runtime-checked abstraction such as `SharedCell`. A future callable
-effect or capture contract may accept more cases without restoring general
-provenance inference.
+This call requires a compatible bounded callback summary or guard. When neither
+is available, the initial alternatives are to finish exclusive mutation before
+invoking the callback, pass an independent value to a statically resolved
+helper, or use an explicit runtime-checked abstraction such as `SharedCell`. A
+future callable effect or capture contract may accept more cases without
+restoring general provenance inference.
+
+Open dynamic calls are also conservative while an overlapping capability is
+active because the current trait syntax cannot promise the absence of ambient
+or reentrant access. Code can end the capability before the dynamic call, use a
+statically resolved helper, or accept a bounded guard where exact root identity
+is sufficient. Reachable graph overlap is rejected unless local structure
+proves disjointness.
 
 Scoped callbacks are less convenient when several borrowed values must be used
 together:
@@ -700,12 +881,37 @@ The compiler must remove:
 - detailed borrow facts for every callable whose normalized signature contains
   no `Borrow<T>`.
 
-Ordinary mutation summaries must use a finite representation such as numeric
-access modes and bit flags. Their equality must not depend on serializing
-structural contracts. The solver must operate with a dependency worklist, visit
-only callers whose dependency summary changed, and converge per strongly
-connected component. Its documented bound must depend on callable edges and the
-fixed summary lattice, not on projection-family cardinality.
+Ordinary mutation summaries must use numeric direct, reachable, and ambient
+access modes plus fixed hazard bits. Their equality must not depend on
+serializing structural contracts. The effect row is an already-normalized
+typing input rather than mutation-summary state.
+
+For a callable with `P` parameters, the mutation-summary lattice permits at
+most `H = 4P + 4` strict ascents: two each for the direct and reachable
+three-state mode of every parameter, two for the ambient three-state mode, and
+one each for the reentrant-control and suspension bits. Implementations may use
+a lower equivalent bound. They must not add a component whose height depends on
+fields, projections, results, generic shape, call paths, or implementations.
+
+The solver must operate with a dependency worklist and visit only callers whose
+dependency summary changed. For `C` affected callables and dependency edges
+`caller -> callee`, one solve may perform at most:
+
+```text
+C + sum(H(callee) for each affected dependency edge)
+```
+
+summary evaluations. Queue deduplication may reduce this count. Strongly
+connected components do not relax the bound. The implementation must count
+strict summary ascents, dependency enqueues, summary evaluations, and SCC body
+visits so the bound can be asserted directly.
+
+Local exclusive-liveness analysis must use a monotone bitset dataflow. For `B`
+control-flow blocks, `E` local control-flow edges, and `L` tracked local
+capabilities or derived aliases, it may insert at most `B * L` live-state facts
+and process at most `B + E * L` block work items. The implementation must count
+both values and assert these bounds. Callee size and call-graph depth are not
+inputs to this analysis.
 
 Explicit borrow provenance must be parameter-level across calls. Local
 field-sensitive facts must be discarded at the callable boundary. Programs
@@ -734,6 +940,12 @@ An exact-call optimization fact must be:
 - conservative at recursive, nested, dynamic, and unresolved call boundaries;
 - excluded from safety summaries and safety fixed points; and
 - irrelevant to whether the source program is accepted.
+
+The optimizer must enforce both a per-body fact budget and a compile-wide fact
+budget. It must count requests, cache hits, cache misses, body visits, analysis
+operations, budget exhaustion, and conservative bailouts by reason. Exhausting
+either budget selects the ordinary materialized fallback and cannot affect
+source acceptance.
 
 The ordinary ABI or materialized representation is always the fallback. An
 optimizer must not request general provenance inference merely to search for
@@ -773,6 +985,8 @@ disabled when it:
   opaque call, or conflicting mutation;
 - combines dynamic trait implementation details into a precise field
   footprint;
+- treats unequal root handles as proof of disjointness when either access may
+  reach shared subobjects;
 - elides an identity guard without an independent local proof; or
 - depends on returned or retained provenance that neither explicit Borrow
   analysis nor an exact-call optimization fact proves.
@@ -793,8 +1007,9 @@ include these workload families:
    four growth points;
 3. explicit-Borrow graphs that independently increase Borrow-aware calls,
    projection depth, and nested scoped callbacks;
-4. mutation graphs that vary direct calls, dynamic calls, callbacks, ambient
-   state, identity guards, and SCC shape;
+4. mutation graphs that vary direct and reachable access, shared subobjects,
+   direct calls, open dynamic calls, callbacks, ambient state, effects, identity
+   guards, nested reborrows, and SCC shape;
 5. a full `pkg::web` cold compile and a representative full-stack application;
 6. a warm source-only edit through one SDK instance;
 7. the historical V-499 selected-provider and host-boundary-disabled compiles
@@ -811,6 +1026,8 @@ Required measurements are:
 
 - total semantic and compilation time;
 - ordinary mutation-analysis time;
+- local exclusive-liveness block visits, state insertions, and convergence
+  iterations;
 - explicit borrow-analysis time;
 - callable and call-edge count;
 - ordinary summary evaluations and SCC reevaluations;
@@ -818,17 +1035,24 @@ Required measurements are:
 - projection-family and widening count;
 - retained summary bytes and peak resident memory;
 - optimized runtime and emitted Wasm size for affected fast paths; and
-- optimization acceptance and fallback counts by reason.
+- optimization acceptance and fallback counts by reason;
+- exact-call fact requests, cache hits, cache misses, body visits, analysis
+  operations, and per-body or compile-wide budget exhaustion; and
+- ordinary summary strict ascents, dependency enqueues, and solver-bound usage.
 
 The implementation must satisfy these structural gates:
 
 - increasing ordinary DTO field count does not increase interprocedural
   mutation-summary size;
 - ordinary mutation analysis creates no projection families or widenings;
+- ordinary exclusive-liveness work is bounded by the current callable's local
+  control-flow graph and local place count, satisfies the `B * L` state and
+  `B + E * L` work-item formulas above, and is independent of callee graph size;
 - a program with no `Borrow<T>` creates zero explicit-borrow provenance facts;
-- ordinary summary evaluations remain close to growth in affected call edges;
-- doubling repeated DTO topology does not produce superlinear summary-state
-  growth;
+- ordinary summary evaluations do not exceed the finite-lattice formula above;
+- for each of the two largest generated DTO size doublings, ordinary summary
+  evaluations, retained summary bytes, and local-liveness state insertions each
+  grow by no more than `2.25x`; exceeding that ratio is a scaling failure;
 - the selected-provider graph no longer routes ordinary `~T` functions through
   detailed borrow analysis;
 - exact-call optimization analysis stays within its configured work and memory
@@ -836,12 +1060,19 @@ The implementation must satisfy these structural gates:
 - removing the legacy contracts does not silently disable an accepted
   optimization without a recorded disposition and benchmark result.
 
+Before post-change performance measurements begin, the implementation PR must
+record numeric per-body and compile-wide optimizer budgets and numeric wall-time
+and memory regression limits for every required workload family. Those values
+may be changed later only with an explained design change and a new clean
+measurement run. This prevents a final result from selecting its own gate.
+
 The report must include the compiler revisions, hardware, commands, sample
-counts, warmup policy, distributions or ranges, raw counters, and same-machine
-ratios. Scaling conclusions must use the generated size series, not two
-endpoints. Counter and state-growth gates are authoritative across machines.
-Regressions must not be hidden with higher timeouts, fewer workers, test-only
-source batching, or benchmark-specific compiler branches.
+counts, warmup policy, distributions or ranges, raw counters, configured
+budgets, budget usage, and same-machine ratios. Scaling conclusions must use
+the generated size series, not two endpoints. Counter and state-growth gates
+are authoritative across machines. Regressions must not be hidden with higher
+timeouts, fewer workers, test-only source batching, or benchmark-specific
+compiler branches.
 
 The source-import dependency-snapshot miss described by the same investigation
 is separate. This decision does not remove the import surface from the cache
@@ -881,8 +1112,10 @@ performance.
 - Zero-copy access sometimes requires callback nesting.
 - Borrowed values use explicit Borrow-aware helpers instead of ordinary method
   dispatch.
-- Unknown callbacks and ambient object access are rejected during ordinary
-  exclusive mutation.
+- Unknown callbacks, open dynamic calls, effects, and uncertain ambient object
+  access are rejected while they may overlap active exclusive mutation.
+- Calls that may reach shared subobjects can be rejected even when their root
+  object handles differ.
 - Active borrows cannot be captured or used by effectful code.
 - Dynamic trait dispatch on a borrowed receiver is unavailable.
 - Host, Wasm, and FFI boundaries cannot accept source borrows.
@@ -945,16 +1178,21 @@ Implementation should proceed in this order:
 2. Inventory every compiler and codegen consumer of current borrowing
    contracts. Record whether each consumer will use the finite safety summary,
    explicit Borrow facts, a bounded exact-call optimization fact, or deletion.
-3. Introduce the finite ordinary mutation summary and dependency worklist.
+3. Introduce the finite direct, reachable, and ambient access modes, fixed
+   hazard bits, normalized-effect input, dependency worklist, and required
+   solver counters. Assert the finite-lattice evaluation bound.
 4. Route ordinary `~T` safety through that summary while preserving exclusive
    isolation, local place precision, bounded identity guards, and conservative
-   callback, ambient-access, result-alias, and suspension rules.
+   callback, ambient-access, result-alias, effect, reachable-graph, and
+   suspension rules. Implement local final-use analysis and full-invocation
+   parent suspension for nested reborrows.
 5. Add the unshadowable built-in `Borrow<T>` type, replace `borrow T`, and
    remove the parser's contextual prefix and custom generic-inner-type handling.
 6. Enforce normalized type-position, exact callable, formation, activation,
    reborrow, exclusive-access, and explicit Borrow-aware call rules.
-7. Migrate all four `SharedCell<T>` methods to `Borrow<T>` and
-   `~Borrow<T>`.
+7. Migrate all four `SharedCell<T>` methods to `Borrow<T>` and `~Borrow<T>`.
+   Enforce compatibility with pre-existing ordinary aliases in addition to the
+   cell's runtime guard.
 8. Preserve only parameter-level scoped origins across Borrow-aware calls. Keep
    field and index projections local. Apply the closed independent-result
    classification.
@@ -962,8 +1200,9 @@ Implementation should proceed in this order:
    generic arguments, ordinary borrowed-receiver dispatch, closure capture,
    effects, every host or Wasm import and export, every FFI signature, and every
    host call.
-10. Add the bounded exact-call optimization fact, migrate justified consumers,
-    and remove every optimization whose old proof is no longer valid.
+10. Add per-body and compile-wide budgets and counters for bounded exact-call
+    optimization facts, migrate justified consumers, and remove every
+    optimization whose old proof is no longer valid.
 11. Remove `ViewIterator`, `Array.view_iter()`, named regions,
     `@borrow_contract`, and their exports and syntax.
 12. Delete borrowed-result SCC inference, ordinary compact-contract
@@ -984,14 +1223,31 @@ Validation must cover observable behavior at the smallest useful boundaries.
 Required cases include:
 
 - ordinary `~obj` mutation isolation against aliases passed as other arguments;
+- acceptance of an opaque callback after the final local use of `~T`;
+- rejection, guarding, or bounded-summary admission of the same callback when
+  `~T` remains live after it;
+- conservative exclusive-liveness joins through branches and loops;
+- proof that ordinary last-use analysis inspects only the current callable's
+  control-flow graph and does not recursively inspect callees;
+- rejection when a nested reborrow ends its own local use before a reentrant
+  call but its caller resumes the parent capability after the nested call;
+- acceptance of the same nested call when passing the parent capability is the
+  caller's final use;
 - rejection of reentrant alias access through unknown callbacks, module state,
-  closures, effects, suspension, and dynamic calls with uncertain access;
+  closures, effects, suspension, and dynamic calls with uncertain access while
+  an overlapping exclusive capability remains live;
 - acceptance of statically resolved helpers whose bounded summaries are
   compatible with an active exclusive capability;
 - local field and stable-index disjointness plus bounded identity guards for
-  dynamically uncertain argument overlap;
-- whole-parameter access summaries for generic functions and trait methods,
-  with every implementation checked against the declared access modes;
+  dynamically uncertain exact-root overlap;
+- direct and reachable whole-parameter modes for generic functions, object
+  graphs, and `val` values containing object handles;
+- rejection of a reachable shared-object conflict through unequal root handles,
+  proving that a root identity guard does not establish graph disjointness;
+- finite trait-method parameter and effect contracts, with every implementation
+  checked against the declaration;
+- conservative ambient, reentrant-control, suspension, and effect defaults for
+  open dynamic calls while an overlapping capability is active;
 - conservative local aliasing of reference-bearing call results;
 - rejection of active `~T` storage, capture, plain-value laundering, exclusive
   capability results, and exclusive reborrow overlap;
@@ -1000,6 +1256,12 @@ Required cases include:
 - `~val` logical writeback and conservative materialization;
 - shared and exclusive `SharedCell` callbacks;
 - nested shared callbacks and runtime conflict behavior;
+- rejection or a sufficient exact-root guard when a `SharedCell` callback
+  accesses a pre-existing ordinary alias of the stored object;
+- rejection of reachable alias access through a different root during a
+  `SharedCell` callback unless local structure proves disjointness;
+- acceptance of compatible ordinary shared reads during `SharedCell.with` and
+  rejection of potentially overlapping ordinary writes;
 - exact `SharedCell` signatures, exclusive `val` writeback, object-handle
   rebinding, and guard completion;
 - scoped borrow helper parameters;
@@ -1040,8 +1302,13 @@ Required cases include:
   suspension, task, host or Wasm import, host or Wasm export, FFI, and host call;
 - parameter-level Borrow origins across module boundaries without published
   field or index paths;
-- exact-call optimization facts are demand-driven, budgeted, cached, and never
-  affect source acceptance;
+- exact-call optimization facts are demand-driven, cached, constrained by
+  declared per-body and compile-wide budgets, and never affect source
+  acceptance;
+- exact-call fact counters cover cache misses, body visits, analysis operations,
+  budget exhaustion, and conservative bailouts;
+- ordinary summary evaluations satisfy the finite-lattice formula, and the
+  generated scaling series satisfies the `2.25x` doubling gates;
 - stable-field forwarding retains its proven exact-call cases and falls back
   for whole-parameter writes, dynamic calls, or missing field proof;
 - mutable aggregate promotion retains its proven fresh exact-call cases and
