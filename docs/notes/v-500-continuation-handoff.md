@@ -17,9 +17,8 @@ worktree.
   followed by the handoff and runner-fix commits `55975193`, `52f2f41b`, and
   `265a0ea0`.
 - Performance artifacts now exist under
-  `docs/notes/artifacts/v500/6dfde641/`. The artifact packaging and the final
-  edits to this handoff and `v-500-scoped-borrows-results.md` are uncommitted at
-  the time of this update; commit and push them together before opening the PR.
+  `docs/notes/artifacts/v500/6dfde641/`. The artifacts and final performance
+  report are committed as `1768d6ee` (`Record V-500 performance evidence`).
 - Continue from these commits and files; do not reset or discard them.
 - Linear V-500 is already **In Progress** and assigned to Drew.
 - Required PR title: `[V-500] Implement scoped explicit borrows`
@@ -110,10 +109,11 @@ on 2026-08-12:
   desktop sandbox);
 - `git diff --check`: passed.
 
-The implementation is committed and pushed. Bounded clean performance
-measurement is complete, its report has been filled with honest conclusions,
-and the raw artifacts have been packaged with hashes. The remaining work is to
-commit/push the report and artifacts, open the ready PR, and update Linear.
+The implementation and performance evidence are committed. Bounded clean
+performance measurement is complete, its report has been filled with honest
+conclusions, and the raw artifacts have been packaged with hashes. The
+remaining work is to push the final commits, open the ready PR, and update
+Linear.
 
 ## Review-loop state
 
@@ -161,9 +161,8 @@ the long matrix unless new evidence points to a real regression.
 
 Next steps:
 
-1. Review `git diff --check` and documentation links.
-2. Commit the report, artifact manifest, and compressed JSON files.
-3. Push the branch, open the ready PR, and update Linear V-500.
+1. Push the branch.
+2. Open the ready PR and update Linear V-500.
 
 ## Publish and Linear completion
 
