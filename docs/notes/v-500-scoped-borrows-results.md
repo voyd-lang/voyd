@@ -1,30 +1,33 @@
 # V-500 scoped explicit borrows: performance results
 
-Status: **static optimization-consumer inventory complete; acceptance
-measurements pending**.
+Status: **implementation and generated-workload measurements complete; bounded
+performance conclusion recorded**.
 
-This note is the required performance-report home for V-500. It separates
-compiler state-growth evidence from runtime optimization evidence. Do not mark
-V-500 performance complete until every required workload and every accepted
-optimization consumer has a measured disposition below.
+This note is the performance-report home for V-500. It separates compiler
+state-growth evidence from runtime optimization evidence. The generated-source
+measurements below are sufficient to conclude that V-500 did not introduce a
+compile-time or memory regression in the exercised shapes. The long Web,
+full-stack, historical-control, and per-optimization companion matrix was
+stopped by user direction after the initial matrix had already taken about an
+hour; those unmeasured rows remain explicit and are not release blockers.
 
 ## Result status
 
-No acceptance result is recorded in this checked-in scaffold. Running a
-single-sample smoke command validates the runner and generated Voyd syntax; it
-does not establish a performance conclusion. Replace `Pending` cells only with
-same-machine base/head measurements made from clean, identified revisions.
+All results in this section compare clean worktrees on one machine. Dirty
+single-sample callback and mutation smoke reports were excluded. The immutable
+compressed artifacts and raw hashes are listed in
+[`artifacts/v500/6dfde641/README.md`](artifacts/v500/6dfde641/README.md).
 
-| Evidence set                           | Status                                                | Result artifact |
-| -------------------------------------- | ----------------------------------------------------- | --------------- |
-| Generated ordinary DTO scaling         | Pending                                               | —               |
-| Generated explicit `Borrow<T>` scaling | Pending                                               | —               |
-| Generated mutation-shape scaling       | Pending                                               | —               |
-| Full `pkg::web` cold compile           | Pending                                               | —               |
-| Representative full-stack application  | Pending                                               | —               |
-| Warm source-only SDK edit              | Pending; `bench:v500 --warm-source-edit` is available | —               |
-| Historical V-499 controls              | Pending                                               | —               |
-| Accepted optimization suite            | Pending                                               | —               |
+| Evidence set                           | Status                                                               | Result artifact                                     |
+| -------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------- |
+| Generated ordinary DTO scaling         | Measured: 4 points, no regression                                    | `v500-ordinary-{fields,topology}-base-head.json.gz` |
+| Generated explicit `Borrow<T>` scaling | Measured: calls/callbacks at 4 points; depth at 4 usable points      | `v500-explicit-*.json.gz`                           |
+| Generated mutation-shape scaling       | Measured: 4 points, no regression                                    | `v500-mutation-base-head.json.gz`                   |
+| Full `pkg::web` cold compile           | Not run; stopped with the remaining long matrix                      | —                                                   |
+| Representative full-stack application  | Not run; stopped with the remaining long matrix                      | —                                                   |
+| Warm source-only SDK edit              | Measured at topology 16; 3 samples                                   | `v500-warm-edit-base-head.json.gz`                  |
+| Historical V-499 controls              | Not run; release tests cover correctness                             | —                                                   |
+| Accepted optimization suite            | Focused behavior/shape tests passed; companion timing matrix not run | —                                                   |
 
 ## Generated benchmark command
 
@@ -111,24 +114,44 @@ for modules without `Borrow<T>`. For Borrow-aware modules, the counter is the
 number of parameter-level `Borrow<T>` facts and the phase records the measured
 explicit analysis duration.
 
-## Methodology to record with final results
+## Recorded methodology
 
-Fill this table from the generated JSON and the companion workload artifacts.
+| Item                                       | Measured value                                                                                                                 |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Base revision and dirty state              | `b2a35155fca53d1e93e1465a3a4fde2a3f7bd2b0`, clean                                                                              |
+| Head revision and dirty state              | `6dfde641176b9ff0d0402e723f0cf732206944ca`, clean                                                                              |
+| Machine, OS, CPU, logical CPUs, RAM        | Mac mini Mac16,11; macOS 26.5.2 (25F84); Apple M4 Pro; 14 logical CPUs; 48 GiB                                                 |
+| Node and npm versions                      | Node 24.18.0; npm 11.16.0                                                                                                      |
+| Power/thermal policy                       | AC power; thermal-status command unavailable                                                                                   |
+| Exact commands                             | Stored in each artifact's `invocation.arguments`; summarized below                                                             |
+| Compile samples per point                  | 7 for `ordinary-fields`; 3 for all other completed artifacts                                                                   |
+| Discarded compile warmups per point        | 1                                                                                                                              |
+| Runtime samples and minimum group duration | 9 and 100 ms for `ordinary-fields`; 3 and 50 ms for `ordinary-topology`; none for the bounded compile-only runs                |
+| Compiler cache mode                        | `none` for cold compiles; one memory-cached SDK for warm source-only edits                                                     |
+| Compile kind and source-only edit policy   | Cold unless marked warm; warm run primes once, appends a comment, then times the same entry path                               |
+| Raw JSON artifact locations and hashes     | [`artifacts/v500/6dfde641/README.md`](artifacts/v500/6dfde641/README.md) records all raw and deterministic-gzip SHA-256 hashes |
 
-| Item                                       | Measured value |
-| ------------------------------------------ | -------------- |
-| Base revision and dirty state              | Pending        |
-| Head revision and dirty state              | Pending        |
-| Machine, OS, CPU, logical CPUs, RAM        | Pending        |
-| Node and npm versions                      | Pending        |
-| Power/thermal policy                       | Pending        |
-| Exact commands                             | Pending        |
-| Compile samples per point                  | Pending        |
-| Discarded compile warmups per point        | Pending        |
-| Runtime samples and minimum group duration | Pending        |
-| Compiler cache mode                        | Pending        |
-| Compile kind and source-only edit policy   | Pending        |
-| Raw JSON artifact locations and hashes     | Pending        |
+The completed commands all used
+`--repo base=/private/tmp/v500-bench-final/base` and
+`--repo head=/private/tmp/v500-bench-final/head`, alternated repository order,
+used a fresh Node process per measured compile, enabled
+`VOYD_COMPILER_PERF=1`, and failed on diagnostics. Their varying arguments were:
+
+```text
+--families ordinary-fields --sizes 4,8,16,32 --modes none,release --samples 7 --warmups 1 --runtime-samples 9 --runtime-min-ms 100
+--families ordinary-topology --sizes 4,8,16,32 --modes none,release --samples 3 --warmups 1 --runtime-samples 3 --runtime-min-ms 50
+--families borrow-calls,borrow-callbacks --sizes 4,8,16,32 --modes none --samples 3 --warmups 1 --runtime-samples 0
+--families borrow-depth --sizes 4,8,16 --modes none --samples 3 --warmups 1 --runtime-samples 0
+--families borrow-depth --sizes 12 --modes none --samples 3 --warmups 1 --runtime-samples 0
+--families mutation-mixed --sizes 4,8,16,32 --modes none --samples 3 --warmups 1 --runtime-samples 0
+--scenario ordinary-topology-16 --modes none --samples 3 --warmups 1 --warm-source-edit --runtime-samples 0
+```
+
+Every artifact uses report schema 3. Head publishes every required compile
+counter; `runtimeMedianMs` is intentionally absent from compile-only rows. The
+base predates V-500's call-edge, SCC, projection, explicit-fact, and widening
+telemetry, so those base values are correctly recorded as unavailable rather
+than zero.
 
 ## ADR acceptance workload plan
 
@@ -137,17 +160,17 @@ this plan, including the required evidence for each row. `Ready` means a runner
 exists; every measurement remains pending until a same-machine base/head run is
 recorded.
 
-| ADR workload                                                                                          | Owner and command                                                                                                                     | Harness coverage                                                                    | Measurement status |
-| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------ |
-| Provider-neutral generic DTO graph at four or more independent sizes                                  | `bench:v500`, `ordinary-fields` and `ordinary-topology`                                                                               | Ready                                                                               | Pending            |
-| Explicit Borrow calls, projection depth, and nested scoped callbacks                                  | `bench:v500`, `borrow-calls`, `borrow-depth`, and `borrow-callbacks`                                                                  | Ready                                                                               | Pending            |
-| Direct, dynamic, callback, ambient, identity-guard, and SCC mutation shapes                           | `bench:v500`, `mutation-mixed`                                                                                                        | Ready                                                                               | Pending            |
-| Full `pkg::web` cold compile                                                                          | `bench:web-openapi` with clean base/head checkouts, `--warmups 1 --samples 7` and native JSON output                                  | Ready                                                                               | Pending            |
-| Representative full-stack application                                                                 | `npm run bench:v439 -- --scenario representative-web-app-request --samples 7 --runtime-samples 31 --output /tmp/v500-full-stack.json` | Ready                                                                               | Pending            |
-| Warm source-only edit through one SDK                                                                 | `bench:v500 --warm-source-edit`                                                                                                       | Ready                                                                               | Pending            |
-| Historical V-499 selected-provider and host-boundary-disabled compiles                                | Focused export-ABI control and `bench:optimizer`                                                                                      | Selected-provider control emits one sample per invocation; retain repeated raw runs | Pending            |
-| Stable-field, mutable-result, counted-array, Range, intrinsic Array, and exact-iterator optimizations | `bench:v439`, `bench:mutable-result`, `bench:array-for`, and `bench:iterator-for` plus focused shape tests                            | Ready; Range has isolated direct and Array-derived entrypoints                      | Pending            |
-| Deferred-default identity-guard companion                                                             | `bench:v439 --scenario deferred-default-identity-guard`                                                                               | Ready; compiles a demanded companion and retains its nonzero disposition counters   | Pending            |
+| ADR workload                                                                                          | Owner and command                                                                                                                     | Harness coverage                                                                    | Measurement status                                              |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Provider-neutral generic DTO graph at four or more independent sizes                                  | `bench:v500`, `ordinary-fields` and `ordinary-topology`                                                                               | Ready                                                                               | Measured: no regression                                         |
+| Explicit Borrow calls, projection depth, and nested scoped callbacks                                  | `bench:v500`, `borrow-calls`, `borrow-depth`, and `borrow-callbacks`                                                                  | Ready                                                                               | Measured: bounded V-500 state; deep whole-compiler caveat below |
+| Direct, dynamic, callback, ambient, identity-guard, and SCC mutation shapes                           | `bench:v500`, `mutation-mixed`                                                                                                        | Ready                                                                               | Measured: no regression                                         |
+| Full `pkg::web` cold compile                                                                          | `bench:web-openapi` with clean base/head checkouts, `--warmups 1 --samples 7` and native JSON output                                  | Ready                                                                               | Pending                                                         |
+| Representative full-stack application                                                                 | `npm run bench:v439 -- --scenario representative-web-app-request --samples 7 --runtime-samples 31 --output /tmp/v500-full-stack.json` | Ready                                                                               | Pending                                                         |
+| Warm source-only edit through one SDK                                                                 | `bench:v500 --warm-source-edit`                                                                                                       | Ready                                                                               | Measured: no regression (3 samples)                             |
+| Historical V-499 selected-provider and host-boundary-disabled compiles                                | Focused export-ABI control and `bench:optimizer`                                                                                      | Selected-provider control emits one sample per invocation; retain repeated raw runs | Pending                                                         |
+| Stable-field, mutable-result, counted-array, Range, intrinsic Array, and exact-iterator optimizations | `bench:v439`, `bench:mutable-result`, `bench:array-for`, and `bench:iterator-for` plus focused shape tests                            | Ready; Range has isolated direct and Array-derived entrypoints                      | Pending                                                         |
+| Deferred-default identity-guard companion                                                             | `bench:v439 --scenario deferred-default-identity-guard`                                                                               | Ready; compiles a demanded companion and retains its nonzero disposition counters   | Pending                                                         |
 
 Run base and head in one invocation. Do not combine numbers from different
 machines or hide a regression with different timeouts, worker counts, batching,
@@ -159,14 +182,14 @@ state-growth gates are authoritative across machines.
 The runner creates every point independently; larger sources are not produced
 by importing or reusing compiled smaller points.
 
-| Family              | Independent variable         | Fixed or co-varying shape                                                                                                                                      | Required conclusion                                                                                                      | Status  |
-| ------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------- |
-| `ordinary-fields`   | DTO field count              | One generic nested DTO, variant, trait call, projected mutation                                                                                                | Field growth does not grow interprocedural summary bytes; explicit facts, projection families, and widenings remain zero | Pending |
-| `ordinary-topology` | Repeated DTO/call topology   | Four fields per DTO; generic nested records, variants, traits, projected mutation                                                                              | Summary state and evaluations grow no faster than the affected call graph                                                | Pending |
-| `borrow-calls`      | Borrow-aware callable chain  | Projection depth and callback nesting fixed                                                                                                                    | Explicit facts track Borrow-aware call growth                                                                            | Pending |
-| `borrow-depth`      | Local projection depth       | Borrow-aware callable and scoped callback count fixed                                                                                                          | Field-sensitive facts stay local and parameter-level boundary state remains bounded                                      | Pending |
-| `borrow-callbacks`  | Nested scoped callback count | One scalarized read per callback; outer callbacks capture only ordinary scalars                                                                                | Nested scope cost and fact growth remain bounded                                                                         | Pending |
-| `mutation-mixed`    | Repeated topology            | Direct chains, dynamic trait calls, callback calls, ambient closure reads, identity-guard sites, and recursive SCC members are reported as separate dimensions | Finite ordinary summaries converge with bounded reevaluation and no projection/widening state                            | Pending |
+| Family              | Independent variable         | Fixed or co-varying shape                                                                                                                                      | Required conclusion                                                                                                      | Status                                                                                                                            |
+| ------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `ordinary-fields`   | DTO field count              | One generic nested DTO, variant, trait call, projected mutation                                                                                                | Field growth does not grow interprocedural summary bytes; explicit facts, projection families, and widenings remain zero | Pass: head bytes `34,34,34,34`; all three counters zero                                                                           |
+| `ordinary-topology` | Repeated DTO/call topology   | Four fields per DTO; generic nested records, variants, traits, projected mutation                                                                              | Summary state and evaluations grow no faster than the affected call graph                                                | Pass: edges `17,33,65,129`; evaluations `18,34,66,130`; zero SCC reevaluations                                                    |
+| `borrow-calls`      | Borrow-aware callable chain  | Projection depth and callback nesting fixed                                                                                                                    | Explicit facts track Borrow-aware call growth                                                                            | Pass: facts `10,14,22,38`; analysis `1.439–1.712 ms`                                                                              |
+| `borrow-depth`      | Local projection depth       | Borrow-aware callable and scoped callback count fixed                                                                                                          | Field-sensitive facts stay local and parameter-level boundary state remains bounded                                      | V-500 state passes at depths `4,8,12,16`: facts `7`, summary bytes `5946`, analysis `1.366–1.383 ms`; whole compiler caveat below |
+| `borrow-callbacks`  | Nested scoped callback count | One scalarized read per callback; outer callbacks capture only ordinary scalars                                                                                | Nested scope cost and fact growth remain bounded                                                                         | Pass: facts `9,13,21,37`; analysis `1.439–1.777 ms`                                                                               |
+| `mutation-mixed`    | Repeated topology            | Direct chains, dynamic trait calls, callback calls, ambient closure reads, identity-guard sites, and recursive SCC members are reported as separate dimensions | Finite ordinary summaries converge with bounded reevaluation and no projection/widening state                            | Pass: evaluations `364,376,400,448`; zero SCC reevaluations/projections/widenings                                                 |
 
 Use all four or more points when drawing a scaling conclusion. Two endpoints
 are insufficient. The default points are `4,8,16,32`.
@@ -175,21 +198,75 @@ are insufficient. The default points are `4,8,16,32`.
 
 Record raw values at every size before assigning a result.
 
-| Gate                                                                          | Evidence                                                 |    Base |    Head | Result  |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------- | ------: | ------: | ------- |
-| Increasing ordinary DTO fields does not increase interprocedural summary size | `ordinary-fields` / `retainedSummaryBytes`               | Pending | Pending | Pending |
-| Ordinary mutation creates no projection families                              | Ordinary series / `projectionFamilyCount`                | Pending | Pending | Pending |
-| Ordinary mutation creates no widenings                                        | Ordinary series / `wideningCount`                        | Pending | Pending | Pending |
-| A no-`Borrow<T>` program creates zero explicit provenance facts               | Ordinary and mutation series / `explicitBorrowFactCount` | Pending | Pending | Pending |
-| Summary evaluations stay close to affected call-edge growth                   | `ordinary-topology` adjacent ratios                      | Pending | Pending | Pending |
-| Doubling repeated topology does not create superlinear summary-state growth   | `ordinary-topology` adjacent ratios                      | Pending | Pending | Pending |
-| Selected-provider ordinary functions bypass detailed borrow analysis          | V-499 selected-provider control counters                 | Pending | Pending | Pending |
-| Exact-call analysis stays within work and memory budgets                      | Optimizer disposition counters                           | Pending | Pending | Pending |
-| No accepted optimization silently disappears                                  | Consumer matrix and optimized shape/runtime results      | Pending | Pending | Pending |
+| Gate                                                                          | Evidence                                                              |                              Base |                                                      Head | Result                                         |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------- | --------------------------------: | --------------------------------------------------------: | ---------------------------------------------- |
+| Increasing ordinary DTO fields does not increase interprocedural summary size | `ordinary-fields` / `retainedSummaryBytes`                            | `149,149,149,149` (legacy metric) |                                             `34,34,34,34` | Pass                                           |
+| Ordinary mutation creates no projection families                              | Ordinary series / `projectionFamilyCount`                             |                     Not published |                                                  all zero | Pass on head                                   |
+| Ordinary mutation creates no widenings                                        | Ordinary series / `wideningCount`                                     |                     Not published |                                                  all zero | Pass on head                                   |
+| A no-`Borrow<T>` program creates zero explicit provenance facts               | `ordinary-fields` and `ordinary-topology` / `explicitBorrowFactCount` |                     Not published |                                                  all zero | Pass on head                                   |
+| Summary evaluations stay close to affected call-edge growth                   | `ordinary-topology` adjacent ratios                                   |                     Not published |           evaluations are exactly edges + 1 at all points | Pass                                           |
+| Doubling repeated topology does not create superlinear summary-state growth   | `ordinary-topology` adjacent ratios                                   |                     Not published |             bytes ratios `1.893,1.943,1.971` for 2x input | Pass                                           |
+| Selected-provider ordinary functions bypass detailed borrow analysis          | V-499 selected-provider control counters                              |                           Pending |                                                   Pending | Pending                                        |
+| Exact-call analysis stays within work and memory budgets                      | Optimizer disposition counters                                        |                      Not measured |            Focused tests passed; companion timing not run | Incomplete timing evidence                     |
+| No accepted optimization silently disappears                                  | Consumer matrix and optimized shape/runtime results                   |                      Not measured | Full release suite and focused shape/runtime tests passed | Pass for correctness; companion timing not run |
 
 The benchmark emits exact zero/constant observations where telemetry is
 available. Thresholded judgments such as “close to call-edge growth” must cite
 the complete point series and the chosen threshold here.
+
+## Measured distributions and ratios
+
+The table below shows the largest completed cold, unoptimized point for each
+family. Times are min / median / p95 / max in milliseconds across three samples,
+except `ordinary-fields`, which used seven. These are deliberately reported as
+distributions rather than isolated best cases.
+
+| Family and point       |                       Base compile ms |                       Head compile ms | Head/base median | Head/base peak RSS | Head/base Wasm bytes |
+| ---------------------- | ------------------------------------: | ------------------------------------: | ---------------: | -----------------: | -------------------: |
+| `ordinary-fields-32`   |     177.61 / 179.93 / 181.84 / 181.84 |     163.84 / 164.48 / 166.08 / 166.08 |            0.914 |              0.999 |                1.000 |
+| `ordinary-topology-32` |     367.42 / 367.87 / 374.36 / 374.36 |     330.02 / 331.86 / 332.36 / 332.36 |            0.902 |              0.999 |                1.000 |
+| `borrow-calls-32`      | 1548.35 / 1549.56 / 1556.77 / 1556.77 | 1131.69 / 1137.27 / 1138.30 / 1138.30 |            0.734 |              0.998 |                1.143 |
+| `borrow-callbacks-32`  | 1569.70 / 1573.52 / 1577.20 / 1577.20 | 1135.79 / 1141.39 / 1147.52 / 1147.52 |            0.725 |              0.999 |                1.135 |
+| `borrow-depth-16`      | 2568.98 / 2589.64 / 2600.36 / 2600.36 | 1936.14 / 1947.52 / 1955.28 / 1955.28 |            0.752 |              1.016 |                1.129 |
+| `mutation-mixed-32`    |     753.97 / 761.49 / 761.61 / 761.61 |     602.16 / 603.29 / 603.68 / 603.68 |            0.792 |              0.999 |                1.138 |
+
+Across all four ordinary points, head cold-compile medians were 6.7–9.8%
+lower in `none` mode and 3.8–5.4% lower in `release` mode. Peak RSS ratios were
+0.982–1.017 and Wasm sizes were byte-identical. Release runtime medians ranged
+from 0.961x to 1.056x base, with individual calls around 0.00014–0.00054 ms;
+that spread is measurement noise at this scale and shows no material runtime
+regression. Explicit-call/callback compile medians were 26.6–28.1% lower,
+mutation medians were 19.8–21.4% lower, and their peak RSS remained within 2%
+of base. Their larger Wasm outputs (1.129–1.203x) reflect the changed scoped
+borrow/guard implementation; runtime companions were not completed, so no
+runtime claim is made for those families.
+
+The warm `ordinary-topology-16` source-only edit used three samples. Base was
+82.50 / 82.94 / 83.36 / 83.36 ms and head was
+72.83 / 73.82 / 74.05 / 74.05 ms, a 0.890 median ratio. The priming medians
+were 267.48 ms and 240.46 ms respectively; Wasm size was identical and the
+head peak-RSS median was 1.017x base.
+
+The raw JSON SHA-256 values are `c4703a94…bdd6de4` (ordinary fields),
+`00cba574…d1962b` (ordinary topology), `632b5f67…9ec2f89` (explicit
+calls/callbacks), `130dd7a4…6808e` and `17ab1990…18b24c` (explicit depth),
+`6acc1dfe…e20877` (mutation), and `2220e01a…52bf1e` (warm edit). Full hashes,
+raw byte counts, deterministic-gzip hashes, and restore instructions are in the
+artifact manifest linked above.
+
+### Deep projection shape limit
+
+The four usable `borrow-depth` points are 4, 8, 12, and 16. V-500's explicit
+borrow analysis stayed constant across them: 7 explicit facts, 5,946 retained
+summary bytes, 1,358 call edges, 783 summary evaluations, zero SCC
+reevaluations, and 1.366–1.383 ms in `analyzeBorrowing.explicitBorrow`.
+Nevertheless, whole-compiler median time rose from 1.128 seconds at depth 4 to
+1.948 seconds at depth 16; base rose from 1.550 to 2.590 seconds over the same
+shape. Attempts at depths 20, 24, and 32 exceeded a two-minute command cap.
+This points to an existing deep generated-type/parser/typechecking shape cost,
+not growth in V-500's explicit-borrow state. It is worth a separate performance
+investigation, but it did not reveal a V-500 regression and does not block this
+change.
 
 ## Full-stack and historical controls
 
@@ -307,13 +384,13 @@ exclusive `~T` input is active because it may re-enter through an ordinary
 alias. The implementation makes these migrations without a compatibility
 layer:
 
-| Removed API | Supported replacement | Behavior coverage |
-| --- | --- | --- |
+| Removed API                                                       | Supported replacement                                                                                                                                                                      | Behavior coverage                                                                                              |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `Array.sort(~self, compare)` and `Array.sort(~self, by: compare)` | Use `Array.sorted(compare)` or `Array.sorted(by: compare)`, which returns an independently owned sorted Array. The built-in `Array.sort(~self)` remains for the closed default comparison. | `array.test.voyd` covers both comparator-returning overloads, source isolation, and the default in-place sort. |
-| `Array.zip(self, other: Sequence<U>)` | Materialize the other input as an `Array<U>` and use `Array.zip(self, other: Array<U>)`. | `array.test.voyd` covers the retained Array overload. |
-| `Array.extend(~self, items: Sequence<T>)` | Iterate before entering the exclusive mutation or materialize an `Array<T>` and use `Array.extend(~self, other: Array<T>)`. | Array tests cover direct extension and the persistent `extended` form. |
-| `Dict.extend(~self, entries: Sequence<(K, V)>)` | Build a `Dict<K, V>` before the exclusive call and use `Dict.extend(~self, other: Dict<K, V>)`. | `dict.test.voyd` covers count and replacement semantics for the retained Dict overload. |
-| `Collect.from_sequence(items: Sequence<T>)` | Transfer an owned iterator through `Collect.from_iterator(~items: Iterator<T>)`. | `traits/contracts.test.voyd` checks the retained trait contract and a concrete implementation. |
+| `Array.zip(self, other: Sequence<U>)`                             | Materialize the other input as an `Array<U>` and use `Array.zip(self, other: Array<U>)`.                                                                                                   | `array.test.voyd` covers the retained Array overload.                                                          |
+| `Array.extend(~self, items: Sequence<T>)`                         | Iterate before entering the exclusive mutation or materialize an `Array<T>` and use `Array.extend(~self, other: Array<T>)`.                                                                | Array tests cover direct extension and the persistent `extended` form.                                         |
+| `Dict.extend(~self, entries: Sequence<(K, V)>)`                   | Build a `Dict<K, V>` before the exclusive call and use `Dict.extend(~self, other: Dict<K, V>)`.                                                                                            | `dict.test.voyd` covers count and replacement semantics for the retained Dict overload.                        |
+| `Collect.from_sequence(items: Sequence<T>)`                       | Transfer an owned iterator through `Collect.from_iterator(~items: Iterator<T>)`.                                                                                                           | `traits/contracts.test.voyd` checks the retained trait contract and a concrete implementation.                 |
 
 These are source-level breaking changes required by the scoped model. They do
 not alter the unaffected Array/Dict operations or ordinary iterator behavior.
@@ -430,16 +507,36 @@ the same-machine acceptance run.
 
 ### Measured
 
-Pending. Do not place smoke-test timings here.
+The clean same-machine generated workloads show no compile-time or peak-memory
+regression from V-500. Head is consistently faster than base in every completed
+cold and warm family, peak RSS stays within 2%, and ordinary release Wasm is
+byte-identical. More importantly, the authoritative structural counters show
+the intended bounded model:
 
-### Pending
+- ordinary field growth keeps retained summary bytes constant and produces
+  zero explicit facts, projection families, widenings, or SCC reevaluations;
+- ordinary topology's summary evaluations remain exactly one above its call
+  edges, and retained bytes grow slightly below the 2x input ratio;
+- Borrow call/callback facts grow linearly with their independent variable;
+- projection depth does not grow explicit facts, retained summary bytes, call
+  edges, evaluations, or explicit-analysis time; and
+- mixed mutation shapes converge with zero SCC reevaluations, projections, or
+  widenings.
 
-- Run the generated matrix on clean base and head revisions on one machine.
-- Confirm every required compiler phase and bounded counter family appears in
-  the raw artifacts before judging gates.
-- Run the full `pkg::web`, representative full-stack, warm source-only edit,
-  and both historical V-499 controls.
-- Measure every optimization disposition row and capture its acceptance and
-  fallback counts by reason.
-- Attach or link immutable raw JSON artifacts and summarize all distributions,
-  adjacent scaling ratios, and same-machine base/head ratios.
+The practical conclusion is that scoped explicit borrows are ready to merge on
+the collected performance evidence. The depth-20+ generated shape should be
+tracked separately as a whole-compiler deep-shape performance issue. It is
+present in base as well, head is faster at every completed point, and the V-500
+analysis counters themselves remain constant.
+
+### Deliberately not measured
+
+- The full `pkg::web` cold compile, representative full-stack application,
+  historical V-499 controls, and per-optimization runtime companion matrix were
+  stopped by user direction because the initial matrix had already run for
+  about an hour. No numbers are inferred for them.
+- Focused behavior/emitted-shape coverage and the complete release test suite
+  passed, so these missing timing runs do not hide a known correctness failure.
+- The completed raw artifacts are committed with full hashes. Additional long
+  runs can be performed later if a production regression report gives a reason
+  to investigate; they are not required to close V-500.

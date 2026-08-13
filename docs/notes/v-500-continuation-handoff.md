@@ -1,6 +1,6 @@
 # V-500 continuation handoff
 
-Last updated: 2026-08-12 (America/Los_Angeles)
+Last updated: 2026-08-13 (America/Los_Angeles)
 
 This is the durable restart point for Linear V-500, “Implement scoped explicit
 borrows proposal.” Read this file before changing or validating the current
@@ -11,10 +11,16 @@ worktree.
 - Worktree: `/Users/drewy/.codex/worktrees/4ffe/voyd`
 - Branch: `drew/v-500-implement-scoped-explicit-borrows-proposal`
 - Required benchmark base: `b2a35155fca53d1e93e1465a3a4fde2a3f7bd2b0`.
-- The validated V-500 implementation is committed and pushed as
-  `74227f4d` (`Finish scoped borrow integration`), on top of the original
-  implementation checkpoint `06bfff63` and handoff checkpoint `4c28805b`.
-- Continue from these commits; do not reset or discard them.
+- The validated implementation and benchmark-runner fixes are committed and
+  pushed through `6dfde641` (`Report V-500 benchmark progress`). The main
+  implementation commit is `74227f4d` (`Finish scoped borrow integration`),
+  followed by the handoff and runner-fix commits `55975193`, `52f2f41b`, and
+  `265a0ea0`.
+- Performance artifacts now exist under
+  `docs/notes/artifacts/v500/6dfde641/`. The artifact packaging and the final
+  edits to this handoff and `v-500-scoped-borrows-results.md` are uncommitted at
+  the time of this update; commit and push them together before opening the PR.
+- Continue from these commits and files; do not reset or discard them.
 - Linear V-500 is already **In Progress** and assigned to Drew.
 - Required PR title: `[V-500] Implement scoped explicit borrows`
 - Required PR state: ready for review, not draft.
@@ -23,7 +29,7 @@ worktree.
   `std::array::Array` / `ArrayIterator` factory and step identities; its hostile
   lookalike regression is green.
 
-All subagents were stopped before this handoff. No debug logging remains under
+No debug logging remains under
 `packages/compiler/src/semantics/borrowing`.
 
 ## What is implemented
@@ -104,9 +110,10 @@ on 2026-08-12:
   desktop sandbox);
 - `git diff --check`: passed.
 
-The implementation is committed and pushed. Remaining work is performance
-measurement, completing `v-500-scoped-borrows-results.md`, publishing a durable
-artifact, and opening the ready PR.
+The implementation is committed and pushed. Bounded clean performance
+measurement is complete, its report has been filled with honest conclusions,
+and the raw artifacts have been packaged with hashes. The remaining work is to
+commit/push the report and artifacts, open the ready PR, and update Linear.
 
 ## Review-loop state
 
@@ -132,93 +139,31 @@ read-only correctness reviewer over only that changed lens before publishing.
 
 ## Commit and benchmark sequence
 
-The implementation commit is `74227f4d` and is already pushed. Continue with:
+Clean detached worktrees were measured at
+`/private/tmp/v500-bench-final/{base,head}` using base `b2a35155...` and head
+`6dfde641...`. Completed evidence covers four-point ordinary fields/topology,
+Borrow calls/callbacks, four usable Borrow-depth points, four-point mixed
+mutation, and a warm source-only edit. Exact commands, sample counts,
+distributions, counter series, ratios, caveats, and conclusions are now in
+`docs/notes/v-500-scoped-borrows-results.md`.
 
-1. Create a clean detached head checkout at
-   `/private/tmp/v500-bench-final/head` from that commit.
-2. Run `npm install` in the head checkout so workspace links resolve into that
-   checkout.
-3. Keep the already-prepared clean base checkout at
-   `/private/tmp/v500-bench-final/base` on
-   `b2a35155fca53d1e93e1465a3a4fde2a3f7bd2b0`.
-4. Write raw output under `/private/tmp/v500-bench-final/results`.
-5. Run benchmarks sequentially on AC power with no concurrent build/test work.
+The full matrix was stopped after about an hour because its projected 40–50
+minute duration did not add enough information. Web, full-stack, historical,
+and optimization companion timings were intentionally not run. Depths 20, 24,
+and 32 also exceeded a two-minute command cap; the completed 4/8/12/16 points
+show constant explicit-borrow analysis state while both base and head incur a
+separate whole-compiler deep-shape cost. Head is faster at every measured depth.
 
-The base checkout was already verified clean with local dependencies installed.
-Machine recorded for the final report: Mac mini Mac16,11, M4 Pro, 14 cores
-(10 performance / 4 efficiency), 48 GB RAM, macOS 26.5.2 (25F84), Node 24.18.0,
-npm 11.16.0, AC power. Thermal-status command was unavailable.
+Raw JSON files were deterministically compressed under
+`docs/notes/artifacts/v500/6dfde641/`; its README contains raw and compressed
+SHA-256 hashes. Dirty one-sample smoke artifacts were excluded. Do not restart
+the long matrix unless new evidence points to a real regression.
 
-Primary commands (run from the clean head checkout):
+Next steps:
 
-```sh
-BASE=/private/tmp/v500-bench-final/base
-HEAD=/private/tmp/v500-bench-final/head
-OUT=/private/tmp/v500-bench-final/results
-mkdir -p "$OUT"
-
-npm run bench:v500 -- \
-  --repo base="$BASE" --repo head="$HEAD" \
-  --families all --sizes 4,8,16,32 --modes none,release \
-  --samples 7 --warmups 1 --runtime-samples 9 --runtime-min-ms 100 \
-  --fail-on-diagnostics \
-  --output "$OUT/v500-generated-base-head.json"
-
-npm run bench:v500 -- \
-  --repo base="$BASE" --repo head="$HEAD" \
-  --scenario ordinary-topology-16 --modes none \
-  --samples 7 --warmups 1 --warm-source-edit --fail-on-diagnostics \
-  --output "$OUT/v500-warm-edit-base-head.json"
-
-npm run bench:web-openapi -- \
-  --repo base="$BASE" --repo head="$HEAD" \
-  --compiler-cache none --compile-count 1 \
-  --warmups 1 --samples 7 --require-clean \
-  --output "$OUT/v500-web-openapi-base-head.json"
-```
-
-The Web comparison entry is
-`packages/web/src/openapi/openapi_app.test.voyd`, which is unchanged from base;
-changes to `packages/web/src/web.test.voyd` do not invalidate that input hash.
-
-Companion benchmarks required by the report:
-
-- `bench:v439` for `representative-web-app-request`,
-  `focused-checked-access`, `isolated-range-optimizations`, and
-  `deferred-default-identity-guard`, base and head separately with
-  `--sdk-root`, 7 compile samples and 31 runtime samples;
-- `bench:mutable-result`, `bench:array-for`, and `bench:iterator-for`, base and
-  head separately with `--sdk-root`, 7 compile samples and 31 runtime samples;
-- `bench:optimizer --preset full --scenarios vtrace-main --modes unoptimized`
-  from each checkout, 1 compile warmup, 7 compile samples, 9 runtime samples;
-- the selected-provider export-ABI test, one discarded warmup plus 7 alternating
-  raw samples per checkout with `VOYD_COMPILER_PERF=1`.
-
-Full exact commands and extraction guidance were prepared in the prior task
-context; the benchmark scripts' `--help`, README, and
-`docs/notes/v-500-scoped-borrows-results.md` also describe each invocation.
-Expected total benchmark wall time is roughly 50–85 minutes.
-
-Important report rule: historical base does not publish every V-500 counter.
-Write “not published by base” for missing base call-edge/SCC/projection/fact
-metrics. A missing head metric is a blocker; do not report it as zero.
-
-After measurement:
-
-- replace every `Pending` acceptance cell in
-  `docs/notes/v-500-scoped-borrows-results.md`;
-- include revisions, dirty states, machine/power policy, exact commands,
-  distributions, ratios, Wasm sizes/hashes, counter dispositions, and structural
-  gates;
-- keep all raw JSON/logs unchanged, generate `SHA256SUMS`, and archive them;
-- prefer a content-addressed repository artifact under the measured head SHA if
-  reasonably small; otherwise use a durable GitHub release asset and commit its
-  URL, size, and hashes;
-- link the immutable artifact from the report, PR, and Linear ticket.
-
-Commit the measured report/artifact manifest separately after the implementation
-benchmark commit if needed, then rerun documentation/check gates appropriate to
-that final diff.
+1. Review `git diff --check` and documentation links.
+2. Commit the report, artifact manifest, and compressed JSON files.
+3. Push the branch, open the ready PR, and update Linear V-500.
 
 ## Publish and Linear completion
 
