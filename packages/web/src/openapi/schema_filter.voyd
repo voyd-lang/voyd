@@ -15,12 +15,12 @@ pub fn without_descriptions(value: JsonValue) -> JsonValue
       JsonArray { value: items }
     JsonObject:
       let entries = active.value.entries()
-      let ~fields = Dict<String, JsonValue>::with_capacity(entries.len())
+      var fields = Dict<String, JsonValue>::with_capacity(entries.len())
       var index = 0
       while index < entries.len():
         let entry = entries.at(index)
         if not entry.0.equals("description"):
-          fields.set(entry.0, without_descriptions(entry.1))
+          fields = fields.setting(entry.0, without_descriptions(entry.1))
         index = index + 1
       JsonObject { value: fields }
     else:

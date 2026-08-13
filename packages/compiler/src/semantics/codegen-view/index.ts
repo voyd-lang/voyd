@@ -386,9 +386,10 @@ export type CallLoweringIndex = {
 };
 
 export type CodegenOrdinaryMutationSummary = {
-  parameterAccesses: readonly ("unused" | "read" | "write")[];
-  ambientObjectAccess: boolean;
-  invokesUnknownCallback: boolean;
+  directAccesses: readonly ("unused" | "read" | "write")[];
+  reachableAccesses: readonly ("unused" | "read" | "write")[];
+  ambientAccess: "unused" | "read" | "write";
+  reentrant: boolean;
   maySuspend: boolean;
 };
 
@@ -435,6 +436,9 @@ export type ExactCallOptimizationDecision =
 export type ExactCallOptimizationMetrics = {
   requests: number;
   cacheHits: number;
+  cacheMisses: number;
+  bodyVisits: number;
+  budgetExhaustions: number;
   acceptedFacts: number;
   fallbacks: number;
   workUnits: number;
@@ -2583,11 +2587,19 @@ export const buildProgramCodegenView = (
         ?.borrowing.ordinaryMutationSummaries?.get(ref.symbol);
       if (!summary) return undefined;
       return {
-        parameterAccesses: summary.parameterAccesses.map((access) =>
+        directAccesses: summary.directAccesses.map((access) =>
           access === 0 ? "unused" : access === 1 ? "read" : "write",
         ),
-        ambientObjectAccess: summary.ambientObjectAccess,
-        invokesUnknownCallback: summary.invokesUnknownCallback,
+        reachableAccesses: summary.reachableAccesses.map((access) =>
+          access === 0 ? "unused" : access === 1 ? "read" : "write",
+        ),
+        ambientAccess:
+          summary.ambientAccess === 0
+            ? "unused"
+            : summary.ambientAccess === 1
+              ? "read"
+              : "write",
+        reentrant: summary.reentrant,
         maySuspend: summary.maySuspend,
       };
     },

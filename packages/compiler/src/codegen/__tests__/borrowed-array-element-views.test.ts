@@ -77,6 +77,30 @@ const compileMain = (source: string): (() => number) =>
 describe("borrowed array element views", () => {
   beforeEach(() => perf.increment.mockClear());
 
+  it("preserves planned immutable alias storage across continuations", () => {
+    const main = compileMain(`
+obj Box { value: i32 }
+
+eff Signal
+  pause(resume) -> void
+
+fn across_effect(): Signal -> i32
+  let source = Box { value: 1 }
+  Signal::pause()
+  let ~alias = source
+  alias = Box { value: 9 }
+  source.value
+
+pub fn main() -> i32
+  let source = Box { value: 1 }
+  let ~alias = source
+  alias = Box { value: 9 }
+  source.value
+`);
+
+    expect(main()).toBe(9);
+  });
+
   it("lowers call-scoped identity guards after single-shot arguments", () => {
     const { instance, module } = compileProgram(`
 obj Box { value: i32 }
@@ -191,8 +215,9 @@ pub fn aliased_elements() -> i32
     ).toThrow();
   });
 
-  it("compares the nested allocation reached by dereferenced footprints", () => {
-    const { instance } = compileProgram(`
+  it("rejects identity guards for allocations reachable beneath distinct roots", () => {
+    expect(() =>
+      compileProgram(`
 obj Box { value: i32 }
 obj Holder { box: Box }
 
@@ -246,13 +271,8 @@ pub fn aliased_nested_constants() -> i32
     ~__array_get(values, 0),
     ~__array_get(values, 1)
   )
-`);
-    expect((instance.exports.distinct_constants as () => number)()).toBe(14);
-    expect((instance.exports.distinct as () => number)()).toBe(14);
-    expect(() => (instance.exports.aliased_nested as () => number)()).toThrow();
-    expect(() =>
-      (instance.exports.aliased_nested_constants as () => number)(),
-    ).toThrow();
+`),
+    ).toThrow(/TY0048/);
   });
 
   it("compares complete identities for dynamic projected value places", () => {
@@ -391,8 +411,9 @@ pub fn overlapping() -> i32
     expect(() => (instance.exports.overlapping as () => number)()).toThrow();
   });
 
-  it("guards nested identities behind distinct outer nominals", () => {
-    const { instance, module } = compileProgram(`
+  it("does not use distinct outer nominals to guard reachable identities", () => {
+    expect(() =>
+      compileProgram(`
 obj Box { value: i32 }
 obj LeftHolder { box: Box }
 obj RightHolder { box: Box }
@@ -412,14 +433,13 @@ pub fn overlapping() -> i32
   let ~left = LeftHolder { box: shared }
   let ~right = RightHolder { box: shared }
   mutate_nested(~left, ~right)
-`);
-    expect((instance.exports.distinct as () => number)()).toBe(14);
-    expect(() => (instance.exports.overlapping as () => number)()).toThrow();
-    expect(module.emitText()).toContain("ref.eq");
+`),
+    ).toThrow(/TY0048/);
   });
 
-  it("evaluates guard operands and defaults once in source order", () => {
-    const { instance } = compileProgram(`
+  it("rejects guarded mutation through conservatively aliased call results", () => {
+    expect(() =>
+      compileProgram(`
 obj Box { value: i32 }
 obj Counter { state: i32 }
 
@@ -461,8 +481,8 @@ pub fn main() -> i32
   let ~left = Box { value: 1 }
   let ~right = Box { value: 10 }
   guarded(~counter, ~left, ~right) + counter.state * 100
-`);
-    expect((instance.exports.main as () => number)()).toBe(12317);
+`),
+    ).toThrow(/TY0048/);
   });
 
   it("preserves side effects and skips the callee on a guard trap", () => {
@@ -509,8 +529,9 @@ pub fn run(right: i32) -> i32
     expect(recorded()).toBe(123);
   });
 
-  it("lowers identity guards for open trait dispatch", () => {
-    const { instance } = compileProgram(`
+  it("uses the conservative declaration bound for open trait dispatch", () => {
+    expect(() =>
+      compileProgram(`
 obj Box { value: i32 }
 
 trait Mutator
@@ -536,12 +557,13 @@ pub fn main() -> i32
   let ~left = Box { value: 1 }
   let ~right = Box { value: 10 }
   guarded(~mutator, ~left, ~right)
-`);
-    expect((instance.exports.main as () => number)()).toBe(14);
+`),
+    ).toThrow(/TY0048/);
   });
 
-  it("uses allocation identity for mutable open trait receivers", () => {
-    const { instance } = compileProgram(`
+  it("does not use allocation identity to narrow open trait receivers", () => {
+    expect(() =>
+      compileProgram(`
 obj Box { value: i32 }
 
 trait Bumper
@@ -560,12 +582,13 @@ pub fn main() -> i32
   let ~left: Bumper = Box { value: 1 }
   let ~right = Box { value: 10 }
   guarded(~left, ~right)
-`);
-    expect((instance.exports.main as () => number)()).toBe(14);
+`),
+    ).toThrow(/TY0048/);
   });
 
-  it("uses storage identity for root-rebinding open trait receivers", () => {
-    const { instance, module } = compileProgram(`
+  it("does not use storage identity to narrow open trait receivers", () => {
+    expect(() =>
+      compileProgram(`
 trait Replacer
   fn replace(~self, ~other: Replacer): () -> i32
 
@@ -584,9 +607,8 @@ pub fn main() -> i32
   let ~left: Replacer = Box {}
   let ~right: Replacer = Box {}
   guarded(~left, ~right)
-`);
-    expect((instance.exports.main as () => number)()).toBe(3);
-    expect(module.emitText()).toContain("ref.eq");
+`),
+    ).toThrow(/TY0048/);
   });
 
   it("preserves identity guards through generic instantiation", () => {

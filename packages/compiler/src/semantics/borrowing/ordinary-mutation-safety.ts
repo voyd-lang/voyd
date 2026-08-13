@@ -19,7 +19,9 @@ import type {
 } from "./model.js";
 import { projectionPathsOverlap } from "./model.js";
 import {
+  applyExactLocalCallbackHazards,
   joinOrdinaryMutationSummaries,
+  ordinaryMutationDynamicBoundSummary,
   OrdinaryParameterAccess,
   ordinaryMutationSignatureUpperBound,
   type OrdinaryMutationSummary,
@@ -40,6 +42,7 @@ type OrdinaryIdentity = Pick<
 type OrdinaryAccess = {
   parameter: number;
   access: OrdinaryParameterAccess;
+  kind: "direct" | "reachable";
   argument: CallableBorrowIndexArgument;
   argumentRootIsParameter: boolean;
   /** Direct local body paths. Absent when a call crosses a finite boundary. */
@@ -129,6 +132,7 @@ export const planOrdinaryMutationSafety = ({
         rightIndex += 1
       ) {
         const right = accesses[rightIndex]!;
+        if (left.parameter === right.parameter) continue;
         if (
           left.access !== OrdinaryParameterAccess.Write &&
           right.access !== OrdinaryParameterAccess.Write
@@ -198,23 +202,16 @@ const summaryForCall = ({
     return undefined;
   }
   if (call.ordinaryDynamicBound) {
-    return {
-      parameterAccesses: call.ordinaryDynamicBound.parameterBindingKinds.map(
-        (kind) =>
-          kind === "mutable-ref"
-            ? OrdinaryParameterAccess.Write
-            : OrdinaryParameterAccess.Read,
-      ),
-      ambientObjectAccess: call.ordinaryDynamicBound.ambientObjectAccess,
-      invokesUnknownCallback: call.ordinaryDynamicBound.invokesUnknownCallback,
-      maySuspend: call.ordinaryDynamicBound.maySuspend,
-    };
+    return ordinaryMutationDynamicBoundSummary(call.ordinaryDynamicBound);
   }
   if (call.openTraitDispatch && call.signature) {
+    const open = ordinaryMutationSignatureUpperBound({
+      signature: call.signature,
+    });
     return {
-      ...ordinaryMutationSignatureUpperBound({ signature: call.signature }),
-      ambientObjectAccess: true,
-      invokesUnknownCallback: true,
+      ...open,
+      ambientAccess: OrdinaryParameterAccess.Write,
+      reentrant: true,
       maySuspend: true,
     };
   }
@@ -235,7 +232,11 @@ const summaryForCall = ({
     targetSummaries.length === call.targets.length &&
     call.argumentPlanAmbiguous !== true
   ) {
-    return resolved;
+    return applyExactLocalCallbackHazards({
+      call,
+      callee: resolved,
+      localSummaries,
+    });
   }
   const fallback = call.signature
     ? ordinaryMutationSignatureUpperBound({
@@ -243,9 +244,17 @@ const summaryForCall = ({
         maySuspend: call.maySuspend,
       })
     : undefined;
-  return resolved && fallback
-    ? joinOrdinaryMutationSummaries(resolved, fallback)
-    : (resolved ?? fallback);
+  const bounded =
+    resolved && fallback
+      ? joinOrdinaryMutationSummaries(resolved, fallback)
+      : (resolved ?? fallback);
+  return bounded
+    ? applyExactLocalCallbackHazards({
+        call,
+        callee: bounded,
+        localSummaries,
+      })
+    : undefined;
 };
 
 const callAccesses = ({
@@ -275,12 +284,11 @@ const callAccesses = ({
   });
   const reboundParameters = localRootReboundParameters(call);
   const parameterCount = Math.max(
-    summary.parameterAccesses.length,
+    summary.directAccesses.length,
+    summary.reachableAccesses.length,
     call.signature?.parameters.length ?? 0,
   );
   return Array.from({ length: parameterCount }).flatMap((_, parameter) => {
-    const summarized =
-      summary.parameterAccesses[parameter] ?? OrdinaryParameterAccess.Unused;
     const signatureParameter = call.signature?.parameters[parameter];
     const signatureType = signatureParameter?.type;
     const explicitlyBorrowed =
@@ -292,35 +300,50 @@ const callAccesses = ({
         ? OrdinaryParameterAccess.Write
         : OrdinaryParameterAccess.Read
       : OrdinaryParameterAccess.Unused;
-    const access = Math.max(summarized, forced) as OrdinaryParameterAccess;
-    if (access === OrdinaryParameterAccess.Unused) return [];
     const argument = indexCallArgumentFor(call, parameter);
     if (!argument?.place) return [];
-    if (
-      access === OrdinaryParameterAccess.Read &&
-      !argumentCanAliasDuringCall({ argument, call, parameter, typing })
-    ) {
-      return [];
-    }
     const paths = localPaths?.get(parameter);
-    const localAccessPaths =
-      access === OrdinaryParameterAccess.Write ? paths?.write : paths?.read;
-    return [
-      {
-        parameter,
-        access,
-        argument,
-        argumentRootIsParameter: caller.parameterPlaces.has(
-          argument.place.root,
-        ),
-        ...(localAccessPaths && localAccessPaths.length > 0
-          ? { localPaths: localAccessPaths }
-          : {}),
-        ...(reboundParameters.has(parameter)
-          ? { localRootRebound: true as const }
-          : {}),
-      },
-    ];
+    return (["direct", "reachable"] as const).flatMap((kind) => {
+      const summarized =
+        (kind === "direct"
+          ? summary.directAccesses[parameter]
+          : summary.reachableAccesses[parameter]) ??
+        OrdinaryParameterAccess.Unused;
+      const access = Math.max(
+        summarized,
+        kind === "direct" ? forced : OrdinaryParameterAccess.Unused,
+      ) as OrdinaryParameterAccess;
+      if (access === OrdinaryParameterAccess.Unused) return [];
+      if (
+        access === OrdinaryParameterAccess.Read &&
+        !argumentCanAliasDuringCall({ argument, call, parameter, typing })
+      ) {
+        return [];
+      }
+      const localAccessPaths =
+        kind === "direct"
+          ? access === OrdinaryParameterAccess.Write
+            ? paths?.write
+            : paths?.read
+          : undefined;
+      return [
+        {
+          parameter,
+          access,
+          kind,
+          argument,
+          argumentRootIsParameter: caller.parameterPlaces.has(
+            argument.place!.root,
+          ),
+          ...(localAccessPaths && localAccessPaths.length > 0
+            ? { localPaths: localAccessPaths }
+            : {}),
+          ...(reboundParameters.has(parameter)
+            ? { localRootRebound: true as const }
+            : {}),
+        },
+      ];
+    });
   });
 };
 
@@ -1030,6 +1053,27 @@ const compareCallAccesses = ({
   ) {
     return { kind: "overlap", reason: "same-place-overlap" };
   }
+  // A reachable access follows a handle stored beneath the argument root.
+  // Exact root identities describe only the roots, so neither unequal roots
+  // nor a root-allocation guard can prove the reachable graphs disjoint. A
+  // complete, non-overlapping inline allocation type domain remains a local
+  // proof. Allocation-backed roots are excluded because their reachable
+  // domain begins in their fields, not at the root allocation's nominal type.
+  if (left.kind === "reachable" || right.kind === "reachable") {
+    const reachableDomainsAreInline = [left, right].every(
+      (access) =>
+        access.kind !== "reachable" ||
+        (typeof access.argument.type === "number" &&
+          !typeIsAllocationBacked(access.argument.type, typing)),
+    );
+    if (
+      reachableDomainsAreInline &&
+      accessAllocationDomainsAreDisjoint(left, right, typing)
+    ) {
+      return { kind: "disjoint" };
+    }
+    return { kind: "overlap", reason: "incomplete-identity" };
+  }
   const leftIdentities = identitiesForAccess({ access: left, call, typing });
   const rightIdentities = identitiesForAccess({ access: right, call, typing });
   if (!leftIdentities.complete || !rightIdentities.complete) {
@@ -1071,10 +1115,16 @@ const compareCallAccesses = ({
   if (summary.maySuspend) {
     return { kind: "overlap", reason: "suspending-target" };
   }
-  if (summary.ambientObjectAccess) {
+  if (summary.ambientAccess !== OrdinaryParameterAccess.Unused) {
     return { kind: "overlap", reason: "ambient-access" };
   }
-  if (summary.invokesUnknownCallback) {
+  if (summary.reentrant) {
+    return { kind: "overlap", reason: "unknown-callback" };
+  }
+  if (
+    call.signature !== undefined &&
+    !typing.effects.isEmpty(call.signature.effectRow)
+  ) {
     return { kind: "overlap", reason: "unknown-callback" };
   }
   if (target === undefined) {

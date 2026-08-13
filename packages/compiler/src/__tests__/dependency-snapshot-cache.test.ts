@@ -184,9 +184,7 @@ describe("compiler dependency snapshots", () => {
         "pub fn main() -> i32",
         "  read(PackageBox { value: 7 })",
       ].join("\n"),
-      [packageRootPath]: ["#!no_prelude", "pub use src::api::all"].join(
-        "\n",
-      ),
+      [packageRootPath]: ["#!no_prelude", "pub use src::api::all"].join("\n"),
       [packageApiPath]: [
         "#!no_prelude",
         "pub obj PackageBox { api value: i32 }",
@@ -197,15 +195,16 @@ describe("compiler dependency snapshots", () => {
     };
     const cache = createCompilerDependencySnapshotCache();
     const first = await loadAndAnalyze({ files, roots, cache });
-    const packageInterface = first.analyzed.semantics.get("pkg:dep::api")!
-      .exports.packageSemanticInterface!;
+    const packageInterface =
+      first.analyzed.semantics.get("pkg:dep::api")!.exports
+        .packageSemanticInterface!;
     const readExport = packageInterface.exports.find(
       (entry) => entry.name === "read",
     );
 
     expect(readExport).toBeDefined();
-    const readParameterType = readExport!.declarations[0]!.signature!
-      .parameters[0]!.type;
+    const readParameterType =
+      readExport!.declarations[0]!.signature!.parameters[0]!.type;
     expect(
       packageInterface.types.find((type) => type.id === readParameterType)
         ?.descriptor,
@@ -332,7 +331,27 @@ pub fn defaulted(value: i32 = 0) -> i32
     ).toBeGreaterThanOrEqual(4);
     expect(JSON.stringify(first)).toContain("visible");
     expect(JSON.stringify(first)).not.toContain("hidden");
-    expect(first.version).toBe(3);
+    expect(first.version).toBe(4);
+    expect(first.ordinaryMutationSummaries.length).toBeGreaterThan(0);
+    first.ordinaryMutationSummaries.forEach(({ summary }) => {
+      expect(Object.keys(summary).sort()).toEqual([
+        "ambientAccess",
+        "directAccesses",
+        "maySuspend",
+        "reachableAccesses",
+        "reentrant",
+      ]);
+      expect(summary.directAccesses).toHaveLength(
+        summary.reachableAccesses.length,
+      );
+    });
+    expect(projectPackageSemanticInterface(roundTripped)).toEqual(projected);
+    expect(() =>
+      projectPackageSemanticInterface({
+        ...roundTripped,
+        version: 3,
+      } as Parameters<typeof projectPackageSemanticInterface>[0]),
+    ).toThrow(/unsupported package semantic interface/);
     expect(first).not.toHaveProperty("summaries");
     expect(first).not.toHaveProperty("coercions");
     expect(first).not.toHaveProperty("callableResultCoercions");

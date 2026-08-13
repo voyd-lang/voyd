@@ -114,10 +114,17 @@ const captureFields = ({
     if (typeof symbol !== "number") {
       throw new Error("missing symbol for continuation capture");
     }
-    const storageRefType =
-      field.bindingKind === "mutable-ref"
+    const storageRef =
+      field.storageRef === true || field.bindingKind === "mutable-ref";
+    const storageRefType = storageRef
+      ? ctx.module.mutableStorageSymbols.has(symbol) ||
+        field.bindingKind === "mutable-ref"
         ? getMutableRefStorageType({ typeId: field.typeId, ctx })
-        : undefined;
+        : getInlineHeapBoxType({ typeId: field.typeId, ctx })
+      : undefined;
+    if (storageRef && typeof storageRefType !== "number") {
+      throw new Error("continuation capture requires storage-ref ABI");
+    }
     return {
       name: wasmSymbolName({ ctx, moduleId: ctx.moduleId, symbol }),
       symbol,
@@ -127,7 +134,7 @@ const captureFields = ({
         storageRefType ??
         wasmHeapFieldTypeFor(field.typeId, ctx, new Set(), "runtime"),
       sourceKind: field.sourceKind,
-      storageRef: typeof storageRefType === "number",
+      storageRef,
       bindingKind: field.bindingKind,
     };
   });

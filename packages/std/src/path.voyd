@@ -3,9 +3,8 @@
 //! `std::path` performs lexical path composition and inspection without touching
 //! the file system. Use `std::fs` when you need host-backed path existence or I/O.
 
-use std::array::Array
 use std::optional::types::all
-use std::string::type::{ String, StringSlice, new_string }
+use std::string::type::{ String, StringSlice }
 
 pub obj Path {
   raw: String
@@ -118,31 +117,10 @@ fn byte_at_or(value: StringSlice, index: i32, fallback: i32) -> i32
       fallback
 
 fn concat_slices(left: StringSlice, right: StringSlice): () -> String
-  let left_len = string_len(left)
-  let right_len = string_len(right)
-  let ~bytes = Array<i32>::with_capacity(left_len + right_len)
-  append_slice_bytes(bytes, left)
-  append_slice_bytes(bytes, right)
-  new_string(bytes.to_fixed_array())
+  left.to_string().concat(right)
 
 fn concat_slices_with_separator(left: StringSlice, right: StringSlice): () -> String
-  let left_len = string_len(left)
-  let right_len = string_len(right)
-  let ~bytes = Array<i32>::with_capacity(left_len + right_len + 1)
-  append_slice_bytes(bytes, left)
-  bytes.push(47)
-  append_slice_bytes(bytes, right)
-  new_string(bytes.to_fixed_array())
+  left.to_string().concat("/").concat(right)
 
 fn string_len(value: StringSlice): () -> i32
   value.byte_len()
-
-fn append_slice_bytes(~into: Array<i32>, source: StringSlice) -> void
-  var index = 0
-  while index < source.byte_len():
-    match(source.get_byte(index))
-      Some<i32> { value }:
-        into.push(value)
-      None:
-        return void
-    index = index + 1

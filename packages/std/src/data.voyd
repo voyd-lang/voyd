@@ -555,8 +555,7 @@ pub obj DataValueReader {
 impl DataValueReader
   /// Creates a reader positioned at the root value.
   pub fn init(value: DataValue) -> DataValueReader
-    let ~events = Array<DataValueWriteEvent>::init()
-    append_data_value_events(events, value)
+    let events = data_value_events(value)
     DataValueReader {
       events,
       index: 0,
@@ -931,60 +930,72 @@ impl DataReader<DataValueReadError> for DataValueReader
       else:
         self.fail<Unit>("data reader variant has unread fields")
 
-fn append_data_value_events(
-  ~events: Array<DataValueWriteEvent>,
-  value: DataValue
-) -> void
+fn data_value_events(value: DataValue) -> Array<DataValueWriteEvent>
+  var events = Array<DataValueWriteEvent>::init()
   value.match(data)
     DataNull:
-      events.push(DataValueLiteralEvent { value: DataNull {} })
+      events = events.pushed(DataValueLiteralEvent { value: DataNull {} })
     DataBool:
-      events.push(DataValueLiteralEvent { value: DataBool { value: data.value } })
+      events = events.pushed(DataValueLiteralEvent {
+        value: DataBool { value: data.value }
+      })
     DataI32:
-      events.push(DataValueLiteralEvent { value: DataI32 { value: data.value } })
+      events = events.pushed(DataValueLiteralEvent {
+        value: DataI32 { value: data.value }
+      })
     DataI64:
-      events.push(DataValueLiteralEvent { value: DataI64 { value: data.value } })
+      events = events.pushed(DataValueLiteralEvent {
+        value: DataI64 { value: data.value }
+      })
     DataF32:
-      events.push(DataValueLiteralEvent { value: DataF32 { value: data.value } })
+      events = events.pushed(DataValueLiteralEvent {
+        value: DataF32 { value: data.value }
+      })
     DataF64:
-      events.push(DataValueLiteralEvent { value: DataF64 { value: data.value } })
+      events = events.pushed(DataValueLiteralEvent {
+        value: DataF64 { value: data.value }
+      })
     DataString:
-      events.push(DataValueLiteralEvent {
+      events = events.pushed(DataValueLiteralEvent {
         value: DataString { value: data.value.as_slice().to_string() }
       })
     DataBytes:
-      events.push(DataValueLiteralEvent {
+      events = events.pushed(DataValueLiteralEvent {
         value: DataBytes { value: data.value.copied() }
       })
     DataArray:
-      events.push(DataValueBeginArrayEvent { length: data.values.len() })
+      events = events.pushed(DataValueBeginArrayEvent { length: data.values.len() })
       var index = 0
       while index < data.values.len():
-        append_data_value_events(events, data.values.at(index))
+        events = events.extended(data_value_events(data.values.at(index)))
         index = index + 1
-      events.push(DataValueEndArrayEvent {})
+      events = events.pushed(DataValueEndArrayEvent {})
     DataObject:
-      events.push(DataValueBeginRecordEvent { field_count: data.fields.len() })
-      append_data_field_events(events, data.fields)
-      events.push(DataValueEndRecordEvent {})
+      events = events.pushed(DataValueBeginRecordEvent {
+        field_count: data.fields.len()
+      })
+      events = events.extended(data_field_events(data.fields))
+      events = events.pushed(DataValueEndRecordEvent {})
     DataVariant:
-      events.push(DataValueBeginVariantEvent {
+      events = events.pushed(DataValueBeginVariantEvent {
         name: data.name.as_slice().to_string(),
         field_count: data.fields.len()
       })
-      append_data_field_events(events, data.fields)
-      events.push(DataValueEndVariantEvent {})
+      events = events.extended(data_field_events(data.fields))
+      events = events.pushed(DataValueEndVariantEvent {})
+  events
 
-fn append_data_field_events(
-  ~events: Array<DataValueWriteEvent>,
-  fields: Array<DataField>
-) -> void
+fn data_field_events(fields: Array<DataField>) -> Array<DataValueWriteEvent>
+  var events = Array<DataValueWriteEvent>::init()
   var index = 0
   while index < fields.len():
     let field = fields.at(index)
-    events.push(DataValueFieldEvent { name: field.name.as_slice().to_string() })
-    append_data_value_events(events, field.value)
+    events = events.pushed(DataValueFieldEvent {
+      name: field.name.as_slice().to_string()
+    })
+    events = events.extended(data_value_events(field.value))
     index = index + 1
+  events
 
 fn data_event_kind(
   events: Array<DataValueWriteEvent>,
@@ -1634,10 +1645,10 @@ fn data_fields(values: Dict<String, DataValue>) -> Array<DataField>
   fields
 
 fn data_map(fields: Array<DataField>) -> Dict<String, DataValue>
-  let ~values = Dict<String, DataValue>::init()
+  var values = Dict<String, DataValue>::init()
   var index = 0
   while index < fields.len():
     let field = fields.at(index)
-    values.set(field.name, field.value)
+    values = values.setting(field.name, field.value)
     index = index + 1
   values

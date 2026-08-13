@@ -287,7 +287,14 @@ impl RequestBody
             None:
               reading = false
             Some<Bytes> { value: chunk }:
-              buffer.extend(chunk)
+              var index = 0
+              while index < chunk.len():
+                match(chunk.get(index))
+                  Some<i32> { value: byte }:
+                    buffer.push(byte)
+                  None:
+                    void
+                index = index + 1
     Ok<Bytes> { value: buffer.as_bytes() }
 
 /// Responds to one pending request.

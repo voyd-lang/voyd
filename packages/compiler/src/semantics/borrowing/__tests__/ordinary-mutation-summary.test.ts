@@ -7,6 +7,7 @@ import type {
   CallableBorrowIndex,
   CallableBorrowIndexCall,
 } from "../callable-borrow-index.js";
+import type { PlaceProjection } from "../model.js";
 import {
   OrdinaryParameterAccess as Access,
   extractOrdinaryMutationInput,
@@ -19,17 +20,15 @@ import {
 } from "../ordinary-mutation-summary.js";
 
 const summary = (
-  parameterAccesses: readonly Access[],
+  directAccesses: readonly Access[],
   flags: Partial<
-    Pick<
-      OrdinaryMutationSummary,
-      "ambientObjectAccess" | "invokesUnknownCallback" | "maySuspend"
-    >
-  > = {},
+    Pick<OrdinaryMutationSummary, "ambientAccess" | "reentrant" | "maySuspend">
+  > & { reachableAccesses?: readonly Access[] } = {},
 ): OrdinaryMutationSummary => ({
-  parameterAccesses,
-  ambientObjectAccess: false,
-  invokesUnknownCallback: false,
+  directAccesses,
+  reachableAccesses: flags.reachableAccesses ?? directAccesses,
+  ambientAccess: Access.Unused,
+  reentrant: false,
   maySuspend: false,
   ...flags,
 });
@@ -110,6 +109,237 @@ const analyzeStdModule = (moduleId: string, source: string) => {
 };
 
 describe("ordinary mutation summaries", () => {
+  it("uses an exact local SharedCell closure instead of publishing an unknown callback", () => {
+    const result = analyzeStd(`
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl<T> SharedCell<T>
+  fn with<R>(self, body: fn(value: Borrow<T>) : () -> R) -> R
+    body(self.value)
+
+  fn with_mut<R>(self, body: fn(~value: Borrow<T>) : () -> R) -> R
+    let ~value = self.value
+    body(~value)
+
+obj State { ok: bool }
+obj Wrapper { state: SharedCell<State>, count: i32 }
+
+impl Wrapper
+  fn is_ok(self) -> bool
+    self.state.with((state) => state.ok)
+
+  fn invoke(self, body: fn(value: Borrow<State>) : () -> bool) -> bool
+    self.state.with(body)
+
+  fn increment(~self) -> bool
+    let ok = self.is_ok()
+    self.count = self.count + 1
+    ok
+
+  fn update_and_increment(~self) -> void
+    self.state.with_mut((~state) -> void => state.ok = false)
+    self.count = self.count + 1
+`);
+    const functions = new Map(
+      Array.from(result.hir.items.values()).flatMap((item) =>
+        item.kind === "function"
+          ? [
+              [
+                result.binding.symbolTable.getSymbol(item.symbol).name,
+                item,
+              ] as const,
+            ]
+          : [],
+      ),
+    );
+    const isOk = result.borrowing.ordinaryMutationSummaries.get(
+      functions.get("is_ok")!.symbol,
+    );
+    const invoke = result.borrowing.ordinaryMutationSummaries.get(
+      functions.get("invoke")!.symbol,
+    );
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(isOk?.reentrant).toBe(false);
+    expect(invoke?.reentrant).toBe(true);
+  });
+
+  it("propagates direct and reachable modes independently", () => {
+    const directOnly = summary([Access.Write], {
+      reachableAccesses: [Access.Unused],
+    });
+    const reachableOnly = summary([Access.Read], {
+      reachableAccesses: [Access.Write],
+      ambientAccess: Access.Read,
+    });
+    const directCaller = input({
+      symbol: 1,
+      direct: summary([Access.Unused], {
+        reachableAccesses: [Access.Unused],
+      }),
+      calls: [mappedCall({ target: 2, dynamicBound: directOnly })],
+    });
+    const reachableCaller = input({
+      symbol: 3,
+      direct: summary([Access.Unused], {
+        reachableAccesses: [Access.Unused],
+      }),
+      calls: [mappedCall({ target: 4, dynamicBound: reachableOnly })],
+    });
+    const result = solveOrdinaryMutationSummaries({
+      inputs: new Map([
+        [directCaller.symbol, directCaller],
+        [reachableCaller.symbol, reachableCaller],
+      ]),
+      moduleId: "test",
+      recordMetrics: false,
+    });
+
+    expect(result.summaries.get(1)).toEqual(directOnly);
+    expect(result.summaries.get(3)).toEqual(reachableOnly);
+  });
+
+  it("uses the refined O(parameters) solver bound", () => {
+    const callee = input({
+      symbol: 2,
+      direct: summary([Access.Write, Access.Read], {
+        reachableAccesses: [Access.Read, Access.Write],
+        ambientAccess: Access.Write,
+        reentrant: true,
+        maySuspend: true,
+      }),
+    });
+    const caller = input({
+      symbol: 1,
+      direct: summary([Access.Unused, Access.Unused], {
+        reachableAccesses: [Access.Unused, Access.Unused],
+      }),
+      calls: [mappedCall({ target: callee.symbol })],
+    });
+    const result = solveOrdinaryMutationSummaries({
+      inputs: new Map([
+        [caller.symbol, caller],
+        [callee.symbol, callee],
+      ]),
+      moduleId: "test",
+      recordMetrics: false,
+    });
+
+    // C + H(callee) for the single caller -> callee edge.
+    expect(result.metrics.solverEvaluationBound).toBe(14);
+    expect(result.metrics.summaryEvaluations).toBeLessThanOrEqual(14);
+    expect(result.metrics.strictSummaryAscents).toBe(1);
+  });
+
+  it("distinguishes direct field rebinding from reachable child mutation", () => {
+    const result = semanticsPipeline(
+      parse(
+        `obj Child { value: i32 }
+obj Parent { child: Child }
+
+fn replace_child(~parent: Parent, next: Child) -> void
+  parent.child = next
+
+fn update_child(~parent: Parent) -> void
+  parent.child.value = parent.child.value + 1
+`,
+        "ordinary-direct-reachable-summary.test.voyd",
+      ),
+    );
+    const functions = new Map(
+      Array.from(result.hir.items.values()).flatMap((item) =>
+        item.kind === "function"
+          ? [
+              [
+                result.binding.symbolTable.getSymbol(item.symbol).name,
+                item.symbol,
+              ] as const,
+            ]
+          : [],
+      ),
+    );
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(
+      result.borrowing.ordinaryMutationSummaries.get(
+        functions.get("replace_child")!,
+      ),
+    ).toEqual(
+      summary([Access.Write, Access.Unused], {
+        reachableAccesses: [Access.Unused, Access.Unused],
+      }),
+    );
+    expect(
+      result.borrowing.ordinaryMutationSummaries.get(
+        functions.get("update_child")!,
+      ),
+    ).toEqual(
+      summary([Access.Read], {
+        reachableAccesses: [Access.Write],
+      }),
+    );
+  });
+
+  it("treats an allocation parameter's leading dereference as direct", () => {
+    const indexed = (
+      projections: readonly PlaceProjection[],
+    ): CallableBorrowIndex =>
+      ({
+        symbol: 1,
+        parameters: [
+          {
+            symbol: 10,
+            parameter: 0,
+            defaulted: false,
+            access: "mutable",
+            allocationBacked: true,
+          },
+        ],
+        parameterPlaces: new Map([[10, { parameter: 0, path: [] }]]),
+        accesses: [
+          {
+            exprId: 2,
+            kind: "write",
+            place: { root: 10, projections },
+          },
+        ],
+        calls: [],
+        directCallEdges: [],
+        ambientObjectCaptures: [],
+        directAmbientObjectRoots: [],
+        mutableAliasSourceRoots: new Set(),
+        rootReboundParameters: new Set(),
+        flags: {
+          hasMutableParameter: true,
+          hasAmbientObjectCapture: false,
+          hasSuspension: false,
+          hasModuleStorageAccess: false,
+          hasDefaultArgument: false,
+          hasDefaultBorrowFlow: false,
+          hasRuntimeCheckedReceiverWrites: false,
+        },
+      }) as CallableBorrowIndex;
+    const direct = extractOrdinaryMutationInput(
+      indexed([{ kind: "dereference" }, { kind: "index", stable: true }]),
+    ).direct;
+    const reachable = extractOrdinaryMutationInput(
+      indexed([
+        { kind: "dereference" },
+        { kind: "index", stable: true },
+        { kind: "dereference" },
+        { kind: "field", name: "value" },
+      ]),
+    ).direct;
+
+    expect(direct).toEqual(
+      summary([Access.Write], { reachableAccesses: [Access.Unused] }),
+    );
+    expect(reachable).toEqual(
+      summary([Access.Read], { reachableAccesses: [Access.Write] }),
+    );
+  });
+
   it("uses the declaration bound for generic static trait dispatch", () => {
     const result = semanticsPipeline(
       parse(
@@ -203,7 +433,7 @@ fn replaced<T>(source: Store<T>, value: T) -> Store<T>
     expect(
       replaced?.kind === "function"
         ? result.borrowing.ordinaryMutationSummaries?.get(replaced.symbol)
-            ?.parameterAccesses
+            ?.directAccesses
         : undefined,
     ).not.toContain(Access.Write);
     expect(result.diagnostics).toHaveLength(0);
@@ -291,7 +521,9 @@ fn invalid(~state: State) -> i32
   });
 
   it("downgrades only the canonical std Array iterator cursor step", () => {
-    const iteratorSource = (iteratorName: string) => `@intrinsic_type(type: "voyd.std.array")
+    const iteratorSource = (
+      iteratorName: string,
+    ) => `@intrinsic_type(type: "voyd.std.array")
 obj Array<T> { item: T }
 obj ${iteratorName}<T> { source: Array<T>, index: i32 }
 
@@ -311,10 +543,8 @@ fn read_after_step(~source: Array<i32>) -> i32
 `;
 
     expect(
-      analyzeStdModule(
-        "std::array",
-        iteratorSource("ArrayIterator"),
-      ).diagnostics,
+      analyzeStdModule("std::array", iteratorSource("ArrayIterator"))
+        .diagnostics,
     ).toHaveLength(0);
     expect(() =>
       analyzeStdModule("std::evil", iteratorSource("EvilIterator")),
@@ -343,7 +573,10 @@ fn invalid(~state: State) -> i32
   touch_and_read(~state.out, state.out)
 `;
     const valid = semanticsPipeline(
-      parse(source.replace(/fn invalid[\s\S]*/, ""), "ordinary-local-sibling-paths.test.voyd"),
+      parse(
+        source.replace(/fn invalid[\s\S]*/, ""),
+        "ordinary-local-sibling-paths.test.voyd",
+      ),
     );
 
     expect(valid.diagnostics).toHaveLength(0);
@@ -548,16 +781,17 @@ fn build(input: Input) -> Box
     expect(
       build?.kind === "function"
         ? result.borrowing.ordinaryMutationSummaries?.get(build.symbol)
-            ?.parameterAccesses
+            ?.directAccesses
         : undefined,
     ).toEqual([Access.Read]);
     dependencyResult.exports.packageSemanticInterface?.ordinaryMutationSummaries.forEach(
       ({ summary: exported }) =>
         expect(Object.keys(exported).sort()).toEqual([
-          "ambientObjectAccess",
-          "invokesUnknownCallback",
+          "ambientAccess",
+          "directAccesses",
           "maySuspend",
-          "parameterAccesses",
+          "reachableAccesses",
+          "reentrant",
         ]),
     );
   });
@@ -864,7 +1098,7 @@ fn reader(value: Box) -> (fn() -> i32)
       ? result.borrowing.ordinaryMutationSummaries?.get(-1 - lambda.id)
       : undefined;
 
-    expect(summary?.ambientObjectAccess).toBe(true);
+    expect(summary?.ambientAccess).toBe(Access.Read);
   });
 
   it("does not classify synthetic match binders as module storage", () => {
@@ -896,7 +1130,11 @@ fn append(~sink: Sink, event: Event) -> void
         : undefined;
 
     expect(result.diagnostics).toHaveLength(0);
-    expect(appendSummary).toEqual(summary([Access.Write, Access.Unused]));
+    expect(appendSummary).toEqual(
+      summary([Access.Write, Access.Unused], {
+        reachableAccesses: [Access.Unused, Access.Unused],
+      }),
+    );
   });
 
   it("collapses projections while keeping physical intrinsic writes within signature bounds", () => {
@@ -975,7 +1213,7 @@ fn append(~sink: Sink, event: Event) -> void
 
     expect(extractOrdinaryMutationInput(index).direct).toEqual(
       summary([Access.Read, Access.Write, Access.Write], {
-        ambientObjectAccess: true,
+        reachableAccesses: [Access.Unused, Access.Unused, Access.Unused],
         maySuspend: true,
       }),
     );
@@ -985,7 +1223,7 @@ fn append(~sink: Sink, event: Event) -> void
     const second = input({
       symbol: 2,
       direct: summary([Access.Write], {
-        ambientObjectAccess: true,
+        ambientAccess: Access.Write,
         maySuspend: true,
       }),
       calls: [mappedCall({ target: 1 })],
@@ -1006,16 +1244,21 @@ fn append(~sink: Sink, event: Event) -> void
 
     expect(result.summaries.get(1)).toEqual(
       summary([Access.Write], {
-        ambientObjectAccess: true,
+        ambientAccess: Access.Write,
         maySuspend: true,
       }),
     );
     expect(result.metrics).toEqual({
       callableCount: 2,
       callEdgeCount: 2,
+      strictSummaryAscents: 1,
+      dependencyEnqueues: 1,
       summaryEvaluations: 3,
+      sccBodyVisits: 3,
+      solverEvaluationBound: 18,
+      solverBoundUsage: 3,
       sccReevaluations: 1,
-      retainedSummaryBytes: 14,
+      retainedSummaryBytes: 16,
       ordinaryProjectionFamilies: 0,
       ordinaryWidenings: 0,
     });
@@ -1088,7 +1331,12 @@ fn append(~sink: Sink, event: Event) -> void
       recordMetrics: false,
     });
 
-    expect(result.summaries.get(caller.symbol)?.parameterAccesses).toEqual([
+    expect(result.summaries.get(caller.symbol)?.directAccesses).toEqual([
+      Access.Unused,
+      Access.Read,
+      Access.Read,
+    ]);
+    expect(result.summaries.get(caller.symbol)?.reachableAccesses).toEqual([
       Access.Unused,
       Access.Write,
       Access.Write,
@@ -1115,7 +1363,7 @@ fn append(~sink: Sink, event: Event) -> void
       recordMetrics: false,
     });
 
-    expect(result.summaries.get(caller.symbol)?.parameterAccesses).toEqual([
+    expect(result.summaries.get(caller.symbol)?.directAccesses).toEqual([
       Access.Read,
     ]);
   });
@@ -1152,7 +1400,8 @@ fn read_dynamic(reader: Reader) -> i32
         : undefined,
     ).toEqual(
       summary([Access.Read], {
-        invokesUnknownCallback: true,
+        ambientAccess: Access.Write,
+        reentrant: true,
         maySuspend: true,
       }),
     );
@@ -1193,12 +1442,22 @@ fn read_dynamic(reader: Reader): () -> i32
             reader.methods[0]!.symbol,
           )
         : undefined,
-    ).toEqual(summary([Access.Read]));
+    ).toEqual(
+      summary([Access.Read], {
+        ambientAccess: Access.Write,
+        reentrant: true,
+      }),
+    );
     expect(
       readDynamic?.kind === "function"
         ? result.borrowing.ordinaryMutationSummaries.get(readDynamic.symbol)
         : undefined,
-    ).toEqual(summary([Access.Read]));
+    ).toEqual(
+      summary([Access.Read], {
+        ambientAccess: Access.Write,
+        reentrant: true,
+      }),
+    );
   });
 
   it("uses only the selected same-name trait overload bound", () => {
@@ -1247,12 +1506,23 @@ fn run_effectful(runner: Runner): Tick -> i32
       result.borrowing.ordinaryMutationSummaries.get(
         functions.get("run_pure")!.symbol,
       ),
-    ).toEqual(summary([Access.Read]));
+    ).toEqual(
+      summary([Access.Read], {
+        ambientAccess: Access.Write,
+        reentrant: true,
+      }),
+    );
     expect(
       result.borrowing.ordinaryMutationSummaries.get(
         functions.get("run_effectful")!.symbol,
       ),
-    ).toEqual(summary([Access.Read], { maySuspend: true }));
+    ).toEqual(
+      summary([Access.Read], {
+        ambientAccess: Access.Write,
+        reentrant: true,
+        maySuspend: true,
+      }),
+    );
   });
 
   it("keeps local trait defaults on the finite declaration bound", () => {
@@ -1315,12 +1585,14 @@ fn run_dynamic(runner: Runner): Tick -> i32
         : undefined,
     ).toEqual(
       summary([Access.Read], {
+        ambientAccess: Access.Write,
+        reentrant: true,
         maySuspend: true,
       }),
     );
   });
 
-  it("rejects trait implementations outside the finite declaration bound", () => {
+  it("still enforces local exclusive liveness under an open trait bound", () => {
     expect(() =>
       semanticsPipeline(
         parse(
@@ -1342,7 +1614,7 @@ impl Reader for Box
     ).toThrow(/TY0055/);
   });
 
-  it("validates implementations against imported trait declaration bounds", () => {
+  it("preserves conservative open-trait bounds across imports", () => {
     const dependency: ModuleNode = {
       id: "src::ordinary_trait_bound_dependency",
       path: {
@@ -1399,17 +1671,17 @@ impl Reader for Box
     };
     const dependencyResult = semanticsPipeline({ module: dependency, graph });
 
-    expect(() =>
-      semanticsPipeline({
-        module: consumer,
-        graph,
-        exports: new Map([[dependency.id, dependencyResult.exports]]),
-        dependencies: new Map([[dependency.id, dependencyResult]]),
-      }),
-    ).toThrow(/TY0055/);
+    const result = semanticsPipeline({
+      module: consumer,
+      graph,
+      exports: new Map([[dependency.id, dependencyResult.exports]]),
+      dependencies: new Map([[dependency.id, dependencyResult]]),
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
   });
 
-  it("preserves imported closed rows and selected overload suspension", () => {
+  it("keeps fallback imported open receivers conservative while preserving suspension", () => {
     const dependency: ModuleNode = {
       id: "src::ordinary_trait_effect_dependency",
       path: {
@@ -1499,12 +1771,23 @@ fn run_effectful(runner: Runner): Tick -> i32
       result.borrowing.ordinaryMutationSummaries.get(
         functions.get("run_pure")!.symbol,
       ),
-    ).toEqual(summary([Access.Read]));
+    ).toEqual(
+      summary([Access.Read], {
+        ambientAccess: Access.Write,
+        reentrant: true,
+      }),
+    );
     expect(
       result.borrowing.ordinaryMutationSummaries.get(
         functions.get("run_effectful")!.symbol,
       ),
-    ).toEqual(summary([Access.Read], { maySuspend: true }));
+    ).toEqual(
+      summary([Access.Read], {
+        ambientAccess: Access.Write,
+        reentrant: true,
+        maySuspend: true,
+      }),
+    );
   });
 
   it("reports implementation effects outside a declaration upper bound", () => {
@@ -1518,7 +1801,7 @@ fn run_effectful(runner: Runner): Tick -> i32
     const violations = validateOrdinaryMutationSummaryBound({
       symbol: 7,
       implementation: summary([Access.Write], {
-        invokesUnknownCallback: true,
+        reentrant: true,
       }),
       declaration,
     });
@@ -1528,6 +1811,15 @@ fn run_effectful(runner: Runner): Tick -> i32
         kind: "parameter-access",
         symbol: 7,
         parameter: 0,
+        access: "direct",
+        actual: Access.Write,
+        allowed: Access.Read,
+      },
+      {
+        kind: "parameter-access",
+        symbol: 7,
+        parameter: 0,
+        access: "reachable",
         actual: Access.Write,
         allowed: Access.Read,
       },

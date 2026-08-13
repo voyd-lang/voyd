@@ -10,9 +10,6 @@ use std::traits::eq::Eq
 use std::traits::hash::{ Hash, Hasher }
 use std::traits::ord::{ Ord, Ordering, Less, Equal, Greater }
 
-@intrinsic(name: "__i64_extend_s")
-fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
-
 obj EqOrdValue {
   value: i32
 }
@@ -101,14 +98,8 @@ obj IntBag {
 
 impl Collect<i32> for IntBag
   fn from_iterator({ ~items: Iterator<i32> }) -> IntBag
-    var out = Array<i32>::init()
-    while true:
-      match(items.next())
-        Some<i32> { value }:
-          out = out.pushed(value)
-        None:
-          break
-    IntBag { items: out }
+    items
+    IntBag { items: Array<i32>::init() }
 
 obj NoopHasher {}
 
@@ -118,7 +109,7 @@ impl Hasher for NoopHasher
     void
 
   fn finish(self) -> i64
-    extend_i32_s(1)
+    1i64
 
 obj HashValue {
   value: i32
@@ -172,5 +163,5 @@ test "trait contracts work for baseline std traits":
 
   let hasher = NoopHasher {}
   HashValue { value: 8 }.hash(into: hasher)
-  assert(hasher.finish(), eq: extend_i32_s(1))
+  assert(hasher.finish(), eq: 1i64)
   assert(true, eq: true)

@@ -26,16 +26,20 @@ Names are quoted when they are stable enough to search directly.
 | `~T` is exclusive against overlapping aliases and supports local non-lexical reborrows                               | `B`; `CON` completed/nested reborrow and overlap diagnostics      |
 | Fields and stable indices may be proven disjoint locally; uncertain comparable places use bounded identity guards    | `B`; `G`; `CON` identity-guard success and conflict cases         |
 | Arguments and defaults evaluate once before call access activates                                                    | `G`; `CON` default-evaluation-order cases                         |
-| Ordinary summaries have only whole-parameter modes and three bounded flags                                           | `B` ordinary-mutation-summary unit tests; `PERF` scaling counters |
+| Ordinary summaries have only direct/reachable parameter modes, an ambient mode, and two bounded hazard bits          | `B` ordinary-mutation-summary unit tests; `D`; `PERF` counters    |
 | Ordinary SCC solving revisits affected callers and creates no projection families or widenings                       | `B` ordinary-mutation-summary SCC test; `PERF` structural gates   |
+| Summary evaluations and local CFG liveness satisfy the finite solver and bitset bounds                               | `B` solver/liveness bound tests; `PERF` structural gates          |
 | Trait declarations bound dynamic calls and implementations fit the declaration                                       | `B` summary-bound and trait-dispatch tests                        |
-| Exclusive callables reject potentially overlapping ambient access, unknown callbacks, effects, and suspension        | `B`; `T`; `CON` unknown-callback declaration bound                |
+| Exclusive access ends after final possible local use and joins branches and loops conservatively                     | `B` final-use, branch-order, loop, and nested-transfer tests      |
+| Live exclusive capabilities reject overlapping ambient access, reentrant control, effects, and suspension            | `B`; `T`; `CON` unknown-callback declaration bound                |
+| Reachable conflicts never use unequal roots as proof of graph disjointness                                            | `B`; `G` reachable shared-child and identity-guard cases          |
 | Reference-bearing ordinary call results are conservatively possible aliases inside an active exclusive scope         | `B` result-alias conflict cases                                   |
 | Active exclusive capabilities cannot be stored, captured, returned, suspended, or laundered through plain parameters | `B`; `CON` plain-parameter laundering                             |
 | `Borrow<T>` uses normal generic syntax and `borrow T` is rejected                                                    | `P`; `T`                                                          |
 | `Borrow` is reserved, has arity one, is invariant, and cannot be nested                                              | `T`; `P`                                                          |
 | A borrow is legal only as a complete callable input after normalization, including nested callable inputs            | `T` normalized-position tests                                     |
 | Plain places and temporaries form shared scoped borrows for the complete invocation                                  | `B`; `CON` scoped-borrow place, temporary, and optimized cases    |
+| Scoped borrows remain compatible with ordinary aliases, with shared reads allowed during shared access               | `B` ordinary-alias and SharedCell callback cases                  |
 | Nested shared reborrows are accepted; shared-to-exclusive upgrades are rejected                                      | `B`; `CON` scoped-borrow input cases                              |
 | Exclusive scoped access forms only from an exclusive place, exclusive reborrow, or `SharedCell` guard                | `B`; `STD` SharedCell mutation/replacement tests                  |
 | Borrowed results, fields, containers, module storage, and ordinary generic erasure are rejected                      | `T`; `B`                                                          |

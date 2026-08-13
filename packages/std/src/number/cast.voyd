@@ -555,19 +555,19 @@ fn append_signed_i64(~out: Array<i32>, value: i64) -> void
       let digit = to_i32_wrapping(to_i64(0) - (remaining % to_i64(10)))
       reversed.push(ascii_digit(digit))
       remaining = remaining / to_i64(10)
-    append_reverse(out, reversed)
+    var index = reversed.len() - 1
+    while index >= 0:
+      out.push(reversed.at(index))
+      index = index - 1
     return void
 
   while remaining != to_i64(0):
     let digit = to_i32_wrapping(remaining % to_i64(10))
     reversed.push(ascii_digit(digit))
     remaining = remaining / to_i64(10)
-  append_reverse(out, reversed)
-
-fn append_reverse(~out: Array<i32>, values: Array<i32>) -> void
-  var index = values.len() - 1
+  var index = reversed.len() - 1
   while index >= 0:
-    out.push(values.at(index))
+    out.push(reversed.at(index))
     index = index - 1
 
 fn ascii_digit(value: i32) -> i32

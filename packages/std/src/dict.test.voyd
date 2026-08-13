@@ -68,10 +68,10 @@ test "dict init is empty":
   assert(map.is_empty(), eq: true)
 
 test "dict with_capacity supports inserts":
-  let ~map = Dict<IntKey, i32>::with_capacity(40)
+  var map = Dict<IntKey, i32>::with_capacity(40)
   var index = 0
   while index < 40:
-    map.set(IntKey { value: index }, index)
+    map = map.setting(IntKey { value: index }, index)
     index = index + 1
   assert(map.len(), eq: 40)
 
@@ -88,11 +88,11 @@ test "dict with_capacity clamps unsafe sizes":
   let negative = Dict<IntKey, i32>::with_capacity(-7)
   assert(bucket_count_of(negative), eq: 16)
 
-test "dict set insert get contains remove clear":
-  let ~map = Dict<String, i32>::init()
-  map.set("a", 1)
-  assert(map.insert("a", 2), eq: false)
-  assert(map.insert("b", 3), eq: true)
+test "dict setting get contains removing clear":
+  let map = Dict<String, i32>::init()
+    .setting("a", 1)
+    .setting("a", 2)
+    .setting("b", 3)
 
   assert(map.contains("a"), eq: true)
   match(map.get("a"))
@@ -101,21 +101,21 @@ test "dict set insert get contains remove clear":
     None:
       assert(false)
 
-  let removed = map.remove("a")
-  match(removed)
+  match(map.get("a"))
     Some<i32> { value }:
       assert(value, eq: 2)
     None:
       assert(false)
 
-  assert(map.contains("a"), eq: false)
-  map.set("x", 9)
-  map.clear()
-  assert(map.len(), eq: 0)
+  let removed = map.removing("a")
+  assert(removed.contains("a"), eq: false)
 
-test "dict persistent updates remain isolated and copies remain mutable":
-  let ~source = Dict<String, i32>::init()
-  source.set("a", 1)
+  let ~cleared = removed.setting("x", 9)
+  cleared.clear()
+  assert(cleared.len(), eq: 0)
+
+test "dict persistent updates and copies remain isolated":
+  let source = Dict<String, i32>::init().setting("a", 1)
 
   let persistent = source.setting("a", 2).setting("b", 3)
   match(source.get("a"))
@@ -126,16 +126,14 @@ test "dict persistent updates remain isolated and copies remain mutable":
   assert(source.contains("b"), eq: false)
   assert(persistent.len(), eq: 2)
 
-  let ~copy = source.copied()
-  copy.set("a", 4)
-  copy.set("c", 5)
+  let copy = source.copied().setting("a", 4).setting("c", 5)
   assert(copy.len(), eq: 2)
 
 test "dict keys values entries each":
-  let ~map = Dict<String, i32>::init()
-  map.set("a", 1)
-  map.set("b", 2)
-  map.set("c", 3)
+  let map = Dict<String, i32>::init()
+    .setting("a", 1)
+    .setting("b", 2)
+    .setting("c", 3)
 
   let keys = map.keys()
   let values = map.values()
@@ -159,16 +157,11 @@ test "dict keys values entries each":
   assert(stats.with((current) => current.sum), eq: 6)
   assert(stats.with((current) => current.has_a), eq: true)
 
-test "dict extend merged merge":
-  let ~left = Dict<String, i32>::init()
-  left.set("a", 1)
-  let ~right = Dict<String, i32>::init()
-  right.set("b", 2)
-  right.set("a", 9)
+test "dict merged combines entries":
+  let left = Dict<String, i32>::init().setting("a", 1)
+  let right = Dict<String, i32>::init().setting("b", 2).setting("a", 9)
 
-  let ~extended = Dict<String, i32>::init()
-  extended.set("a", 1)
-  extended.extend(right)
+  let extended = Dict<String, i32>::init().setting("a", 1).merged(right)
   assert(extended.len(), eq: 2)
   match(extended.get("a"))
     Some<i32> { value }:
@@ -196,14 +189,14 @@ test "dict extend merged merge":
       assert(false)
 
 test "dict merged preserves the bucket load factor":
-  let ~left = Dict<IntKey, i32>::init()
-  let ~right = Dict<IntKey, i32>::init()
+  var left = Dict<IntKey, i32>::init()
+  var right = Dict<IntKey, i32>::init()
   var index = 0
   while index < 80:
     if index < 40 then:
-      left.set(IntKey { value: index }, index)
+      left = left.setting(IntKey { value: index }, index)
     else:
-      right.set(IntKey { value: index }, index)
+      right = right.setting(IntKey { value: index }, index)
     index = index + 1
 
   let merged = left.merged(right)
@@ -217,10 +210,10 @@ test "dict merged preserves the bucket load factor":
       assert(false)
 
 test "dict map and filter":
-  let ~map = Dict<String, i32>::init()
-  map.set("a", 1)
-  map.set("b", 2)
-  map.set("c", 3)
+  let map = Dict<String, i32>::init()
+    .setting("a", 1)
+    .setting("b", 2)
+    .setting("c", 3)
 
   let mapped = map.map<i32>((_k: String, v: i32) -> i32 => v * 10)
   match(mapped.get("b"))
@@ -266,10 +259,10 @@ test "dict entry helpers":
   assert(removed.dict.contains("pear"), eq: false)
 
 test "dict grows and preserves entries":
-  let ~map = Dict<IntKey, i32>::init()
+  var map = Dict<IntKey, i32>::init()
   var index = 0
   while index < 80:
-    map.set(IntKey { value: index }, index)
+    map = map.setting(IntKey { value: index }, index)
     index = index + 1
   assert(map.len(), eq: 80)
 
@@ -286,9 +279,9 @@ test "dict grows and preserves entries":
       assert(false)
 
 test "dict supports non-string key type":
-  let ~map = Dict<IntKey, i32>::init()
-  map.set(IntKey { value: 1 }, 10)
-  map.set(IntKey { value: 2 }, 20)
+  let map = Dict<IntKey, i32>::init()
+    .setting(IntKey { value: 1 }, 10)
+    .setting(IntKey { value: 2 }, 20)
 
   match(map.get(IntKey { value: 1 }))
     Some<i32> { value }:
@@ -297,10 +290,10 @@ test "dict supports non-string key type":
       assert(false)
 
 test "dict handles colliding custom key hashes":
-  let ~map = Dict<CollidingKey, i32>::init()
-  map.set(CollidingKey { value: 1 }, 10)
-  map.set(CollidingKey { value: 2 }, 20)
-  map.set(CollidingKey { value: 3 }, 30)
+  let map = Dict<CollidingKey, i32>::init()
+    .setting(CollidingKey { value: 1 }, 10)
+    .setting(CollidingKey { value: 2 }, 20)
+    .setting(CollidingKey { value: 3 }, 30)
   assert(map.len(), eq: 3)
   match(map.get(CollidingKey { value: 2 }))
     Some<i32> { value }:

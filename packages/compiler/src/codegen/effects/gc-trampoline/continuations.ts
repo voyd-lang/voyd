@@ -530,11 +530,13 @@ export const ensureContinuationFunction = ({
     const typeId = substitution
       ? ctx.program.types.substitute(valueType, substitution)
       : valueType;
-    const storageRef = groupSites.some((site) =>
-      site.envFields.some(
-        (field) => field.symbol === symbol && field.storageRef === true,
-      ),
-    );
+    const storageRef =
+      ctx.module.mutableStorageSymbols.has(symbol) ||
+      groupSites.some((site) =>
+        site.envFields.some(
+          (field) => field.symbol === symbol && field.storageRef === true,
+        ),
+      );
     const seeded = storageRef
       ? allocateMutableRefLocal({ typeId, ctx, fnCtx })
       : allocateAddressableLocal({ typeId, ctx, fnCtx });
@@ -807,12 +809,18 @@ export const ensureContinuationFunction = ({
         throw new Error("missing symbol for env field");
       }
       const binding = fnCtx.bindings.get(field.symbol);
-      if (!binding || binding.kind !== "local") {
+      if (!binding) {
         throw new Error("missing local binding for env restore");
       }
       if (field.storageRef) {
+        if (binding.kind !== "local" && binding.kind !== "storage-ref") {
+          throw new Error("storage-ref env restore requires a local binding");
+        }
         initOps.push(ctx.mod.local.set(binding.index, storedValue));
         return;
+      }
+      if (binding.kind !== "local") {
+        throw new Error("missing local binding for env restore");
       }
       initOps.push(storeLocalValue({ binding, value, ctx, fnCtx }));
     });

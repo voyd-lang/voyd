@@ -547,14 +547,14 @@ test "json parse keeps late fractional digits with exponent compensation":
       assert(false, eq: true)
 
 test "json stringify emits compact object envelope":
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("ok", JsonBool { value: true })
-  fields.set("count", JsonNumber { value: 12.5 })
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("ok", JsonBool { value: true })
+  fields = fields.setting("count", JsonNumber { value: 12.5 })
 
   let ~items = Array<JsonValue>::with_capacity(2)
   items.push(JsonString { value: "x" })
   items.push(JsonNull {})
-  fields.set("items", JsonArray { value: items })
+  fields = fields.setting("items", JsonArray { value: items })
 
   let value = JsonObject { value: fields }
   let compact = must_stringify(value)
@@ -563,14 +563,14 @@ test "json stringify emits compact object envelope":
   assert(compact.as_slice().ends_with("}"), eq: true)
 
 test "json stringify includes object keys":
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("ok", JsonBool { value: true })
-  fields.set("count", JsonNumber { value: 12.5 })
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("ok", JsonBool { value: true })
+  fields = fields.setting("count", JsonNumber { value: 12.5 })
 
   let ~items = Array<JsonValue>::with_capacity(2)
   items.push(JsonString { value: "x" })
   items.push(JsonNull {})
-  fields.set("items", JsonArray { value: items })
+  fields = fields.setting("items", JsonArray { value: items })
 
   let value = JsonObject { value: fields }
   let compact = must_stringify(value)
@@ -588,14 +588,14 @@ test "json stringify includes object keys":
       assert(false, eq: true)
 
 test "json stringify_pretty emits newlines":
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("ok", JsonBool { value: true })
-  fields.set("count", JsonNumber { value: 12.5 })
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("ok", JsonBool { value: true })
+  fields = fields.setting("count", JsonNumber { value: 12.5 })
 
   let ~items = Array<JsonValue>::with_capacity(2)
   items.push(JsonString { value: "x" })
   items.push(JsonNull {})
-  fields.set("items", JsonArray { value: items })
+  fields = fields.setting("items", JsonArray { value: items })
 
   let value = JsonObject { value: fields }
   let pretty = must_stringify_pretty(value)
