@@ -102,3 +102,57 @@ test("V-500 summaries require explicit zero-presence counters", () => {
     /optimization\.decision\.accepted/u,
   );
 });
+
+test("historical comparisons use each revision's declared counter schema", () => {
+  const summary = {
+    success: true,
+    phasesMs: Object.fromEntries(
+      [
+        "total",
+        "analyzeBorrowing",
+        "analyzeBorrowing.finiteLocal",
+        "analyzeBorrowing.ordinaryMutation",
+        "analyzeBorrowing.explicitBorrow",
+      ].map((name) => [name, 0]),
+    ),
+    counters: Object.fromEntries(
+      [
+        "borrowing.ordinary.callables",
+        "borrowing.ordinary.callEdges",
+        "borrowing.ordinary.summaryEvaluations",
+        "borrowing.ordinary.sccReevaluations",
+        "borrowing.ordinary.retainedSummaryBytes",
+        "borrowing.ordinary.projectionFamilies",
+        "borrowing.ordinary.widenings",
+        "borrowing.explicitBorrowFacts",
+        "codegen.exact_call.requests",
+      ].map((name) => [name, 0]),
+    ),
+  };
+
+  assert.deepEqual(
+    validateCompilerSummaries({
+      summaries: [summary],
+      compileCount: 1,
+      counterSchema: {
+        available: true,
+        counters: ["codegen.exact_call.requests"],
+      },
+    }),
+    [],
+  );
+  assert.match(
+    validateCompilerSummaries({
+      summaries: [summary],
+      compileCount: 1,
+      counterSchema: {
+        available: true,
+        counters: [
+          "codegen.exact_call.requests",
+          "borrowing.ordinary.liveness.cfgBlocks",
+        ],
+      },
+    }).join("\n"),
+    /borrowing\.ordinary\.liveness\.cfgBlocks/u,
+  );
+});

@@ -29,32 +29,18 @@ const V500_REQUIRED_PHASES = [
   "analyzeBorrowing.ordinaryMutation",
   "analyzeBorrowing.explicitBorrow",
 ];
-const V500_REQUIRED_ANALYSIS_COUNTERS = [
+// Counters shared by every revision supported by this historical comparison.
+// Revision-specific zero-presence counters come from that checkout's declared
+// schema, so adding a counter does not make older baselines unmeasurable.
+const STABLE_REQUIRED_ANALYSIS_COUNTERS = [
   "borrowing.ordinary.callables",
   "borrowing.ordinary.callEdges",
   "borrowing.ordinary.summaryEvaluations",
   "borrowing.ordinary.sccReevaluations",
-  "borrowing.ordinary.strictAscents",
-  "borrowing.ordinary.dependencyEnqueues",
-  "borrowing.ordinary.solverBound",
-  "borrowing.ordinary.solverBoundUsage",
-  "borrowing.ordinary.liveness.cfgBlocks",
-  "borrowing.ordinary.liveness.cfgEdges",
-  "borrowing.ordinary.liveness.trackedCapabilities",
-  "borrowing.ordinary.liveness.stateInsertions",
-  "borrowing.ordinary.liveness.workItems",
   "borrowing.ordinary.retainedSummaryBytes",
   "borrowing.ordinary.projectionFamilies",
   "borrowing.ordinary.widenings",
   "borrowing.explicitBorrowFacts",
-  "codegen.exact_call.requests",
-  "codegen.exact_call.cache_hits",
-  "codegen.exact_call.cache_misses",
-  "codegen.exact_call.body_visits",
-  "codegen.exact_call.analysis_operations",
-  "codegen.exact_call.budget_exhaustion.per_body_work",
-  "codegen.exact_call.budget_exhaustion.per_body_memory",
-  "codegen.exact_call.budget_exhaustion.compile_wide_memory",
 ];
 const SOURCE_INPUTS = [
   "packages/compiler/src",
@@ -441,7 +427,7 @@ export const validateCompilerSummaries = ({
       : ["total"];
     const requiredCounters = counterSchema?.available
       ? [
-          ...V500_REQUIRED_ANALYSIS_COUNTERS,
+          ...STABLE_REQUIRED_ANALYSIS_COUNTERS,
           ...counterSchema.counters,
         ]
       : [];
