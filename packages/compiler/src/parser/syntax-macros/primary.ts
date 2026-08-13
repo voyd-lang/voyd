@@ -74,22 +74,9 @@ const parsePrecedence = (cursor: FormCursor, minPrecedence = 0): Expr => {
 
   let expr: Expr;
 
-  if (isPrefixOp(first) && contextualPrefixIsActive(first, cursor)) {
+  if (isPrefixOp(first)) {
     const op = cursor.consume()!;
-    let right = parsePrecedence(cursor, unaryOpInfo(op) ?? -1);
-    const genericTail = cursor.peek();
-    if (
-      isIdentifierAtom(op) &&
-      op.value === "borrow" &&
-      isForm(genericTail) &&
-      genericTail.callsInternal("generics")
-    ) {
-      const parsedTail = parseExpression(cursor.consume()!);
-      right = new Form({
-        location: mergeLocation(right, parsedTail),
-        elements: [right, parsedTail],
-      });
-    }
+    const right = parsePrecedence(cursor, unaryOpInfo(op) ?? -1);
     expr = new Form({
       location: mergeLocation(op, right),
       elements: [op, right],
@@ -117,17 +104,6 @@ const parsePrecedence = (cursor: FormCursor, minPrecedence = 0): Expr => {
   }
 
   return expr;
-};
-
-const contextualPrefixIsActive = (op: Expr, cursor: FormCursor): boolean => {
-  const next = cursor.peek(1);
-  return !(
-    isIdentifierAtom(op) &&
-    op.value === "borrow" &&
-    (next === undefined ||
-      isInfixOp(next) ||
-      (isForm(next) && next.callsInternal("generics")))
-  );
 };
 
 const infixOpInfo = (op?: Expr): number | undefined => {

@@ -486,7 +486,6 @@ const assertDeclarationBindingsAreBindable = (
     declaration.typeParameters.forEach(({ name }) =>
       assertNotSymbolReference(name),
     );
-    declaration.regions.forEach(({ name }) => assertNotSymbolReference(name));
     declaration.methods.forEach(({ signature, body }) => {
       assertFunctionSignatureBindings(signature);
       signature.params.forEach(({ defaultValue }) => {

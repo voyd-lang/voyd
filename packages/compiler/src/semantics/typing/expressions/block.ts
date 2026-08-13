@@ -1,5 +1,5 @@
 import type { HirBlockExpr, HirLetStatement } from "../../hir/index.js";
-import type { HirStmtId, SymbolId, TypeId } from "../../ids.js";
+import type { HirExprId, HirStmtId, SymbolId, TypeId } from "../../ids.js";
 import { typeExpression, type TypeExpressionOptions } from "../expressions.js";
 import { getExprEffectRow } from "../effects.js";
 import {
@@ -10,7 +10,7 @@ import {
 } from "./patterns.js";
 import { mergeBranchType } from "./branching.js";
 import {
-  ensureTypeMatches,
+  ensureTypeMatchesWithoutBorrowFormation,
   resolveTypeExpr,
   getSymbolName,
   typeSatisfiesBorrowFormation,
@@ -262,17 +262,17 @@ const typeLetStatement = (
         annotated !== ctx.primitives.unknown
       ) {
         const initializerType = typeExpression(stmt.initializer, ctx, state, {
-          expectedType: annotated,
+          expectedType: expectedTypeForLocalInitializer(annotated, ctx),
         });
         if (initializerType !== ctx.primitives.unknown) {
-          ensureTypeMatches(
-            initializerType,
-            annotated,
+          ensureLocalInitializerMatches({
+            initializer: stmt.initializer,
+            actual: initializerType,
+            expected: annotated,
             ctx,
             state,
-            "let initializer",
-            ctx.hir.expressions.get(stmt.initializer)?.span ?? stmt.span,
-          );
+            span: ctx.hir.expressions.get(stmt.initializer)?.span ?? stmt.span,
+          });
         }
         bindTuplePatternFromType(
           stmt.pattern,
@@ -311,7 +311,7 @@ const typeLetStatement = (
           : undefined;
 
       const initializerType = typeExpression(stmt.initializer, ctx, state, {
-        expectedType,
+        expectedType: expectedTypeForLocalInitializer(expectedType, ctx),
       });
 
       if (
@@ -319,14 +319,14 @@ const typeLetStatement = (
         expectedType !== ctx.primitives.unknown &&
         initializerType !== ctx.primitives.unknown
       ) {
-        ensureTypeMatches(
-          initializerType,
-          expectedType,
+        ensureLocalInitializerMatches({
+          initializer: stmt.initializer,
+          actual: initializerType,
+          expected: expectedType,
           ctx,
           state,
-          "let initializer",
-          ctx.hir.expressions.get(stmt.initializer)?.span ?? stmt.span,
-        );
+          span: ctx.hir.expressions.get(stmt.initializer)?.span ?? stmt.span,
+        });
       }
 
       const declaredType = expectedType ?? initializerType;
@@ -351,7 +351,7 @@ const typeLetStatement = (
           )
         : undefined;
     const initializerType = typeExpression(stmt.initializer, ctx, state, {
-      expectedType,
+      expectedType: expectedTypeForLocalInitializer(expectedType, ctx),
     });
 
     if (
@@ -359,14 +359,14 @@ const typeLetStatement = (
       expectedType !== ctx.primitives.unknown &&
       initializerType !== ctx.primitives.unknown
     ) {
-      ensureTypeMatches(
-        initializerType,
-        expectedType,
+      ensureLocalInitializerMatches({
+        initializer: stmt.initializer,
+        actual: initializerType,
+        expected: expectedType,
         ctx,
         state,
-        "let initializer",
-        ctx.hir.expressions.get(stmt.initializer)?.span ?? stmt.span,
-      );
+        span: ctx.hir.expressions.get(stmt.initializer)?.span ?? stmt.span,
+      });
     }
 
     const declaredType = expectedType ?? initializerType;
@@ -378,6 +378,71 @@ const typeLetStatement = (
       ctx.activeValueTypeComputations.delete(symbol),
     );
   }
+};
+
+const ensureLocalInitializerMatches = ({
+  initializer,
+  actual,
+  expected,
+  ctx,
+  state,
+  span,
+}: {
+  initializer: HirExprId;
+  actual: TypeId;
+  expected: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+  span: HirLetStatement["span"];
+}): void => {
+  if (
+    isProjectionRootedInBorrow(initializer, ctx) &&
+    typeSatisfiesBorrowFormation(actual, expected, ctx, state)
+  ) {
+    return;
+  }
+  ensureTypeMatchesWithoutBorrowFormation(
+    actual,
+    expected,
+    ctx,
+    state,
+    "let initializer",
+    span,
+  );
+};
+
+const isProjectionRootedInBorrow = (
+  expressionId: HirExprId,
+  ctx: TypingContext,
+): boolean => {
+  const expression = ctx.hir.expressions.get(expressionId);
+  if (!expression) {
+    return false;
+  }
+  if (expression.exprKind === "field-access") {
+    return isProjectionRootedInBorrow(expression.target, ctx);
+  }
+  if (expression.exprKind !== "identifier") {
+    return false;
+  }
+  const type =
+    ctx.resolvedExprTypes.get(expression.id) ??
+    ctx.valueTypes.get(expression.symbol);
+  if (typeof type !== "number") {
+    return false;
+  }
+  return ctx.arena.get(ctx.arena.unfoldRecursive(type)).kind === "borrowed";
+};
+
+const expectedTypeForLocalInitializer = (
+  expectedType: TypeId | undefined,
+  ctx: TypingContext,
+): TypeId | undefined => {
+  if (typeof expectedType !== "number") {
+    return undefined;
+  }
+  const descriptor = ctx.arena.get(ctx.arena.unfoldRecursive(expectedType));
+  return descriptor.kind === "borrowed" ? undefined : expectedType;
 };
 
 const collectPatternSymbols = (

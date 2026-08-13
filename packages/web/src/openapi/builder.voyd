@@ -95,13 +95,12 @@ fn append_document_route(
   path: StringSlice,
   { method: Method, operation: Operation }
 ) -> Document
-  let ~routes = source.routes.copied(1)
-  routes.push(RouteDocument::init(
+  let route = RouteDocument::init(
     method: method,
     path: openapi_path(path),
     operation: operation
-  ))
-  Document { info: source.info, routes: routes }
+  )
+  Document { info: source.info, routes: source.routes.pushed(route) }
 
 fn document_json(spec: Document) -> JsonValue
   render_document(spec.info, spec.routes, include_doc_comments: true)

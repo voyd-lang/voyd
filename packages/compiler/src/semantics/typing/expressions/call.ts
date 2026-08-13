@@ -1088,8 +1088,12 @@ export const typeMethodCallExpr = (
 
   const targetType = typeExpression(expr.target, ctx, state);
   const targetDescriptor = ctx.arena.get(targetType);
-  const readReceiverType =
-    targetDescriptor.kind === "borrowed" ? targetDescriptor.inner : targetType;
+  if (targetDescriptor.kind === "borrowed") {
+    throw new Error(
+      "Borrow<T> values cannot be used as ordinary method receivers; use a Borrow-aware helper",
+    );
+  }
+  const readReceiverType = targetType;
   ctx.table.pushExprTypeScope();
   const probeArgs: Arg[] = [
     { type: readReceiverType, exprId: expr.target },
@@ -2243,39 +2247,7 @@ const callArgumentTypeSatisfiesParameter = (
   expected: TypeId,
   ctx: TypingContext,
   state: TypingState,
-): boolean => {
-  if (satisfiesBorrowFormation(actual, expected, ctx, state)) {
-    return true;
-  }
-  const descriptor = ctx.arena.get(actual);
-  return (
-    descriptor.kind === "borrowed" &&
-    !disallowedValueTraitObjectWidening({
-      actual: descriptor.inner,
-      expected,
-      ctx,
-      state,
-    }) &&
-    typeSatisfies(descriptor.inner, expected, ctx, state)
-  );
-};
-
-const materializedBorrowInnerForParameter = (
-  actual: TypeId,
-  expected: TypeId,
-  ctx: TypingContext,
-  state: TypingState,
-): TypeId | undefined => {
-  const descriptor = ctx.arena.get(actual);
-  if (
-    descriptor.kind !== "borrowed" ||
-    ctx.arena.get(expected).kind === "borrowed" ||
-    !typeSatisfies(descriptor.inner, expected, ctx, state)
-  ) {
-    return undefined;
-  }
-  return descriptor.inner;
-};
+): boolean => satisfiesBorrowFormation(actual, expected, ctx, state);
 
 const argumentTargetsSyntheticParam = (
   arg: Arg,
@@ -2345,15 +2317,8 @@ const validateCallArgs = (
           : spanForArg(match.arg, ctx);
       if (!(state.mode === "relaxed" && hasUnknownArgs)) {
         const expected = providedArgumentTypeForParam(match.param, ctx);
-        const materialized =
-          materializedBorrowInnerForParameter(
-            match.matchedType,
-            expected,
-            ctx,
-            state,
-          ) ?? match.matchedType;
         ensureTypeMatches(
-          materialized,
+          match.matchedType,
           expected,
           ctx,
           state,
@@ -4296,12 +4261,7 @@ const resolveMethodCallCandidates = ({
 }): MethodCallResolution | undefined => {
   const receiverDesc = ctx.arena.get(receiverType);
   if (receiverDesc.kind === "borrowed") {
-    return resolveMethodCallCandidates({
-      receiverType: receiverDesc.inner,
-      methodName,
-      ctx,
-      state,
-    });
+    return undefined;
   }
   if (receiverDesc.kind === "type-param-ref") {
     const constraint = activeTypeParameterConstraint({
@@ -6207,6 +6167,23 @@ const instantiateFunctionCall = ({
     );
   }
 
+  const borrowedTypeArgument = typeParams.find((param) => {
+    const applied = substitution.get(param.typeParam);
+    return (
+      typeof applied === "number" &&
+      typeContainsActiveBorrowForGenericArgument(applied, ctx)
+    );
+  });
+  if (borrowedTypeArgument) {
+    throw new Error(
+      `Borrow<T> cannot instantiate ordinary type parameter ${resolveSymbolName(
+        borrowedTypeArgument.symbol,
+        ctx,
+        nameForSymbol,
+      )}`,
+    );
+  }
+
   const parameters = signature.parameters.map((param) => ({
     ...param,
     type: applyCurrentSubstitution(
@@ -6222,6 +6199,76 @@ const instantiateFunctionCall = ({
   );
 
   return { substitution, parameters, returnType };
+};
+
+const typeContainsActiveBorrowForGenericArgument = (
+  type: TypeId,
+  ctx: TypingContext,
+  seen = new Set<TypeId>(),
+): boolean => {
+  if (seen.has(type)) {
+    return false;
+  }
+  seen.add(type);
+
+  const descriptor = ctx.arena.get(type);
+  switch (descriptor.kind) {
+    case "borrowed":
+      return true;
+    case "recursive":
+      return typeContainsActiveBorrowForGenericArgument(
+        descriptor.body,
+        ctx,
+        seen,
+      );
+    case "trait":
+    case "nominal-object":
+    case "value-object":
+      return descriptor.typeArgs.some((argument) =>
+        typeContainsActiveBorrowForGenericArgument(argument, ctx, seen),
+      );
+    case "structural-object":
+      return descriptor.fields.some((field) =>
+        typeContainsActiveBorrowForGenericArgument(field.type, ctx, seen),
+      );
+    case "fixed-array":
+      return typeContainsActiveBorrowForGenericArgument(
+        descriptor.element,
+        ctx,
+        seen,
+      );
+    case "union":
+      return descriptor.members.some((member) =>
+        typeContainsActiveBorrowForGenericArgument(member, ctx, seen),
+      );
+    case "intersection":
+      return (
+        (typeof descriptor.nominal === "number" &&
+          typeContainsActiveBorrowForGenericArgument(
+            descriptor.nominal,
+            ctx,
+            seen,
+          )) ||
+        (typeof descriptor.structural === "number" &&
+          typeContainsActiveBorrowForGenericArgument(
+            descriptor.structural,
+            ctx,
+            seen,
+          )) ||
+        (descriptor.traits?.some((trait) =>
+          typeContainsActiveBorrowForGenericArgument(trait, ctx, seen),
+        ) ?? false)
+      );
+    case "function":
+      return typeContainsActiveBorrowForGenericArgument(
+        descriptor.returnType,
+        ctx,
+        seen,
+      );
+    case "primitive":
+    case "type-param-ref":
+      return false;
+  }
 };
 
 export const enforceTypeParamConstraint = (

@@ -45,9 +45,3 @@ export type OperationAttribute = {
 export type ExternalAttribute = {
   id: string;
 };
-
-export type BorrowContractAttribute = {
-  reads?: readonly string[];
-  mutates?: readonly string[];
-  returnsFrom?: readonly string[];
-};

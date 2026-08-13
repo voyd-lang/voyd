@@ -357,68 +357,6 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env) -> i32
     ).toBe(true);
   });
 
-  it("preserves array view loans through the public prelude API", async () => {
-    const sdk = createSdk();
-    const invalidSource = `obj Item { value: i32 }
-
-fn replace_slot_during_view() -> i32
-  let ~values = Array<Item>::with_capacity(1)
-  values.push(Item { value: 1 })
-  let ~view: ViewIterator<Item> = values.view_iter()
-  match(view.next())
-    Some<borrow Item> { value }:
-      let _ = values.replace(0, with: Item { value: 2 })
-      value.value
-    None:
-      0
-`;
-    const invalid = await sdk.compile({
-      source: invalidSource,
-    });
-    expect(invalid.success).toBe(false);
-    if (invalid.success) return;
-    const conflicts = invalid.diagnostics.filter(
-      (diagnostic) => diagnostic.code === "TY0048",
-    );
-    expect(conflicts).toHaveLength(1);
-    expect(
-      invalidSource.slice(conflicts[0]!.span.start, conflicts[0]!.span.end),
-    ).toContain("values.replace");
-
-    expectCompileSuccess(
-      await sdk.compile({
-        source: `obj Item { value: i32 }
-
-fn mutate(~item: Item) -> void
-  item.value = item.value + 1
-
-fn mutate_alias_during_view() -> i32
-  let ~values = Array<Item>::with_capacity(1)
-  values.push(Item { value: 1 })
-  let ~alias = values.at(0)
-  let ~view: ViewIterator<Item> = values.view_iter()
-  match(view.next())
-    Some<borrow Item> { value }:
-      mutate(~alias)
-      value.value
-    None:
-      0
-
-pub fn main() -> i32
-  let ~values = Array<Item>::with_capacity(1)
-  values.push(Item { value: 1 })
-  let ~view: ViewIterator<Item> = values.view_iter()
-  let observed =
-    match(view.next())
-      Some<borrow Item> { value }: value.value
-      None: 0
-  let _ = values.replace(0, with: Item { value: 2 })
-  observed
-`,
-      }),
-    );
-  });
-
   it("compiles and runs a source module", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(
@@ -589,10 +527,9 @@ pub fn main() -> i32
     );
 
     await expect(result.run<number>({ entryName: "main" })).resolves.toBe(42);
-    expect(sdk.exportCompilerArtifact()).toBeUndefined();
   });
 
-  it("keeps memory reuse separate from durable borrowing artifacts", async () => {
+  it("supports explicit in-memory compiler reuse", async () => {
     const sdk = createSdk({ compilerCache: "memory" });
     const source = `#!no_prelude
 pub fn main() -> i32
@@ -601,40 +538,12 @@ pub fn main() -> i32
 
     expectCompileSuccess(await sdk.compile({ source }));
     expectCompileSuccess(await sdk.compile({ source }));
-
-    expect(sdk.exportCompilerArtifact()).toBeUndefined();
   });
 
-  it("requires explicit artifact mode to export and import compiler artifacts", async () => {
-    const entryPath = path.join(
-      repoRoot,
-      "tests",
-      "performance",
-      "fixtures",
-      "vtrace-compute-benchmark.voyd",
+  it("rejects the removed compiler artifact cache policy", () => {
+    expect(() => createSdk({ compilerCache: "artifact" } as never)).toThrow(
+      'unknown compiler cache policy "artifact"',
     );
-    const producer = createSdk({ compilerCache: "artifact" });
-    expectCompileSuccess(await producer.compile({ entryPath }));
-    const artifact = producer.exportCompilerArtifact();
-
-    expect(artifact?.schema).toBe("voyd.compiler-dependency-borrow-cache");
-    const consumer = createSdk({
-      compilerCache: "artifact",
-      compilerArtifact: artifact,
-    });
-    const result = expectCompileSuccess(await consumer.compile({ entryPath }));
-    await expect(result.run<number>({ entryName: "main" })).resolves.toBe(
-      428_553,
-    );
-  });
-
-  it("rejects an artifact when compiler caching is disabled", () => {
-    expect(() =>
-      createSdk({
-        compilerCache: "none",
-        compilerArtifact: {} as never,
-      } as never),
-    ).toThrow('compilerArtifact requires compilerCache: "artifact"');
   });
 
   it("rejects an unknown compiler cache policy from untyped callers", () => {

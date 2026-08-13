@@ -302,8 +302,8 @@ For a mutable source, take an owned snapshot inside `with` or `with_mut`, end
 the callback, and only then invoke the continuation. Keep immutable response
 fixtures as ordinary values. Use `SharedCell<T>` for counters, captured writes,
 and other observations that must change across handler calls. Do not invoke a
-continuation from inside a `SharedCell` callback or weaken the borrow contract
-to make a test double compile.
+continuation from inside a `SharedCell` callback or weaken the scoped callback
+boundary to make a test double compile.
 
 ## Exported APIs
 

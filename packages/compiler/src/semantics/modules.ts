@@ -2,16 +2,7 @@ import type { HirBindingKind, HirVisibility } from "./hir/index.js";
 import type { OverloadSetId, SymbolId } from "./ids.js";
 import type { SymbolKind } from "./binder/index.js";
 import type { ModulePath } from "../modules/types.js";
-import type {
-  CallableBorrowContract,
-  CallableBorrowDispatchKind,
-  CallableBorrowSummarySource,
-  LoanAnalysisMode,
-  PlaceProjection,
-  PublicNamedBorrowContract,
-  CallableBorrowSummary,
-} from "./borrowing/index.js";
-import type { SymbolRef } from "./typing/symbol-ref.js";
+import type { OrdinaryMutationSummary } from "./borrowing/index.js";
 import type { EffectOp } from "./effects/effect-table.js";
 
 export interface ModuleExportEffect {
@@ -44,49 +35,17 @@ export interface ModuleExportEntry {
     isStatic: boolean;
   }[];
   effects?: readonly ModuleExportEffect[];
-  borrowing?: readonly {
+  /** Bounded whole-parameter mutation summaries, separate from borrow ABI. */
+  ordinaryMutation?: readonly {
     symbol: SymbolId;
-    /** Canonical entry in the owning module's package borrow interface. */
+    /** Canonical entry in the owning module's finite mutation interface. */
     summaryId: string;
-    capability?: LoanAnalysisMode;
-    contract: CallableBorrowContract;
-    dispatch?: CallableBorrowDispatchKind;
-    namedContract?: PublicNamedBorrowContract;
-    source?: CallableBorrowSummarySource;
+    summary: OrdinaryMutationSummary;
   }[];
-  borrowingCoercions?: readonly {
-    concrete: SymbolRef;
-    trait: SymbolRef;
-    implementation: SymbolRef;
-    /** Exact result projections at which the implementation is reachable. */
-    resultPaths?: readonly (readonly PlaceProjection[])[];
-    /** Public nominal variant that must carry the reachable implementation. */
-    resultType?: SymbolRef;
-    /**
-     * Callable-specific alternatives that make this implementation
-     * reachable. Absent means the coercion is unconditionally reachable.
-     */
-    applicability?: readonly {
-      callable: SymbolRef;
-      omissionRequirements?: readonly (readonly number[])[];
-    }[];
-    contract: CallableBorrowContract;
-  }[];
-  /**
-   * Implementations reachable only after invoking a callable value returned
-   * by this export (for example an omitted callback default).
-   */
-  borrowingCallableResultCoercions?: readonly {
-    concrete: SymbolRef;
-    trait: SymbolRef;
-    implementation: SymbolRef;
-    resultPaths?: readonly (readonly PlaceProjection[])[];
-    resultType?: SymbolRef;
-    applicability?: readonly {
-      callable: SymbolRef;
-      omissionRequirements?: readonly (readonly number[])[];
-    }[];
-    contract: CallableBorrowContract;
+  /** Finite ABI opt-in for guards emitted after omitted defaults execute. */
+  defaultIdentityGuardProtocols?: readonly {
+    symbol: SymbolId;
+    protocol: "presence-conflict-bit-v1";
   }[];
 }
 
@@ -124,36 +83,24 @@ export const firstInstanceMemberOwner = (
   exported.memberSymbols?.find((member) => !member.isStatic)?.owner ??
   (exported.isStatic !== true ? exported.memberOwner : undefined);
 
-export interface ModuleBorrowingTraitImplementation {
-  concrete: SymbolRef;
-  trait: SymbolRef;
-  implementation: SymbolRef;
-  methods: readonly {
-    implementation: SymbolRef;
-    declaration: SymbolRef;
-    contract: CallableBorrowContract;
-  }[];
-}
-
 export interface ModuleExportTable extends Map<string, ModuleExportEntry> {
-  /** Versioned module-level metadata preserved through public re-exports. */
-  borrowingTraitImplementations?: readonly ModuleBorrowingTraitImplementation[];
   /** Stable caller-facing metadata; compiler-private typing state is excluded. */
   packageSemanticInterface?: PackageSemanticInterface;
 }
 
 export const PACKAGE_SEMANTIC_INTERFACE_SCHEMA =
   "voyd.package-semantic-interface" as const;
-export const PACKAGE_SEMANTIC_INTERFACE_VERSION = 1 as const;
+export const PACKAGE_SEMANTIC_INTERFACE_VERSION = 3 as const;
+
+export type PackageOrdinaryMutationSummary = OrdinaryMutationSummary;
 
 export type PackageSemanticInterface = {
   schema: typeof PACKAGE_SEMANTIC_INTERFACE_SCHEMA;
   version: typeof PACKAGE_SEMANTIC_INTERFACE_VERSION;
   moduleId: string;
-  /** Summaries are stored once and referenced by exports/re-exports. */
-  summaries: readonly {
+  ordinaryMutationSummaries: readonly {
     id: string;
-    summary: CallableBorrowSummary;
+    summary: PackageOrdinaryMutationSummary;
   }[];
   exports: readonly {
     name: string;
@@ -161,8 +108,8 @@ export type PackageSemanticInterface = {
     visibility: HirVisibility;
     declarations: readonly {
       key: string;
-      summaryId?: string;
-      capability?: LoanAnalysisMode;
+      ordinaryMutationSummaryId?: string;
+      defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
       signature?: PackageCallableSignature;
       value?: string;
       fields?: readonly {
@@ -176,21 +123,9 @@ export type PackageSemanticInterface = {
       key: string;
       kind: "trait-method" | "effect-operation";
       resumable?: "ctl" | "fn";
-      summaryId?: string;
-      capability?: LoanAnalysisMode;
+      ordinaryMutationSummaryId?: string;
+      defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
       signature?: PackageCallableSignature;
-    }[];
-  }[];
-  coercions: readonly PackageCoercion[];
-  callableResultCoercions: readonly PackageCoercion[];
-  traitImplementations: readonly {
-    concrete: string;
-    trait: string;
-    implementation: string;
-    methods: readonly {
-      implementation: string;
-      declaration: string;
-      summaryId: string;
     }[];
   }[];
   types: readonly { id: string; descriptor: unknown }[];
@@ -214,36 +149,17 @@ export type PackageCallableSignature = {
   };
 };
 
-type PackageCoercion = {
-  concrete: string;
-  trait: string;
-  implementation: string;
-  resultPaths?: readonly (readonly PlaceProjection[])[];
-  resultType?: string;
-  applicability?: readonly {
-    callable: string;
-    omissionRequirements?: readonly (readonly number[])[];
-  }[];
-  summaryId: string;
-};
-
 export const cloneModuleExportTable = (
   table: ModuleExportTable,
 ): ModuleExportTable => {
   const cloned: ModuleExportTable = new Map(table);
-  if (table.borrowingTraitImplementations) {
-    cloned.borrowingTraitImplementations =
-      table.borrowingTraitImplementations.map((implementation) => ({
-        ...implementation,
-        methods: implementation.methods.map((method) => ({ ...method })),
-      }));
-  }
   if (table.packageSemanticInterface) {
     cloned.packageSemanticInterface = {
       ...table.packageSemanticInterface,
-      summaries: table.packageSemanticInterface.summaries.map((entry) => ({
-        ...entry,
-      })),
+      ordinaryMutationSummaries:
+        table.packageSemanticInterface.ordinaryMutationSummaries.map(
+          (entry) => ({ ...entry, summary: { ...entry.summary } }),
+        ),
       exports: table.packageSemanticInterface.exports.map((entry) => ({
         ...entry,
         declarations: entry.declarations.map((declaration) => ({
@@ -251,13 +167,6 @@ export const cloneModuleExportTable = (
         })),
         members: entry.members.map((member) => ({ ...member })),
       })),
-      coercions: [...table.packageSemanticInterface.coercions],
-      callableResultCoercions: [
-        ...table.packageSemanticInterface.callableResultCoercions,
-      ],
-      traitImplementations: [
-        ...table.packageSemanticInterface.traitImplementations,
-      ],
       types: [...table.packageSemanticInterface.types],
     };
   }

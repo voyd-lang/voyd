@@ -1,5 +1,6 @@
 use std::array::{ Array, new_array_unchecked }
 use std::optional::types::all
+use std::shared_cell::SharedCell
 use std::string::type::{ String, from_utf8, Utf8Error, new_string }
 use std::test::assertions::all
 
@@ -143,17 +144,20 @@ test "dict keys values entries each":
   assert(values.len(), eq: 3)
   assert(entries.len(), eq: 3)
 
-  let ~stats = EachStats { count: 0, sum: 0, has_a: false }
+  let stats = SharedCell(EachStats { count: 0, sum: 0, has_a: false })
   map.each((key: String, value: i32) -> void =>
-    stats.count = stats.count + 1
-    stats.sum = stats.sum + value
-    if key.equals("a"):
-      stats.has_a = true
-    void
+    let has_a = key.equals("a")
+    stats.with_mut((~current) =>
+      current.count = current.count + 1
+      current.sum = current.sum + value
+      if has_a:
+        current.has_a = true
+      void
+    )
   )
-  assert(stats.count, eq: 3)
-  assert(stats.sum, eq: 6)
-  assert(stats.has_a, eq: true)
+  assert(stats.with((current) => current.count), eq: 3)
+  assert(stats.with((current) => current.sum), eq: 6)
+  assert(stats.with((current) => current.has_a), eq: true)
 
 test "dict extend merged merge":
   let ~left = Dict<String, i32>::init()
@@ -161,6 +165,17 @@ test "dict extend merged merge":
   let ~right = Dict<String, i32>::init()
   right.set("b", 2)
   right.set("a", 9)
+
+  let ~extended = Dict<String, i32>::init()
+  extended.set("a", 1)
+  extended.extend(right)
+  assert(extended.len(), eq: 2)
+  match(extended.get("a"))
+    Some<i32> { value }:
+      assert(value, eq: 9)
+    None:
+      assert(false)
+
   let merged = left.merged(
     right,
     (_key: String, l: i32, r: i32) -> i32 => l + r

@@ -1,8 +1,17 @@
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createVoydHost } from "@voyd-lang/js-host";
 import type { CodegenOptions } from "../context.js";
 import { compileEffectFixture } from "./support/effects-harness.js";
+
+const perf = vi.hoisted(() => ({ increment: vi.fn() }));
+vi.mock("../../perf.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../perf.js")>()),
+  incrementCompilerPerfCounter: perf.increment,
+}));
+
+const recordedCounters = (): string[] =>
+  perf.increment.mock.calls.map(([name]) => String(name));
 
 const fixtureRoot = resolve(import.meta.dirname, "__fixtures__");
 const fixturePath = resolve(fixtureRoot, "std_array_smoke.voyd");
@@ -24,9 +33,7 @@ const extractWatFunction = (wat: string, functionId: string): string => {
   throw new Error(`unterminated function $${functionId}`);
 };
 
-const compileStdArrayFixture = async (
-  codegenOptions: CodegenOptions = {},
-) =>
+const compileStdArrayFixture = async (codegenOptions: CodegenOptions = {}) =>
   compileEffectFixture({
     entryPath: fixturePath,
     codegenOptions: {
@@ -53,21 +60,34 @@ describe("std::array compile smoke", () => {
     const host = await createVoydHost({ wasm: result.wasm });
     await expect(host.run<number>("direct_len_at_sum")).resolves.toBe(43);
     await expect(host.run<number>("direct_value_len_at_sum")).resolves.toBe(20);
-    await expect(host.run<number>("direct_at_index_side_effect")).resolves.toBe(20);
+    await expect(host.run<number>("direct_at_index_side_effect")).resolves.toBe(
+      20,
+    );
     await expect(host.run<number>("safe_while_sum")).resolves.toBe(10);
-    await expect(host.run<number>("safe_while_cached_len_sum")).resolves.toBe(10);
+    await expect(host.run<number>("safe_while_cached_len_sum")).resolves.toBe(
+      10,
+    );
     await expect(host.run<number>("safe_while_get_sum")).resolves.toBe(10);
     await expect(host.run<number>("safe_while_get_value_sum")).resolves.toBe(
       18,
     );
     await expect(host.run<number>("safe_while_value_sum")).resolves.toBe(18);
     await expect(host.run<number>("safe_for_sum")).resolves.toBe(10);
+    await expect(
+      host.run<number>("safe_for_helper_mutation_sum"),
+    ).resolves.toBe(3);
     await expect(host.run<number>("while_non_zero_start_sum")).resolves.toBe(9);
     await expect(host.run<number>("while_non_unit_step_sum")).resolves.toBe(4);
     await expect(host.run<number>("while_unknown_bound_sum")).resolves.toBe(3);
     await expect(host.run<number>("while_mutates_array_sum")).resolves.toBe(3);
-    await expect(host.run<number>("while_helper_mutation_sum")).resolves.toBe(3);
+    await expect(host.run<number>("while_helper_mutation_sum")).resolves.toBe(
+      3,
+    );
     await expect(host.run<number>("while_stale_length_sum")).resolves.toBe(3);
+    expect(recordedCounters()).toContain("codegen.safe_array_while.accepted");
+    expect(recordedCounters()).toContain(
+      "codegen.range_array_safe_scope.accepted",
+    );
   });
 
   it("traps optimized direct at access when out of bounds", async () => {
@@ -143,6 +163,7 @@ describe("std::array compile smoke", () => {
       "while_stale_length_sum",
       "while_increment_before_at_trap",
       "while_helper_call_mutation_trap",
+      "safe_for_helper_mutation_sum",
     ]) {
       const functionWat = watForExport(wat, exportName);
       expect(functionWat).toContain("array.get");
@@ -151,5 +172,15 @@ describe("std::array compile smoke", () => {
 
     const mutationGetWat = watForExport(wat, "while_helper_mutation_get_sum");
     expect(mutationGetWat).toContain("$std__array__get");
+    expect(
+      recordedCounters().some((name) =>
+        name.startsWith("codegen.safe_array_while.fallback."),
+      ),
+    ).toBe(true);
+    expect(
+      recordedCounters().some((name) =>
+        name.startsWith("codegen.range_array_safe_scope.fallback."),
+      ),
+    ).toBe(true);
   });
 });

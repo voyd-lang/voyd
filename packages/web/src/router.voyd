@@ -364,11 +364,9 @@ impl App
     self.with_route_docs(path.as_slice(), method: method, docs: docs)
 
   api fn adopt(self, middleware: Middleware) -> App
-    let ~next_middleware = self.current_middleware.copied(1)
-    next_middleware.push(middleware)
     App {
       routes: self.routes,
-      current_middleware: next_middleware,
+      current_middleware: self.current_middleware.pushed(middleware),
       prefix: self.prefix,
       next_order: self.next_order,
       not_found_handler: self.not_found_handler,
@@ -1816,10 +1814,8 @@ impl App
       order: self.next_order,
       contract: contract
     }
-    let ~routes = self.routes.copied(1)
-    routes.push(route)
     App {
-      routes: routes,
+      routes: self.routes.pushed(route),
       current_middleware: self.current_middleware,
       prefix: self.prefix,
       next_order: self.next_order + 1,
@@ -1831,17 +1827,8 @@ impl App
     }
 
   fn merge_routes(self, routes: Array<Route>, { next_order: i32 }) -> App
-    let ~merged = self.routes.copied(routes.len())
-    var index = 0
-    while index < routes.len():
-      match(routes.get(index))
-        Some<Route> { value }:
-          merged.push(value)
-        None:
-          void
-      index = index + 1
     App {
-      routes: merged,
+      routes: self.routes.extended(routes),
       current_middleware: self.current_middleware,
       prefix: self.prefix,
       next_order: next_order,
@@ -1867,10 +1854,8 @@ impl App
       order: self.next_order,
       contract: route.contract
     }
-    let ~routes = self.routes.copied(1)
-    routes.push(mounted)
     App {
-      routes: routes,
+      routes: self.routes.pushed(mounted),
       current_middleware: self.current_middleware,
       prefix: self.prefix,
       next_order: self.next_order + 1,
@@ -2116,16 +2101,7 @@ fn run_middleware(middleware: Array<Middleware>, index: i32, ctx: Context, handl
       handler(ctx)
 
 fn combine_middleware(outer: Array<Middleware>, inner: Array<Middleware>): () -> Array<Middleware>
-  let ~combined = outer.copied(inner.len())
-  var index = 0
-  while index < inner.len():
-    match(inner.get(index))
-      Some<Middleware> { value }:
-        combined.push(value)
-      None:
-        void
-    index = index + 1
-  combined
+  outer.extended(inner)
 
 fn default_not_found(ctx: Context) -> Response
   ctx

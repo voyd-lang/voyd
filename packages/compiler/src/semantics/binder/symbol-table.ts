@@ -20,6 +20,13 @@ const bindingIndexKey = (name: string, identity: string): string =>
   `${name}\u0000${identity}`;
 
 const RESERVED_SYMBOL_NAMES = new Set(["void"]);
+const RESERVED_TYPE_NAMES = new Set(["Borrow"]);
+
+const symbolUsesTypeNamespace = (kind: SymbolKind): boolean =>
+  kind === "type" ||
+  kind === "type-parameter" ||
+  kind === "trait" ||
+  kind === "effect";
 
 const cloneScopeInfo = (info: ScopeInfo): ScopeInfo => ({ ...info });
 
@@ -113,7 +120,11 @@ export class SymbolTable {
     symbol: Omit<SymbolRecord, "id" | "scope">,
     scope: ScopeId = this.currentScope()
   ): SymbolId {
-    if (RESERVED_SYMBOL_NAMES.has(symbol.name)) {
+    if (
+      RESERVED_SYMBOL_NAMES.has(symbol.name) ||
+      (RESERVED_TYPE_NAMES.has(symbol.name) &&
+        symbolUsesTypeNamespace(symbol.kind))
+    ) {
       throw new Error(`cannot declare reserved identifier ${symbol.name}`);
     }
     const id = this.nextSymbol++;
@@ -150,7 +161,13 @@ export class SymbolTable {
     }: Pick<SymbolAliasBinding, "name" | "symbol" | "bindingIdentity">,
     scope: ScopeId = this.currentScope()
   ): void {
-    if (RESERVED_SYMBOL_NAMES.has(name)) {
+    const aliasedSymbol = this.symbolRecords[symbol];
+    if (
+      RESERVED_SYMBOL_NAMES.has(name) ||
+      (RESERVED_TYPE_NAMES.has(name) &&
+        aliasedSymbol &&
+        symbolUsesTypeNamespace(aliasedSymbol.kind))
+    ) {
       throw new Error(`cannot declare reserved identifier ${name}`);
     }
     if (!this.symbolRecords[symbol]) {

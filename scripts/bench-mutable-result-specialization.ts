@@ -4,6 +4,11 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cpus } from "node:os";
 import type { CompileResult } from "@voyd-lang/sdk";
+import {
+  captureCompilerPerf,
+  createProcessMemoryTracker,
+  emitBenchmarkReport,
+} from "./benchmark-report.js";
 
 const valueAfter = (name: string): string | undefined => {
   const index = process.argv.indexOf(name);
@@ -32,7 +37,9 @@ const expectCompileSuccess = (
 ): Extract<CompileResult, { success: true }> => {
   if (!result.success) {
     throw new Error(
-      result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+      ("diagnostics" in result ? result.diagnostics : [])
+        .map((diagnostic) => diagnostic.message)
+        .join("\n"),
     );
   }
   return result;
@@ -41,10 +48,24 @@ const expectCompileSuccess = (
 const count = (source: string, pattern: RegExp): number =>
   Array.from(source.matchAll(pattern)).length;
 
+const medianRecord = (
+  records: readonly Readonly<Record<string, number>>[],
+): Record<string, number> => {
+  const keys = new Set(records.flatMap((record) => Object.keys(record)));
+  return Object.fromEntries(
+    Array.from(keys)
+      .sort()
+      .map((key) => [key, median(records.map((record) => record[key] ?? 0))]),
+  );
+};
+
 const compileSamples = positiveInt("--compile-samples", 7);
 const runtimeSamples = positiveInt("--runtime-samples", 31);
 const label = valueAfter("--label") ?? "local";
 const sdkRoot = valueAfter("--sdk-root");
+const outputPath = valueAfter("--output");
+const memoryTracker = createProcessMemoryTracker();
+process.env.VOYD_COMPILER_PERF = "1";
 const sdkModule = sdkRoot
   ? pathToFileURL(resolve(sdkRoot, "packages/sdk/src/index.ts")).href
   : "@voyd-lang/sdk";
@@ -62,14 +83,25 @@ const entryPath = resolve(
 );
 const sdk = createSdk({ compilerCache: "none" });
 const compileDurationsMs: number[] = [];
+const compilerPerfSamples: Array<{
+  phasesMs: Record<string, number>;
+  counters: Record<string, number>;
+}> = [];
 let compiled: Extract<CompileResult, { success: true }> | undefined;
 
 for (let sample = 0; sample < compileSamples; sample += 1) {
   const startedAt = performance.now();
-  compiled = expectCompileSuccess(
-    await sdk.compile({ entryPath, optimize: true, emitWasmText: true }),
+  const captured = await captureCompilerPerf(() =>
+    sdk.compile({ entryPath, optimize: true, emitWasmText: true }),
   );
+  compiled = expectCompileSuccess(captured.value);
   compileDurationsMs.push(performance.now() - startedAt);
+  memoryTracker.sample();
+  const summary = captured.summaries.at(-1);
+  compilerPerfSamples.push({
+    phasesMs: summary?.phasesMs ?? {},
+    counters: summary?.counters ?? {},
+  });
 }
 
 if (!compiled) {
@@ -96,6 +128,7 @@ for (const entry of entries) {
       throw new Error(`${entry} returned a non-deterministic checksum`);
     }
     samplesMs.push(performance.now() - startedAt);
+    memoryTracker.sample();
   }
   runtimes[entry] = { medianMs: median(samplesMs), samplesMs };
 }
@@ -107,45 +140,54 @@ if (
 }
 
 const wasmText = compiled.wasmText ?? "";
-console.log(
-  JSON.stringify(
-    {
-      benchmark: "mutable-result-specialization",
-      label,
-      methodology: {
-        compileSamples,
-        runtimeSamples,
-        optimize: true,
-        compilerCache: "none",
-        sdkRoot: sdkRoot ?? "current checkout",
-        runtimeHost: "one warmed host; one untimed warmup per entry",
-      },
-      compile: {
-        medianMs: median(compileDurationsMs),
-        samplesMs: compileDurationsMs,
-      },
-      artifact: {
-        wasmBytes: compiled.wasm.byteLength,
-        gzipBytes: gzipSync(compiled.wasm).byteLength,
-        callRefSites: count(wasmText, /\bcall_ref\b/g),
-        directCallSites: count(wasmText, /\(call \$/g),
-        allocationSites: count(
-          wasmText,
-          /\((?:array|struct)\.new(?:_fixed|_default)?\b/g,
-        ),
-        structGetSites: count(wasmText, /\(struct\.get\b/g),
-        structSetSites: count(wasmText, /\(struct\.set\b/g),
-      },
-      checksums: Object.fromEntries(checksums),
-      runtimes,
-      environment: {
-        node: process.version,
-        platform: process.platform,
-        arch: process.arch,
-        cpu: cpus()[0]?.model ?? "unknown",
-      },
+emitBenchmarkReport({
+  report: {
+    schemaVersion: 2,
+    benchmark: "mutable-result-specialization",
+    label,
+    methodology: {
+      compileSamples,
+      runtimeSamples,
+      optimize: true,
+      compilerCache: "none",
+      sdkRoot: sdkRoot ?? "current checkout",
+      runtimeHost: "one warmed host; one untimed warmup per entry",
+      compilerPerf: "VOYD_COMPILER_PERF=1; raw summary retained per compile",
+      rawSamples:
+        "compile, runtime, compiler phase/counter, and peak-process memory samples are retained",
     },
-    null,
-    2,
-  ),
-);
+    compile: {
+      medianMs: median(compileDurationsMs),
+      samplesMs: compileDurationsMs,
+      perfSamples: compilerPerfSamples,
+      phaseMediansMs: medianRecord(
+        compilerPerfSamples.map((sample) => sample.phasesMs),
+      ),
+      counterMedians: medianRecord(
+        compilerPerfSamples.map((sample) => sample.counters),
+      ),
+    },
+    processMemory: memoryTracker.finish(),
+    artifact: {
+      wasmBytes: compiled.wasm.byteLength,
+      gzipBytes: gzipSync(compiled.wasm).byteLength,
+      callRefSites: count(wasmText, /\bcall_ref\b/g),
+      directCallSites: count(wasmText, /\(call \$/g),
+      allocationSites: count(
+        wasmText,
+        /\((?:array|struct)\.new(?:_fixed|_default)?\b/g,
+      ),
+      structGetSites: count(wasmText, /\(struct\.get\b/g),
+      structSetSites: count(wasmText, /\(struct\.set\b/g),
+    },
+    checksums: Object.fromEntries(checksums),
+    runtimes,
+    environment: {
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      cpu: cpus()[0]?.model ?? "unknown",
+    },
+  },
+  outputPath,
+});

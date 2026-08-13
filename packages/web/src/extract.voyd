@@ -84,9 +84,7 @@ impl RouteParams
     RouteParams { entries: Array<NameValue>::init() }
 
   api fn append(self, { name: String, value: String }) -> RouteParams
-    let ~next = self.entries.copied(1)
-    next.push({ name: name, value: value })
-    RouteParams { entries: next }
+    RouteParams { entries: self.entries.pushed({ name: name, value: value }) }
 
   api fn get(self, name: StringSlice) -> Option<String>
     find_value(self.entries, name)
@@ -99,9 +97,7 @@ impl QueryParams
     QueryParams { entries: Array<NameValue>::init() }
 
   api fn append(self, { name: String, value: String }) -> QueryParams
-    let ~next = self.entries.copied(1)
-    next.push({ name: name, value: value })
-    QueryParams { entries: next }
+    QueryParams { entries: self.entries.pushed({ name: name, value: value }) }
 
   api fn get(self, name: StringSlice) -> Option<String>
     find_value(self.entries, name)
@@ -114,9 +110,7 @@ impl CookieJar
     CookieJar { entries: Array<NameValue>::init() }
 
   api fn append(self, { name: String, value: String }) -> CookieJar
-    let ~next = self.entries.copied(1)
-    next.push({ name: name, value: value })
-    CookieJar { entries: next }
+    CookieJar { entries: self.entries.pushed({ name: name, value: value }) }
 
   api fn get(self, name: StringSlice) -> Option<String>
     find_value(self.entries, name)

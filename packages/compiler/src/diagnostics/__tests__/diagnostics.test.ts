@@ -46,12 +46,6 @@ describe("diagnostic utilities", () => {
       },
       span: { file: "mock-host.voyd", start: 0, end: 1 },
     });
-    const suspending = diagnosticFromCode({
-      code: "TY0052",
-      params: { kind: "borrow-across-effect", binding: "writes" },
-      span: { file: "mock-host.voyd", start: 2, end: 3 },
-    });
-
     expect(escaping.message).toContain("read_payload");
     expect(escaping.message).toContain("effect continuation");
     expect(escaping.hints?.map((hint) => hint.message).join(" ")).toContain(
@@ -59,9 +53,6 @@ describe("diagnostic utilities", () => {
     );
     expect(escaping.hints?.map((hint) => hint.message).join(" ")).toContain(
       "SharedCell<T>",
-    );
-    expect(suspending.hints?.map((hint) => hint.message).join(" ")).toContain(
-      "tail/resume",
     );
   });
 

@@ -5,9 +5,9 @@
 /// Read-only subscript contract.
 pub trait SubscriptRead<Index, Output>
   /// Returns the value addressed by `index`.
-  fn subscript_get(self, index: Index) -> Output
+  fn subscript_get(self, index: Index): () -> Output
 
 /// Mutable subscript contract.
 pub trait SubscriptWrite<Index, Value>
   /// Writes `value` at `index`.
-  fn subscript_set(~self, index: Index, value: Value) -> void
+  fn subscript_set(~self, index: Index, value: Value): () -> void

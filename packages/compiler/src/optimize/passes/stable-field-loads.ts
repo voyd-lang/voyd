@@ -7,12 +7,13 @@ import type {
   SymbolId,
 } from "../../semantics/ids.js";
 import type {
-  CodegenCallableAccessFootprint,
+  ExactCallOptimizationFact,
   ProgramCodegenView,
 } from "../../semantics/codegen-view/index.js";
 import type { ProgramOptimizationPass } from "../pass.js";
 import type { OptimizedCallInfo, ReadonlyOptimizedModuleView } from "../ir.js";
 import { exactNominalForType, exprTypeFor } from "./shared.js";
+import type { StableFieldFallbackReason } from "../../perf-counter-schema.js";
 
 type AliasGroups = {
   rootOf(symbol: SymbolId): SymbolId;
@@ -26,6 +27,10 @@ type Candidate = {
   accessExprIds: HirExprId[];
 };
 
+type StableFieldCandidateDecision =
+  | { accepted: true }
+  | { accepted: false; reason: StableFieldFallbackReason };
+
 export const stableFieldLoadForwardingPass: ProgramOptimizationPass = {
   name: "stable-field-load-forwarding",
   run(ctx) {
@@ -34,6 +39,9 @@ export const stableFieldLoadForwardingPass: ProgramOptimizationPass = {
       Map<HirExprId, readonly { accessExprIds: readonly HirExprId[] }[]>
     >();
     let forwardedLoads = 0;
+    let candidatesConsidered = 0;
+    let acceptedCandidates = 0;
+    const fallbacks = new Map<StableFieldFallbackReason, number>();
 
     ctx.ir.modules.forEach((moduleView, moduleId) => {
       const loops = new Map<
@@ -60,20 +68,31 @@ export const stableFieldLoadForwardingPass: ProgramOptimizationPass = {
               moduleView,
               program: ctx.ir.baseProgram,
             });
-            const candidates = rawCandidates.filter(
-              (candidate) =>
-                candidate.accessExprIds.length > 1 &&
-                loopPreservesCandidate({
-                  body: expr.body,
-                  condition: expr.condition,
-                  functionBody: item.body,
-                  candidate,
-                  aliases,
-                  calls,
-                  moduleView,
-                  program: ctx.ir.baseProgram,
-                }),
-            );
+            const candidates = rawCandidates.flatMap((candidate) => {
+              if (candidate.accessExprIds.length <= 1) {
+                return [];
+              }
+              candidatesConsidered += 1;
+              const decision = loopPreservesCandidate({
+                body: expr.body,
+                condition: expr.condition,
+                functionBody: item.body,
+                candidate,
+                aliases,
+                calls,
+                moduleView,
+                program: ctx.ir.baseProgram,
+              });
+              if (!decision.accepted) {
+                fallbacks.set(
+                  decision.reason,
+                  (fallbacks.get(decision.reason) ?? 0) + 1,
+                );
+                return [];
+              }
+              acceptedCandidates += 1;
+              return [candidate];
+            });
             if (candidates.length === 0) {
               return;
             }
@@ -99,7 +118,17 @@ export const stableFieldLoadForwardingPass: ProgramOptimizationPass = {
     );
     return {
       changed: forwardedLoads > 0,
-      metrics: { forwarded_loads: forwardedLoads },
+      metrics: {
+        forwarded_loads: forwardedLoads,
+        candidates: candidatesConsidered,
+        accepted: acceptedCandidates,
+        ...Object.fromEntries(
+          [...fallbacks].map(([reason, count]) => [
+            `fallback.${reason}`,
+            count,
+          ]),
+        ),
+      },
     };
   },
 };
@@ -230,14 +259,17 @@ const loopPreservesCandidate = ({
   calls: ReadonlyMap<HirExprId, OptimizedCallInfo>;
   moduleView: ReadonlyOptimizedModuleView;
   program: ProgramCodegenView;
-}): boolean => {
-  let safe = true;
+}): StableFieldCandidateDecision => {
+  let fallback: StableFieldFallbackReason | undefined;
+  const reject = (reason: StableFieldFallbackReason): void => {
+    fallback ??= reason;
+  };
   const inspectLoopExpression = (root: HirExprId): void =>
     walkExpression({
       exprId: root,
       hir: moduleView.hir,
       onEnterExpression: (exprId, expr) => {
-        if (!safe) {
+        if (fallback) {
           return { stop: true };
         }
         if (expr.exprKind === "assign") {
@@ -246,16 +278,17 @@ const loopPreservesCandidate = ({
             moduleView,
             program,
           });
-          safe =
-            assignmentIsDisjoint({ expr, candidate, aliases, moduleView }) &&
-            !(
-              typeof valueSymbol === "number" &&
-              aliases.aliases(valueSymbol, candidate.root)
-            );
+          if (
+            !assignmentIsDisjoint({ expr, candidate, aliases, moduleView }) ||
+            (typeof valueSymbol === "number" &&
+              aliases.aliases(valueSymbol, candidate.root))
+          ) {
+            reject("local-mutation");
+          }
           return;
         }
         if (expr.exprKind === "method-call") {
-          safe = callIsDisjoint({
+          const decision = callIsDisjoint({
             exprId,
             expr,
             candidate,
@@ -264,6 +297,7 @@ const loopPreservesCandidate = ({
             moduleView,
             program,
           });
+          if (!decision.accepted) reject(decision.reason);
           return;
         }
         if (
@@ -272,7 +306,7 @@ const loopPreservesCandidate = ({
             aliases.aliases(capture.symbol, candidate.root),
           )
         ) {
-          safe = false;
+          reject("local-capture");
           return;
         }
         if (
@@ -289,7 +323,7 @@ const loopPreservesCandidate = ({
             );
           })
         ) {
-          safe = false;
+          reject("local-retention");
           return;
         }
         if (
@@ -306,11 +340,11 @@ const loopPreservesCandidate = ({
             );
           })
         ) {
-          safe = false;
+          reject("local-retention");
           return;
         }
         if (expr.exprKind === "call") {
-          safe = callIsDisjoint({
+          const decision = callIsDisjoint({
             exprId,
             expr,
             candidate,
@@ -319,15 +353,16 @@ const loopPreservesCandidate = ({
             moduleView,
             program,
           });
+          if (!decision.accepted) reject(decision.reason);
         }
       },
     });
   inspectLoopExpression(condition);
-  if (safe) {
+  if (!fallback) {
     inspectLoopExpression(body);
   }
-  if (!safe) {
-    return false;
+  if (fallback) {
+    return { accepted: false, reason: fallback };
   }
 
   // A prior call that retains or returns an alias can make a later otherwise
@@ -336,7 +371,7 @@ const loopPreservesCandidate = ({
     exprId: functionBody,
     hir: moduleView.hir,
     onEnterExpression: (exprId, expr) => {
-      if (!safe) {
+      if (fallback) {
         return;
       }
       if (
@@ -345,7 +380,7 @@ const loopPreservesCandidate = ({
           aliases.aliases(capture.symbol, candidate.root),
         )
       ) {
-        safe = false;
+        reject("local-capture");
         return;
       }
       if (
@@ -362,7 +397,7 @@ const loopPreservesCandidate = ({
           );
         })
       ) {
-        safe = false;
+        reject("local-retention");
         return;
       }
       if (expr.exprKind === "assign") {
@@ -375,7 +410,7 @@ const loopPreservesCandidate = ({
           typeof symbol === "number" &&
           aliases.aliases(symbol, candidate.root)
         ) {
-          safe = false;
+          reject("local-mutation");
           return;
         }
       }
@@ -393,7 +428,7 @@ const loopPreservesCandidate = ({
           );
         })
       ) {
-        safe = false;
+        reject("local-retention");
         return;
       }
       if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
@@ -418,16 +453,17 @@ const loopPreservesCandidate = ({
       if (!aliasesRoot) {
         return;
       }
-      safe = callHasNoEscape({
+      const decision = callHasNoEscape({
         callInfo: calls.get(exprId),
         expr,
         moduleView,
         program,
       });
+      if (!decision.accepted) reject(decision.reason);
     },
     onEnterStatement: (_statementId, statement) => {
       if (
-        !safe ||
+        fallback ||
         statement.kind !== "return" ||
         typeof statement.value !== "number"
       ) {
@@ -442,11 +478,11 @@ const loopPreservesCandidate = ({
         typeof symbol === "number" &&
         aliases.aliases(symbol, candidate.root)
       ) {
-        safe = false;
+        reject("local-result-alias");
       }
     },
   });
-  return safe;
+  return fallback ? { accepted: false, reason: fallback } : { accepted: true };
 };
 
 const assignmentIsDisjoint = ({
@@ -493,13 +529,14 @@ const isBorrowMarker = ({
   if (callee?.exprKind !== "identifier") {
     return false;
   }
-  const name = program.symbols.getName(
-    program.symbols.idOf({
-      moduleId: moduleView.moduleId,
-      symbol: callee.symbol,
-    }),
+  const id = program.symbols.idOf({
+    moduleId: moduleView.moduleId,
+    symbol: callee.symbol,
+  });
+  return (
+    (program.symbols.getIntrinsicName(id) ?? program.symbols.getName(id)) ===
+      "~" && program.symbols.getIntrinsicFunctionFlags(id).intrinsic
   );
-  return name === "~";
 };
 
 const callHasNoEscape = ({
@@ -512,24 +549,40 @@ const callHasNoEscape = ({
   expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
   moduleView: ReadonlyOptimizedModuleView;
   program: ProgramCodegenView;
-}): boolean => {
-  const footprints = resolvedFootprints({
+}): StableFieldCandidateDecision => {
+  if (!callInfo) {
+    return { accepted: false, reason: "unresolved-target" };
+  }
+  if (callInfo.traitDispatch) {
+    return { accepted: false, reason: "dynamic-dispatch" };
+  }
+  if (callInfo.identityGuards.length > 0) {
+    return { accepted: false, reason: "identity-guard" };
+  }
+  const facts = resolvedExactFacts({
     callInfo,
     expr,
     moduleView,
     program,
   });
-  return (
-    footprints.length > 0 &&
-    footprints.every((footprint) =>
-      footprint.parameters.every(
-        (parameter) =>
-          !parameter.retained &&
-          !parameter.returned &&
-          !parameter.returnedProvenance,
-      ),
-    )
-  );
+  if (facts.length === 0) {
+    return { accepted: false, reason: "exact-fact-unavailable" };
+  }
+  if (facts.some((fact) => !exactFactHasSafeBoundary(fact))) {
+    return { accepted: false, reason: "unsafe-boundary" };
+  }
+  if (facts.some((fact) => fact.parameters.some((item) => item.escapes))) {
+    return { accepted: false, reason: "escape" };
+  }
+  if (facts.some((fact) => fact.parameters.some((item) => item.retained))) {
+    return { accepted: false, reason: "retention" };
+  }
+  if (
+    facts.some((fact) => fact.parameters.some((item) => item.resultAliases))
+  ) {
+    return { accepted: false, reason: "result-alias" };
+  }
+  return { accepted: true };
 };
 
 const callIsDisjoint = ({
@@ -547,19 +600,19 @@ const callIsDisjoint = ({
   callInfo: OptimizedCallInfo | undefined;
   moduleView: ReadonlyOptimizedModuleView;
   program: ProgramCodegenView;
-}): boolean => {
+}): StableFieldCandidateDecision => {
   if (
     expr.exprKind === "call" &&
     isBorrowMarker({ expr, moduleView, program })
   ) {
-    return true;
+    return { accepted: true };
   }
   if (
     expr.exprKind === "method-call" &&
     callInfo?.traitDispatch &&
     expr.args.length > 0
   ) {
-    return false;
+    return { accepted: false, reason: "dynamic-dispatch" };
   }
   const argumentExprIds = callArgumentExprIds(expr);
   const passesRoot = argumentExprIds.some((argumentExprId) => {
@@ -573,15 +626,14 @@ const callIsDisjoint = ({
     );
   });
   if (!passesRoot) {
-    return true;
+    return { accepted: true };
   }
-  if (
-    !callInfo ||
-    callInfo.traitDispatch ||
-    callInfo.identityGuards.length > 0 ||
-    !callHasNoEscape({ callInfo, expr, moduleView, program })
-  ) {
-    return false;
+  const boundary = callHasNoEscape({ callInfo, expr, moduleView, program });
+  if (!boundary.accepted) {
+    return boundary;
+  }
+  if (!callInfo) {
+    return { accepted: false, reason: "unresolved-target" };
   }
   const targets = resolvedTargetEntries({
     callInfo,
@@ -590,20 +642,19 @@ const callIsDisjoint = ({
     program,
   });
   if (targets.length === 0) {
-    return false;
+    return { accepted: false, reason: "unresolved-target" };
   }
-  return targets.every(([callerInstance, target]) => {
-    const footprint = program.callableAccesses.getFootprint(target);
+  for (const [callerInstance, target] of targets) {
+    const decision = program.exactCallOptimizations.getFact(target);
+    const fact = decision.kind === "available" ? decision.fact : undefined;
     const plan = callInfo.argPlans?.get(callerInstance);
-    if (
-      !footprint ||
-      footprint.maySuspend ||
-      footprint.externalRead ||
-      footprint.externalWrite
-    ) {
-      return false;
+    if (!fact || !exactFactHasSafeBoundary(fact)) {
+      return {
+        accepted: false,
+        reason: fact ? "unsafe-boundary" : "exact-fact-unavailable",
+      };
     }
-    return footprint.parameters.every((parameter, parameterIndex) => {
+    for (const [parameterIndex, parameter] of fact.parameters.entries()) {
       const planned = plan?.[parameterIndex];
       const argumentIndex =
         planned?.kind === "direct"
@@ -612,7 +663,13 @@ const callIsDisjoint = ({
             ? undefined
             : parameterIndex;
       if (typeof argumentIndex !== "number") {
-        return parameter.writePaths.length === 0;
+        if (parameter.writesWholeValue || parameter.indirectAccess) {
+          return { accepted: false, reason: "whole-value-access" };
+        }
+        if (parameter.writeFields.length > 0) {
+          return { accepted: false, reason: "unsupported-argument-plan" };
+        }
+        continue;
       }
       const argumentExprId = argumentExprIds[argumentIndex];
       const argumentSymbol =
@@ -623,19 +680,30 @@ const callIsDisjoint = ({
         typeof argumentSymbol !== "number" ||
         !aliases.aliases(argumentSymbol, candidate.root)
       ) {
-        return true;
+        continue;
       }
-      return (
-        !parameter.runtimeCheckedWrites &&
-        parameter.writePaths.every(
-          (path) =>
-            path.length > 0 &&
-            path[0]?.kind === "field" &&
-            path[0].name !== candidate.field,
-        )
-      );
-    });
-  });
+      if (
+        parameter.readsWholeValue ||
+        parameter.writesWholeValue ||
+        parameter.indirectAccess
+      ) {
+        return { accepted: false, reason: "whole-value-access" };
+      }
+      if (parameter.escapes) {
+        return { accepted: false, reason: "escape" };
+      }
+      if (parameter.retained) {
+        return { accepted: false, reason: "retention" };
+      }
+      if (parameter.resultAliases) {
+        return { accepted: false, reason: "result-alias" };
+      }
+      if (parameter.writeFields.includes(candidate.field)) {
+        return { accepted: false, reason: "candidate-field-write" };
+      }
+    }
+  }
+  return { accepted: true };
 };
 
 const argumentRootSymbol = ({
@@ -663,7 +731,7 @@ const argumentRootSymbol = ({
     : undefined;
 };
 
-const resolvedFootprints = ({
+const resolvedExactFacts = ({
   callInfo,
   expr,
   moduleView,
@@ -673,7 +741,7 @@ const resolvedFootprints = ({
   expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
   moduleView: ReadonlyOptimizedModuleView;
   program: ProgramCodegenView;
-}): readonly CodegenCallableAccessFootprint[] => {
+}): readonly ExactCallOptimizationFact[] => {
   if (
     !callInfo ||
     callInfo.traitDispatch ||
@@ -691,12 +759,21 @@ const resolvedFootprints = ({
   if (targets.length === 0) {
     return [];
   }
-  const footprints = targets.flatMap((target) => {
-    const footprint = program.callableAccesses.getFootprint(target);
-    return footprint ? [footprint] : [];
+  const facts = targets.flatMap((target) => {
+    const decision = program.exactCallOptimizations.getFact(target);
+    return decision.kind === "available" ? [decision.fact] : [];
   });
-  return footprints.length === targets.length ? footprints : [];
+  return facts.length === targets.length ? facts : [];
 };
+
+const exactFactHasSafeBoundary = (fact: ExactCallOptimizationFact): boolean =>
+  !fact.nestedCall &&
+  !fact.recursiveCall &&
+  !fact.dynamicCall &&
+  !fact.unresolvedCall &&
+  !fact.identityGuard &&
+  !fact.externalAccess &&
+  !fact.maySuspend;
 
 const resolvedTargetEntries = ({
   callInfo,
@@ -714,8 +791,8 @@ const resolvedTargetEntries = ({
     return resolved;
   }
   // Monomorphic direct calls intentionally omit the per-instance target map;
-  // the callee's declaration symbol plus its callable footprint is their
-  // resolution proof. Function-value locals have no footprint and bail out.
+  // the callee's declaration symbol plus its exact body fact is their
+  // resolution proof. Function-value locals have no exact fact and bail out.
   const callee =
     expr.exprKind === "call"
       ? moduleView.hir.expressions.get(expr.callee)

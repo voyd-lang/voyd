@@ -7,6 +7,8 @@ import {
 } from "./call-resolution.js";
 import type { BorrowPlace } from "./model.js";
 import { typeIsAllocationBacked } from "./reference-bearing.js";
+import { STD_INTRINSIC_TYPE } from "../../compiler-contracts/index.js";
+import { typeHasIntrinsicRole } from "./intrinsic-type-role.js";
 
 /**
  * Resolve the small place vocabulary shared by the cheap index and full facts.
@@ -47,35 +49,34 @@ export const placeOfExpression = (
     if (intrinsicBoundary && name === "__array_get") {
       const target = expression.args[0]?.expr;
       if (typeof target !== "number") return undefined;
-      const place = placeOfExpression(target, hir, resolveContext);
-      if (!place) return undefined;
       const index = expression.args[1]?.expr;
-      const indexExpression =
-        typeof index === "number" ? hir.expressions.get(index) : undefined;
-      const constant =
-        indexExpression?.exprKind === "literal" &&
-        indexExpression.literalKind === "i32"
-          ? Number(indexExpression.value)
-          : undefined;
-      return {
-        root: place.root,
-        projections: [
-          ...place.projections,
-          ...(typeof expressionTypeFor(target, resolveContext) === "number" &&
-          typeIsAllocationBacked(
-            expressionTypeFor(target, resolveContext)!,
-            resolveContext.typing,
-          )
-            ? ([{ kind: "dereference" }] as const)
-            : []),
-          {
-            kind: "index",
-            stable: true,
-            ...(Number.isInteger(constant) ? { constant } : {}),
-          },
-        ],
-      };
+      return typeof index === "number"
+        ? indexedPlace({ target, index, hir, resolveContext })
+        : undefined;
     }
+  }
+  if (
+    expression?.exprKind === "method-call" &&
+    resolveContext &&
+    expression.method === "at" &&
+    typeHasIntrinsicRole({
+      type: expressionTypeFor(expression.target, resolveContext),
+      role: STD_INTRINSIC_TYPE.array,
+      typing: resolveContext.typing,
+      symbolTable: resolveContext.symbolTable,
+      moduleId: resolveContext.moduleId,
+      imports: resolveContext.imports,
+    })
+  ) {
+    const index = expression.args[0]?.expr;
+    return typeof index === "number"
+      ? indexedPlace({
+          target: expression.target,
+          index,
+          hir,
+          resolveContext,
+        })
+      : undefined;
   }
   if (expression?.exprKind !== "field-access") {
     return undefined;
@@ -102,6 +103,43 @@ export const placeOfExpression = (
       ...target.projections,
       ...(needsDereference ? ([{ kind: "dereference" }] as const) : []),
       projection,
+    ],
+  };
+};
+
+const indexedPlace = ({
+  target,
+  index,
+  hir,
+  resolveContext,
+}: {
+  target: HirExprId;
+  index: HirExprId;
+  hir: HirGraph;
+  resolveContext: ResolveContext;
+}): BorrowPlace | undefined => {
+  const place = placeOfExpression(target, hir, resolveContext);
+  if (!place) return undefined;
+  const indexExpression = hir.expressions.get(index);
+  const constant =
+    indexExpression?.exprKind === "literal" &&
+    indexExpression.literalKind === "i32"
+      ? Number(indexExpression.value)
+      : undefined;
+  const targetType = expressionTypeFor(target, resolveContext);
+  return {
+    root: place.root,
+    projections: [
+      ...place.projections,
+      ...(typeof targetType === "number" &&
+      typeIsAllocationBacked(targetType, resolveContext.typing)
+        ? ([{ kind: "dereference" }] as const)
+        : []),
+      {
+        kind: "index",
+        stable: true,
+        ...(Number.isInteger(constant) ? { constant } : {}),
+      },
     ],
   };
 };

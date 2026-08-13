@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
-import {
-  createVoydHost,
-  parseExportAbi,
-} from "@voyd-lang/js-host";
+import { createVoydHost, parseExportAbi } from "@voyd-lang/js-host";
 import { compileProgram, type CompileProgramResult } from "../../pipeline.js";
 import { createFsModuleHost } from "../../modules/fs-host.js";
 import { wasmBufferSource } from "./support/wasm-utils.js";
@@ -59,6 +56,28 @@ const buildModule = async ({
 };
 
 describe("export abi metadata", { timeout: 60_000 }, () => {
+  it("rejects source borrows at an actual Wasm export", async () => {
+    const result = await compileProgram({
+      entryPath: resolve(fixtureRoot, "borrow-boundary-export.voyd"),
+      roots: { src: fixtureRoot },
+      host: createFsModuleHost(),
+      codegenOptions: { boundaryExports: false },
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("expected Borrow export rejection");
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "CG0001",
+          message: expect.stringContaining(
+            "Wasm export read cannot use Borrow<T>",
+          ),
+        }),
+      ]),
+    );
+  });
+
   it("derives automatic DTO exports for opaque VX values", async () => {
     const wasm = await buildModule({
       entryFile: "boundary-export-contract.voyd",

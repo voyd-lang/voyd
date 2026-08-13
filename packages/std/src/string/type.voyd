@@ -25,7 +25,7 @@ pub obj String {
 
 /// Immutable backing shared by strings and stable slices.
 obj StringStorage {
-  pri bytes: FixedArray<i32>
+  bytes: FixedArray<i32>
 }
 
 impl StringStorage
@@ -111,6 +111,59 @@ pub fn parse_float_error_invalid_format(): () -> ParseFloatError
 
 /// Rune set used by trimming and character membership APIs.
 pub type CharSet = Array<i32>
+
+/// Returns a stable immutable view of a scoped string.
+///
+/// The returned slice retains the string's immutable backing and is therefore
+/// independent of the scoped `Borrow<String>` invocation.
+pub fn as_slice(value: Borrow<String>): () -> StringSlice
+  StringSlice {
+    source: value.bytes,
+    start: 0,
+    byte_count: value.byte_count
+  }
+
+/// Returns an owned string formed by appending `other` to a scoped string.
+pub fn concat(value: Borrow<String>, other: StringSlice): () -> String
+  let total = value.byte_count + other.byte_count
+  let ~bytes = Array<i32>::with_capacity(total)
+
+  var index = 0
+  while index < value.byte_count:
+    bytes.push(__array_get(value.bytes.bytes, index))
+    index = index + 1
+
+  index = 0
+  while index < other.byte_count:
+    bytes.push(__array_get(other.source.bytes, other.start + index))
+    index = index + 1
+
+  new_string(bytes.to_fixed_array())
+
+/// Returns an owned string formed by appending `other` to a scoped string.
+pub fn concat(value: Borrow<String>, other: String): () -> String
+  concat(value, other.as_slice())
+
+/// Returns an owned string with one line-feed byte appended.
+///
+/// This is a package helper for line-oriented std APIs. It keeps raw storage
+/// access inside the string module and normalizes any partial UTF-8 sequence
+/// in `value` through the usual owned-string constructor.
+pub fn appending_line_feed(value: StringSlice): () -> String
+  let byte_count = value.byte_count
+  let bytes = new_fixed_array<i32>(byte_count + 1)
+  __array_copy(bytes, {
+    from: value.source.raw_bytes(),
+    to_index: 0,
+    from_index: value.start,
+    count: byte_count
+  })
+  __array_set(bytes, byte_count, 10)
+  new_string(bytes)
+
+/// Returns an owned string with one line-feed byte appended.
+pub fn appending_line_feed(value: String): () -> String
+  appending_line_feed(value.as_slice())
 
 impl StringSlice
   /// Returns the number of UTF-8 bytes.
@@ -304,7 +357,12 @@ impl StringSlice
     self,
     { on separator: i32, max_splits?: i32, keep_empty?: bool }
   ) -> Array<StringSlice>
-    self.split(where: (r: i32) -> bool => r == separator, max_splits: max_splits, keep_empty: keep_empty)
+    split_on_rune(
+      self,
+      separator,
+      max_splits: max_splits,
+      keep_empty: keep_empty
+    )
 
   /// Splits a string by a delimiter or predicate.
   api fn split(
@@ -846,7 +904,12 @@ impl String
     self,
     { on separator: i32, max_splits?: i32, keep_empty?: bool }
   ) -> Array<StringSlice>
-    self.split(where: (r: i32) -> bool => r == separator, max_splits: max_splits, keep_empty: keep_empty)
+    split_on_rune(
+      self.as_slice(),
+      separator,
+      max_splits: max_splits,
+      keep_empty: keep_empty
+    )
 
   /// Splits a string by a delimiter or predicate.
   api fn split(
@@ -949,15 +1012,31 @@ impl String
 
   /// Trims leading and trailing characters in place.
   api fn trim(~self) -> void
-    let next = self.trimmed().to_string()
-    self.bytes = next.bytes
-    self.byte_count = next.byte_count
+    let slice = self.trimmed()
+    let byte_count = slice.byte_count
+    let bytes = new_fixed_array<i32>(byte_count)
+    __array_copy(bytes, {
+      from: slice.source.bytes,
+      to_index: 0,
+      from_index: slice.start,
+      count: byte_count
+    })
+    self.bytes = StringStorage { bytes }
+    self.byte_count = byte_count
 
   /// Trims leading and trailing characters in place.
   api fn trim(~self, chars: CharSet) -> void
-    let next = self.trimmed(chars).to_string()
-    self.bytes = next.bytes
-    self.byte_count = next.byte_count
+    let slice = self.trimmed(chars)
+    let byte_count = slice.byte_count
+    let bytes = new_fixed_array<i32>(byte_count)
+    __array_copy(bytes, {
+      from: slice.source.bytes,
+      to_index: 0,
+      from_index: slice.start,
+      count: byte_count
+    })
+    self.bytes = StringStorage { bytes }
+    self.byte_count = byte_count
 
   /// Returns a lowercase ASCII copy of this string.
   api fn lowered(self): () -> String
@@ -971,9 +1050,12 @@ impl String
 
   /// Converts this string in place to lowercase ASCII characters.
   api fn lower(~self) -> void
-    let next = self.lowered()
-    self.bytes = next.bytes
-    self.byte_count = next.byte_count
+    let out = new_fixed_array<i32>(self.byte_count)
+    var index = 0
+    while index < self.byte_count:
+      __array_set(out, index, to_ascii_lower(__array_get(self.bytes.bytes, index)))
+      index = index + 1
+    self.bytes = new_string_storage(out)
 
   /// Returns an uppercase ASCII copy of this string.
   api fn uppered(self): () -> String
@@ -987,51 +1069,48 @@ impl String
 
   /// Converts this string in place to uppercase ASCII characters.
   api fn upper(~self) -> void
-    let next = self.uppered()
-    self.bytes = next.bytes
-    self.byte_count = next.byte_count
+    let out = new_fixed_array<i32>(self.byte_count)
+    var index = 0
+    while index < self.byte_count:
+      __array_set(out, index, to_ascii_upper(__array_get(self.bytes.bytes, index)))
+      index = index + 1
+    self.bytes = new_string_storage(out)
 
   /// Returns a new string with replacements applied.
   api fn replaced(
     self,
     { old: String, with replacement: String, max_replacements?: i32 }
   ): () -> String
-    if old.byte_count <= 0:
-      return new_string(self.copy_raw_bytes())
-    if self.byte_count == 0:
-      return empty_string()
-
-    let source = self.bytes.raw_bytes()
-    let old_source = string_raw_bytes(old)
-    let replacement_source = string_raw_bytes(replacement)
-    let ~out = Array<i32>::with_capacity(self.byte_count)
-    var index = 0
-    var replacement_count = 0
-    while index < self.byte_count:
-      let has_capacity = (index + old.byte_count) <= self.byte_count
-      let can_replace_more = match(max_replacements)
-        Some<i32> { value }:
-          replacement_count < value
-        None:
-          true
-
-      if has_capacity and can_replace_more and bytes_match_at(source, old_source, index, old.byte_count):
-        append_bytes(out, replacement_source, replacement.byte_count)
-        index = index + old.byte_count
-        replacement_count = replacement_count + 1
-      else:
-        out.push(__array_get(source, index))
-        index = index + 1
-    new_string(out.to_fixed_array())
+    replaced_string(
+      self,
+      old: old,
+      with: replacement,
+      max_replacements: max_replacements
+    )
 
   /// Replaces matching content with new content.
   api fn replace(
     ~self,
     { old: String, with replacement: String, max_replacements?: i32 }
-  ) -> void
-    let next = self.replaced(old: old, with: replacement, max_replacements: max_replacements)
-    self.bytes = next.bytes
-    self.byte_count = next.byte_count
+    ) -> void
+    let source_bytes = new_fixed_array<i32>(self.byte_count)
+    __array_copy(source_bytes, {
+      from: self.bytes.bytes,
+      to_index: 0,
+      from_index: 0,
+      count: self.byte_count
+    })
+    let next = replaced_string(new_string(source_bytes), old: old, with: replacement, max_replacements: max_replacements)
+    let next_count = next.byte_count
+    let next_bytes = new_fixed_array<i32>(next_count)
+    __array_copy(next_bytes, {
+      from: next.bytes.bytes,
+      to_index: 0,
+      from_index: 0,
+      count: next_count
+    })
+    self.bytes = new_string_storage(next_bytes)
+    self.byte_count = next_count
 
   /// Returns a new string repeated `count` times.
   api fn repeat(self, count: i32) -> String
@@ -1323,11 +1402,12 @@ impl Iterator<StringSlice> for StringGraphemeIterator
     if self.index >= self.source.byte_len():
       return None {}
     let start = self.index
-    self.index = next_grapheme_boundary(
-      string_raw_bytes(self.source),
+    let next_index = next_grapheme_boundary(
+      self.source.bytes.bytes,
       self.source.byte_len(),
       self.index
     )
+    self.index = next_index
     Some<StringSlice> {
       value: new_string_slice(self.source, start, self.index - start)
     }
@@ -1500,6 +1580,38 @@ fn string_from_slice(value: StringSlice) -> String
     count: value.byte_count
   })
   new_string(storage)
+
+fn replaced_string(
+  source_string: String,
+  { old: String, with replacement: String, max_replacements?: i32 }
+) -> String
+  if old.byte_count <= 0:
+    return new_string(source_string.copy_raw_bytes())
+  if source_string.byte_count == 0:
+    return empty_string()
+
+  let source = source_string.bytes.raw_bytes()
+  let old_source = string_raw_bytes(old)
+  let replacement_source = string_raw_bytes(replacement)
+  let ~out = Array<i32>::with_capacity(source_string.byte_count)
+  var index = 0
+  var replacement_count = 0
+  while index < source_string.byte_count:
+    let has_capacity = (index + old.byte_count) <= source_string.byte_count
+    let can_replace_more = match(max_replacements)
+      Some<i32> { value }:
+        replacement_count < value
+      None:
+        true
+
+    if has_capacity and can_replace_more and bytes_match_at(source, old_source, index, old.byte_count):
+      append_bytes(out, replacement_source, replacement.byte_count)
+      index = index + old.byte_count
+      replacement_count = replacement_count + 1
+    else:
+      out.push(__array_get(source, index))
+      index = index + 1
+  new_string(out.to_fixed_array())
 
 fn advance_rune_index(value: String, cursor: i32, steps: i32) -> Option<StringIndex>
   if cursor < 0 or cursor > value.byte_len():
@@ -1725,6 +1837,36 @@ fn split_on_substring(
       index = index + 1
 
   let tail_len = value.byte_len() - start
+  if allow_empty or tail_len > 0:
+    parts.push(new_string_slice(value.source, value.start + start, tail_len))
+  parts
+
+fn split_on_rune(
+  value: StringSlice,
+  separator: i32,
+  { max_splits?: i32, keep_empty?: bool }
+) -> Array<StringSlice>
+  let allow_empty = keep_empty ?? false
+  let limit = max_splits ?? -1
+  let source = value.source.raw_bytes()
+  let end = value.start + value.byte_count
+  let ~parts = Array<StringSlice>::with_capacity(4)
+  var start = 0
+  var index = 0
+  var splits = 0
+  while (value.start + index) < end:
+    let absolute_index = value.start + index
+    let read = decode_utf8_at(source, __array_len(source), absolute_index)
+    let can_split = limit < 0 or splits < limit
+    if can_split and read.codepoint == separator:
+      let length = index - start
+      if allow_empty or length > 0:
+        parts.push(new_string_slice(value.source, value.start + start, length))
+      start = index + read.width
+      splits = splits + 1
+    index = index + read.width
+
+  let tail_len = value.byte_count - start
   if allow_empty or tail_len > 0:
     parts.push(new_string_slice(value.source, value.start + start, tail_len))
   parts

@@ -256,7 +256,7 @@ const formatTypeId = ({
   ): string => {
     switch (descriptor.kind) {
       case "borrowed":
-        return `borrow ${formatTypeRef(descriptor.inner, active)}`;
+        return `Borrow<${formatTypeRef(descriptor.inner, active)}>`;
       case "primitive":
         return descriptor.name;
       case "type-param-ref":

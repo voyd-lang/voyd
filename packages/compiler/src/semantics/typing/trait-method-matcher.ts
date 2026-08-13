@@ -318,9 +318,9 @@ export const typeExprKey = (
 
   switch (expr.typeKind) {
     case "borrowed":
-      return `borrow ${
+      return `Borrow<${
         typeExprKey(expr.inner, substitutions, visiting, selfType) ?? "_"
-      }`;
+      }>`;
     case "named": {
       const symbol = expr.symbol;
       const substitution =

@@ -327,7 +327,7 @@ describe("runBootstrap", () => {
       expect(clientVoyd).not.toContain("obj Model");
 
       const sharedView = await readFile(resolve(target, "src/app/ui.voyd"), "utf8");
-      expect(sharedView).toContain("attrs.push(html_event_handler<Msg>(");
+      expect(sharedView).toContain("].pushed(html_event_handler<Msg>(");
       expect(sharedView).toContain("on_input={(event: InputEvent) -> Msg =>");
       expect(sharedView).not.toContain("static_view");
       expect(sharedView).not.toContain("interactive");

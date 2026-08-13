@@ -1,0 +1,11 @@
+obj Box {
+  value: i32
+}
+
+fn invoke_unknown(
+  ~value: Box,
+  body: fn() : () -> void
+) -> void
+  value.value = value.value + 1
+  body()
+  value.value = value.value + 1

@@ -12,7 +12,7 @@ pub std::result::fns::{ ok, err, and_then, unwrap_or }
 pub std::enums::{ enum }
 
 pub std::traits::{ Eq, Ord, Hash, Default, Clone, Copy }
-pub std::traits::{ Sequence, Iterator, ViewIterator, for }
+pub std::traits::{ Sequence, Iterator, for }
 pub std::range::{ Range }
 
 pub std::array::{ Array, ArrayPop }

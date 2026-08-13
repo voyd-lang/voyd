@@ -35,9 +35,9 @@ pub fn shared_cell_read_during_write_trap() -> void
 
 pub fn shared_cell_write_during_read_trap() -> void
   let cell = SharedCell(SharedCellTrapValue { value: 1 })
-  cell.with((value) =>
+  cell.with((_value) =>
     cell.with_mut((~current) =>
-      current.value = value.value + 1
+      current.value = 2
     )
   )
   void

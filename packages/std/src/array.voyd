@@ -13,9 +13,9 @@ use std::traits::ord::{ Ordering, Less, Equal, Greater }
 @intrinsic_type(type: "voyd.std.array")
 pub obj Array<T> {
   /// Internal fixed-size backing storage.
-  pri storage: FixedArray<T>,
+  storage: FixedArray<T>,
   /// Number of initialized elements in `storage`.
-  pri count: i32
+  count: i32
 }
 
 /// Result payload returned by `Array::popped`.
@@ -25,6 +25,19 @@ pub obj ArrayPop<T> {
   /// Removed value, when the source array was non-empty.
   value?: T
 }
+
+impl Array<i32>
+  /// Returns an independently owned copy of a scoped array.
+  api fn copied({ from source: Borrow<Array<i32>> }): () -> Array<i32>
+    let count = source.count
+    let next_raw = new_fixed_array<i32>(count)
+    __array_copy(next_raw, {
+      from: source.storage,
+      to_index: 0,
+      from_index: 0,
+      count: count
+    })
+    Array<i32> { storage: next_raw, count: count }
 
 impl<T> Array<T>
   /// Creates an empty array.
@@ -294,9 +307,28 @@ impl<T> Array<T>
 
   /// Returns a sorted copy.
   api fn sorted(self, compare: (left: T, right: T) : () -> i32) -> Array<T>
-    let ~copy = self.copied()
-    copy.sort(compare)
-    copy
+    let next_raw = new_fixed_array<T>(self.capacity())
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: self.count
+    })
+
+    var index = 1
+    while index < self.count:
+      let value = __array_get(next_raw, index)
+      var cursor = index - 1
+      while cursor >= 0:
+        let shifted = __array_get(next_raw, cursor)
+        if compare(shifted, value) <= 0:
+          break
+        __array_set(next_raw, cursor + 1, shifted)
+        cursor = cursor - 1
+      __array_set(next_raw, cursor + 1, value)
+      index = index + 1
+
+    Array<T> { storage: next_raw, count: self.count }
 
   /// Returns a sorted copy.
   api fn sorted(self) -> Array<T>
@@ -307,28 +339,41 @@ impl<T> Array<T>
 
   /// Returns a sorted copy.
   api fn sorted(self, { by compare: (left: T, right: T) : () -> Ordering }) -> Array<T>
-    let ~copy = self.copied()
-    copy.sort(by: compare)
-    copy
+    let next_raw = new_fixed_array<T>(self.capacity())
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: self.count
+    })
 
-  /// Returns a zero-copy iterator over borrowed element views.
-  ///
-  /// Use `iter()` when retained independent values are required. A view item
-  /// keeps shared access to this array's backing storage through its final use.
-  api fn view_iter(self) -> ViewIterator<T>
-    ArrayViewIterator<T> {
-      source: self.storage,
-      cursor: ArrayViewCursor {
-        count: self.count,
-        index: 0
-      }
-    }
+    var index = 1
+    while index < self.count:
+      let value = __array_get(next_raw, index)
+      var cursor = index - 1
+      while cursor >= 0:
+        let shifted = __array_get(next_raw, cursor)
+        if ordering_to_i32(compare(shifted, value)) <= 0:
+          break
+        __array_set(next_raw, cursor + 1, shifted)
+        cursor = cursor - 1
+      __array_set(next_raw, cursor + 1, value)
+      index = index + 1
+
+    Array<T> { storage: next_raw, count: self.count }
 
   /// Returns a reversed copy.
   api fn reversed(self) -> Array<T>
-    let ~copy = self.copied()
-    copy.reverse()
-    copy
+    let next_raw = new_fixed_array<T>(self.capacity())
+    var index = 0
+    while index < self.count:
+      __array_set(
+        next_raw,
+        index,
+        __array_get(self.storage, self.count - index - 1)
+      )
+      index = index + 1
+    Array<T> { storage: next_raw, count: self.count }
 
   /// Copies values into a fixed-size array.
   api fn to_fixed_array(self) -> FixedArray<T>
@@ -364,7 +409,26 @@ impl<T> Array<T>
 
   /// Returns a new collection with `other` appended.
   api fn concat(self, other: Array<T>) -> Array<T>
-    self.extended(other)
+    let next_count = self.count + other.count
+    let current_capacity = self.capacity()
+    let next_capacity =
+      if next_count > current_capacity
+        then: growth_capacity(current_capacity, next_count)
+        else: current_capacity
+    let next_raw = new_fixed_array<T>(next_capacity)
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: self.count
+    })
+    __array_copy(next_raw, {
+      from: other.storage,
+      to_index: self.count,
+      from_index: 0,
+      count: other.count
+    })
+    Array<T> { storage: next_raw, count: next_count }
 
   /// Returns a new array containing the first `n` elements.
   api fn take(self, n: i32) -> Array<T>
@@ -447,20 +511,6 @@ impl<T> Array<T>
       index = index + 1
     Array<(T, U)> { storage: next_raw, count: count }
 
-  /// Pairs values from two sequences until either sequence ends.
-  api fn zip<U>(self, { other: Sequence<U> }) -> Array<(T, U)>
-    let ~out = Array<(T, U)>::with_capacity(self.count)
-    let ~iter = other.iter()
-    var index = 0
-    while index < self.count:
-      match(iter.next())
-        Some<U> { value: right }:
-          out.push((__array_get(self.storage, index), right))
-          index = index + 1
-        None:
-          break
-    out
-
   /// Combines all values into one using a binary reducer.
   api fn fold(self, combine: (left: T, right: T) -> T) -> Optional<T>
     if self.count == 0:
@@ -474,33 +524,7 @@ impl<T> Array<T>
     Some<T> { value: acc }
 
   /// Sorts values in place.
-  api fn sort(~self, compare: (left: T, right: T) : () -> i32) -> void
-    if self.count < 2:
-      return void
-
-    self.ensure_capacity(self.count)
-    var index = 1
-    while index < self.count:
-      let value = __array_get(self.storage, index)
-      var cursor = index - 1
-      while cursor >= 0:
-        let shifted = __array_get(self.storage, cursor)
-        if compare(shifted, value) <= 0:
-          break
-        __array_set(self.storage, cursor + 1, shifted)
-        cursor = cursor - 1
-      __array_set(self.storage, cursor + 1, value)
-      index = index + 1
-
-  /// Sorts values in place.
   api fn sort(~self) -> void
-    self.sort(
-      (left: T, right: T) -> i32 =>
-        default_compare_i32(left, right)
-    )
-
-  /// Sorts values in place.
-  api fn sort(~self, { by compare: (left: T, right: T) : () -> Ordering }) -> void
     if self.count < 2:
       return void
 
@@ -511,7 +535,7 @@ impl<T> Array<T>
       var cursor = index - 1
       while cursor >= 0:
         let shifted = __array_get(self.storage, cursor)
-        if ordering_to_i32(compare(shifted, value)) <= 0:
+        if default_compare_i32(shifted, value) <= 0:
           break
         __array_set(self.storage, cursor + 1, shifted)
         cursor = cursor - 1
@@ -578,7 +602,9 @@ impl<T> Array<T>
       removing: 1,
       inserting: Array<T>::with_capacity(0)
     )
-    removed.first()
+    if removed.count == 0:
+      return None {}
+    Some<T> { value: __array_get(removed.storage, 0) }
 
   /// Inserts a value at the target location.
   api fn insert(~self, value: T, { at index: i32 }) -> void
@@ -599,7 +625,9 @@ impl<T> Array<T>
       removing: 1,
       inserting: Array<T>::with_capacity(0)
     )
-    removed.first()
+    if removed.count == 0:
+      return None {}
+    Some<T> { value: __array_get(removed.storage, 0) }
 
   /// Removes and returns a value when present.
   api fn remove(~self, { at index: i32 }) -> T
@@ -612,11 +640,9 @@ impl<T> Array<T>
       removing: 1,
       inserting: Array<T>::with_capacity(0)
     )
-    match(removed.first())
-      Some<T> { value }:
-        value
-      None:
-        trap_out_of_bounds(self.storage)
+    if removed.count == 0:
+      return trap_out_of_bounds(self.storage)
+    __array_get(removed.storage, 0)
 
   /// Appends values from another collection or sequence.
   api fn extend(~self, other: Array<T>) -> void
@@ -632,16 +658,6 @@ impl<T> Array<T>
       count: other.count
     })
     self.count = self.count + other.count
-
-  /// Appends values from another collection or sequence.
-  api fn extend(~self, { items: Sequence<T> }) -> void
-    let ~iter = items.iter()
-    while true:
-      match(iter.next())
-        Some<T> { value }:
-          self.push(value)
-        None:
-          break
 
   /// Replaces a range with inserted values and returns removed values.
   ///
@@ -719,51 +735,180 @@ impl<T> Array<T>
 
   /// Returns a copy with all values removed.
   api fn cleared(self) -> Array<T>
-    let ~copy = self.copied()
-    copy.clear()
-    copy
+    Array<T> {
+      storage: new_fixed_array<T>(self.capacity()),
+      count: 0
+    }
 
   /// Returns a copy with reserved additional capacity.
   api fn reserved(self, additional: i32) -> Array<T>
-    let ~copy = self.copied(additional)
-    copy.reserve(additional)
-    copy
+    let safe_additional = additional.max(0)
+    let required = self.count + safe_additional
+    let current_capacity = self.capacity()
+    let next_capacity =
+      if required > current_capacity
+        then: growth_capacity(current_capacity, required)
+        else: current_capacity
+    let next_raw = new_fixed_array<T>(next_capacity)
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: self.count
+    })
+    Array<T> { storage: next_raw, count: self.count }
 
   /// Returns a copy with one value appended.
   api fn pushed(self, value: T) -> Array<T>
-    let ~copy = self.copied(1)
-    copy.push(value)
-    copy
+    let next_count = self.count + 1
+    let current_capacity = self.capacity()
+    let next_capacity =
+      if next_count > current_capacity
+        then: growth_capacity(current_capacity, next_count)
+        else: current_capacity
+    let next_raw = new_fixed_array<T>(next_capacity)
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: self.count
+    })
+    __array_set(next_raw, self.count, value)
+    Array<T> { storage: next_raw, count: next_count }
 
   /// Returns a copy with the last value removed.
   api fn popped(self) -> ArrayPop<T>
-    let ~copy = self.copied()
-    let value = copy.pop()
-    ArrayPop<T> { array: copy, value }
+    let next_raw = new_fixed_array<T>(self.capacity())
+    if self.count == 0:
+      return ArrayPop<T> {
+        array: Array<T> { storage: next_raw, count: 0 },
+        value: None {}
+      }
+
+    let next_count = self.count - 1
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: next_count
+    })
+    ArrayPop<T> {
+      array: Array<T> { storage: next_raw, count: next_count },
+      value: Some<T> { value: __array_get(self.storage, next_count) }
+    }
 
   /// Returns a copy with a value inserted at the requested index.
   api fn inserted(self, value: T, { at index: i32 }) -> Array<T>
-    let ~copy = self.copied(1)
-    copy.insert(value, at: index)
-    copy
+    let insert_index = clamp_insert_index(index, self.count)
+    let next_count = self.count + 1
+    let current_capacity = self.capacity()
+    let next_capacity =
+      if next_count > current_capacity
+        then: growth_capacity(current_capacity, next_count)
+        else: current_capacity
+    let next_raw = new_fixed_array<T>(next_capacity)
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: insert_index
+    })
+    __array_set(next_raw, insert_index, value)
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: insert_index + 1,
+      from_index: insert_index,
+      count: self.count - insert_index
+    })
+    Array<T> { storage: next_raw, count: next_count }
 
   /// Returns a copy with one value removed.
   api fn removed(self, index: i32) -> Array<T>
-    let ~copy = self.copied()
-    copy.remove(index)
-    copy
+    let computed_index = compute_index(index, self.count)
+    let next_raw = new_fixed_array<T>(self.capacity())
+    if computed_index < 0 or computed_index >= self.count:
+      __array_copy(next_raw, {
+        from: self.storage,
+        to_index: 0,
+        from_index: 0,
+        count: self.count
+      })
+      return Array<T> { storage: next_raw, count: self.count }
+
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: computed_index
+    })
+    let next_count = self.count - 1
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: computed_index,
+      from_index: computed_index + 1,
+      count: next_count - computed_index
+    })
+    Array<T> { storage: next_raw, count: next_count }
 
   /// Returns a copy with values from `other` appended.
   api fn extended(self, other: Array<T>) -> Array<T>
-    let ~copy = self.copied(other.count)
-    copy.extend(other)
-    copy
+    let next_count = self.count + other.count
+    let current_capacity = self.capacity()
+    let next_capacity =
+      if next_count > current_capacity
+        then: growth_capacity(current_capacity, next_count)
+        else: current_capacity
+    let next_raw = new_fixed_array<T>(next_capacity)
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: self.count
+    })
+    __array_copy(next_raw, {
+      from: other.storage,
+      to_index: self.count,
+      from_index: 0,
+      count: other.count
+    })
+    Array<T> { storage: next_raw, count: next_count }
 
   /// Returns a copy with a splice operation applied.
   api fn spliced(self, { at start: i32, removing remove_count: i32, inserting items: Array<T> }) -> Array<T>
-    let ~copy = self.copied(items.count)
-    copy.splice(at: start, removing: remove_count, inserting: items)
-    copy
+    let clamped_start = clamp_insert_index(start, self.count)
+    let safe_delete_count =
+      if remove_count < 0 then: 0 else: remove_count
+    let available = self.count - clamped_start
+    let effective_delete_count =
+      if safe_delete_count > available then: available else: safe_delete_count
+    let next_count = self.count - effective_delete_count + items.count
+
+    let required_capacity = self.count + items.count
+    let current_capacity = self.capacity()
+    let next_capacity =
+      if required_capacity > current_capacity
+        then: growth_capacity(current_capacity, required_capacity)
+        else: current_capacity
+    let next_raw = new_fixed_array<T>(next_capacity)
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: clamped_start
+    })
+    __array_copy(next_raw, {
+      from: items.storage,
+      to_index: clamped_start,
+      from_index: 0,
+      count: items.count
+    })
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: clamped_start + items.count,
+      from_index: clamped_start + effective_delete_count,
+      count: self.count - clamped_start - effective_delete_count
+    })
+    Array<T> { storage: next_raw, count: next_count }
 
   /// Ensures this array has enough capacity for `required` values.
   fn ensure_capacity(~self, required: i32) -> void
@@ -869,18 +1014,6 @@ obj ArrayIterator<T> {
   index: i32
 }
 
-/// Inline state that advances independently from a view iterator's source.
-val ArrayViewCursor {
-  count: i32,
-  index: i32
-}
-
-/// Internal iterator state for `Array::view_iter`.
-obj ArrayViewIterator<T> {
-  source: FixedArray<T>,
-  cursor: ArrayViewCursor
-}
-
 impl<T> Sequence<T> for Array<T>
   /// Returns an iterator over values.
   api fn iter(self) -> Iterator<T>
@@ -894,18 +1027,6 @@ impl<T> Iterator<T> for ArrayIterator<T>
     let value = self.array.get(self.index)
     self.index = self.index + 1
     value
-
-impl<T> ViewIterator<T> for ArrayViewIterator<T>
-  region cursor = self.cursor
-  region source = deref(self.source)
-
-  /// Returns the next borrowed element view.
-  api fn next(~self) -> Option<borrow T>
-    if self.cursor.index >= self.cursor.count:
-      return None {}
-    let value: borrow T = __array_get(self.source, self.cursor.index)
-    self.cursor.index = self.cursor.index + 1
-    Some<borrow T> { value }
 
 impl<T> SubscriptRead<i32, Optional<T>> for Array<T>
   /// Returns the value addressed by subscript syntax.

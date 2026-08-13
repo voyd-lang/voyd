@@ -121,7 +121,6 @@ export const bindFunctionDecl = (
     moduleIndex: options.moduleIndex ?? ctx.nextModuleIndex++,
     implId: undefined,
     intrinsic: intrinsicMetadata,
-    borrowContract: decl.borrowContract,
     documentation: declarationDocForSyntax(decl.signature.name, ctx),
   });
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   COMPILER_FUNCTION_CONTRACTS,
+  CUSTOM_DTO_CONTRACT,
+  CUSTOM_DTO_CONTRACT_ID,
   HOST_TRANSPORT_PROVIDER_CONTRACT,
   HOST_TRANSPORT_PROVIDER_CONTRACT_ID,
   SELECTED_HOST_TRANSPORT_PROVIDER_MODULES,
@@ -62,6 +64,21 @@ describe("compiler function contract catalog", () => {
         { role: "readerComplete", name: "reader_complete", expectedArity: 1 },
         { role: "createWriter", name: "create_writer", expectedArity: 2 },
         { role: "finishWriter", name: "finish_writer", expectedArity: 1 },
+      ],
+    });
+  });
+
+  it("declares the CustomDto callback boundary", () => {
+    expect(CUSTOM_DTO_CONTRACT).toMatchObject({
+      id: CUSTOM_DTO_CONTRACT_ID,
+      expectedTypeParameters: 2,
+      methods: [
+        {
+          name: "write",
+          expectedArity: 1,
+          ordinaryMutation: { invokesUnknownCallback: true },
+        },
+        { name: "read", expectedArity: 1 },
       ],
     });
   });

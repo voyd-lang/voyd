@@ -1,5 +1,5 @@
-// Keep this renderer source-idiomatic. It intentionally uses ordinary objects,
-// range-based loops, and direct Array iteration instead of hand-lowered controls.
+// Keep this renderer source-idiomatic. It intentionally uses ordinary objects
+// and range-based loops instead of hand-lowered controls.
 use std::math::{ INFINITY }
 use std::number::all
 use std::number::cast::to_i64
@@ -301,30 +301,8 @@ obj HitRecord {
   front_face: bool
 }
 
-impl HitRecord
-  fn init() -> HitRecord
-    HitRecord {
-      p: Point3(0.0, 0.0, 0.0),
-      normal: Vec3(0.0, 0.0, 0.0),
-      mat: Lambertian(Color(0.0, 0.0, 0.0)),
-      t: 0.0,
-      front_face: false
-    }
-
-  fn apply(~self, rec: HitRecord) -> void
-    self.p = rec.p
-    self.normal = rec.normal
-    self.mat = rec.mat
-    self.t = rec.t
-    self.front_face = rec.front_face
-
-  fn set_face_normal(~self, ray: Ray, outward_normal: Vec3) -> void
-    self.front_face = ray.direction.dot(outward_normal) < 0.0
-    self.normal =
-      if self.front_face then: outward_normal else: outward_normal * -1.0
-
 trait Hittable
-  fn hit(self, { ray: Ray, ray_t: Interval, ~rec: HitRecord }) -> bool
+  fn hit(self, { ray: Ray, ray_t: Interval }): () -> Option<HitRecord>
 
 obj HittableList {
   pri objects: Array<Hittable>
@@ -338,22 +316,28 @@ impl HittableList
     self.objects.push(object)
 
 impl Hittable for HittableList
-  fn hit(self, { ray: Ray, ray_t: Interval, ~rec: HitRecord }) -> bool
-    let ~temp_rec = HitRecord()
-    var hit_anything = false
+  fn hit(self, { ray: Ray, ray_t: Interval }) -> Option<HitRecord>
+    var result: Option<HitRecord> = None {}
     var closest_so_far = ray_t.max
+    var index = 0
 
-    for object in self.objects:
-      if object.hit({
-        ray,
-        ray_t: Interval(ray_t.min, closest_so_far),
-        rec: temp_rec
-      }):
-        hit_anything = true
-        closest_so_far = temp_rec.t
-        rec.apply(temp_rec)
+    while index < self.objects.len():
+      match(self.objects.get(index))
+        Some<Hittable> { value: object }:
+          match(object.hit({
+            ray,
+            ray_t: Interval(ray_t.min, closest_so_far)
+          }))
+            Some<HitRecord> { value }:
+              closest_so_far = value.t
+              result = Some<HitRecord> { value }
+            None:
+              void
+        None:
+          void
+      index = index + 1
 
-    hit_anything
+    result
 
 obj Sphere {
   center: Point3,
@@ -369,7 +353,7 @@ impl Sphere
     Sphere { center, radius, mat }
 
 impl Hittable for Sphere
-  fn hit(self, { ray: Ray, ray_t: Interval, ~rec: HitRecord }) -> bool
+  fn hit(self, { ray: Ray, ray_t: Interval }) -> Option<HitRecord>
     let oc = self.center - ray.origin
     let a = ray.direction.len_squared()
     let h = ray.direction.dot(oc)
@@ -377,7 +361,7 @@ impl Hittable for Sphere
 
     let discriminant = h * h - a * c
     if discriminant < 0.0:
-      return false
+      return None {}
 
     let sqrtd = math::sqrt(discriminant)
 
@@ -385,14 +369,15 @@ impl Hittable for Sphere
     if not ray_t.surrounds(root):
       root = (h + sqrtd) / a
       if not ray_t.surrounds(root):
-        return false
+        return None {}
 
-    rec.t = root
-    rec.p = ray.at(rec.t)
-    rec.mat = self.mat
-    let outward_normal = (rec.p - self.center) / self.radius
-    rec.set_face_normal(ray, outward_normal)
-    true
+    let p = ray.at(root)
+    let outward_normal = (p - self.center) / self.radius
+    let front_face = ray.direction.dot(outward_normal) < 0.0
+    let normal = if front_face then: outward_normal else: outward_normal * -1.0
+    Some<HitRecord> {
+      value: HitRecord { p, normal, mat: self.mat, t: root, front_face }
+    }
 
 obj Camera {
   aspect_ratio: f64,
@@ -528,15 +513,14 @@ fn ray_color(ray: Ray, depth: i32, world: Hittable) -> Color
   if depth <= 0:
     return empty
 
-  let ~rec = HitRecord()
-
-  if world.hit({ rec, ray_t: Interval(0.001, INFINITY), ray }):
-    let scatter = rec.mat.scatter({ r_in: ray, rec })
-    return scatter.attenuation * ray_color(scatter.scattered, depth - 1, world)
-
-  let unit_direction = ray.direction.unit_vector()
-  let a = 0.5 * (unit_direction.y + 1.0)
-  (one * (1.0 - a)) + (sky * a)
+  match(world.hit({ ray_t: Interval(0.001, INFINITY), ray }))
+    Some<HitRecord> { value: rec }:
+      let scatter = rec.mat.scatter({ r_in: ray, rec })
+      scatter.attenuation * ray_color(scatter.scattered, depth - 1, world)
+    None:
+      let unit_direction = ray.direction.unit_vector()
+      let a = 0.5 * (unit_direction.y + 1.0)
+      (one * (1.0 - a)) + (sky * a)
 
 fn checksum_color(color: Color) -> i32
   let r = to_pixel(color.x)

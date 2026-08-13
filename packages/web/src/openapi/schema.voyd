@@ -28,17 +28,32 @@ pub fn schema_for(
   shape: Shape,
   { prefix: String, ~components: Dict<String, JsonValue>, include_doc_comments: bool }
 ) -> JsonValue
+  components.extend(schema_components(shape, prefix: prefix, include_doc_comments: include_doc_comments))
+  render_schema(shape, prefix: prefix, include_doc_comments: include_doc_comments)
+
+pub fn schema_components(
+  shape: Shape,
+  { prefix: String, include_doc_comments: bool }
+) -> Dict<String, JsonValue>
+  let ~components = Dict<String, JsonValue>::with_capacity(shape.definitions.len())
   let stable_prefix = schema_identity_prefix(shape, fallback: prefix)
   var index = 0
   while index < shape.definitions.len():
     let definition = shape.definitions.at(index)
-    let rendered_definition = schema_node(definition.shape, prefix: stable_prefix, components: components)
+    let rendered_definition = schema_node(definition.shape, prefix: stable_prefix)
     components.set(
       component_name(stable_prefix, definition.key.as_slice()),
       if include_doc_comments: rendered_definition else: without_descriptions(rendered_definition)
     )
     index = index + 1
-  let rendered = schema_node(shape.root, prefix: stable_prefix, components: components)
+  components
+
+pub fn render_schema(
+  shape: Shape,
+  { prefix: String, include_doc_comments: bool }
+) -> JsonValue
+  let stable_prefix = schema_identity_prefix(shape, fallback: prefix)
+  let rendered = schema_node(shape.root, prefix: stable_prefix)
   if include_doc_comments: rendered else: without_descriptions(rendered)
 
 pub fn opaque_schema(content_type: String) -> JsonValue
@@ -62,7 +77,7 @@ pub fn content_without_schema(content_type: String) -> JsonValue
 
 pub fn schema_node(
   node: ShapeNode,
-  { prefix: String, ~components: Dict<String, JsonValue> }
+  { prefix: String }
 ) -> JsonValue
   node.match(active)
     BoolShape:
@@ -88,16 +103,16 @@ pub fn schema_node(
     ArrayShape:
       let ~out = Dict<String, JsonValue>::init()
       out.set("type", json_string("array"))
-      out.set("items", schema_node(active.element, prefix: prefix, components: components))
+      out.set("items", schema_node(active.element, prefix: prefix))
       JsonObject { value: out }
     RecordShape:
-      record_schema(active, prefix: prefix, components: components)
+      record_schema(active, prefix: prefix)
     UnionShape:
-      union_schema(active, prefix: prefix, components: components)
+      union_schema(active, prefix: prefix)
 
 fn record_schema(
   record: RecordShape,
-  { prefix: String, ~components: Dict<String, JsonValue> }
+  { prefix: String }
 ) -> JsonValue
   let ~out = Dict<String, JsonValue>::init()
   out.set("type", json_string("object"))
@@ -107,7 +122,7 @@ fn record_schema(
   var index = 0
   while index < record.fields.len():
     let field = record.fields.at(index)
-    let property = schema_node(field.shape, prefix: prefix, components: components)
+    let property = schema_node(field.shape, prefix: prefix)
     properties.set(field.name, with_description(property, field.documentation))
     if not field.optional:
       required.push(JsonString { value: field.name })
@@ -120,7 +135,7 @@ fn record_schema(
 
 fn union_schema(
   union: UnionShape,
-  { prefix: String, ~components: Dict<String, JsonValue> }
+  { prefix: String }
 ) -> JsonValue
   let ~out = Dict<String, JsonValue>::init()
   set_optional_string(out, "description", union.documentation)
@@ -140,7 +155,7 @@ fn union_schema(
     var field_index = 0
     while field_index < variant.fields.len():
       let field = variant.fields.at(field_index)
-      let property = schema_node(field.shape, prefix: prefix, components: components)
+      let property = schema_node(field.shape, prefix: prefix)
       properties.set(field.name, with_description(property, field.documentation))
       if not field.optional:
         required.push(JsonString { value: field.name })

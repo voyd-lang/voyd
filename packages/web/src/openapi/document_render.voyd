@@ -7,7 +7,6 @@ use std::json::{ JsonObject, JsonString, JsonValue }
 use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
-use super::json_copy::copy_json_object
 use super::operation_render::operation_json
 use super::types::{ Info, RouteDocument }
 
@@ -16,9 +15,6 @@ pub fn document_json(
   routes: Array<RouteDocument>,
   { include_doc_comments: bool }
 ) -> JsonValue
-  let ~root = Dict<String, JsonValue>::init()
-  root.set("openapi", JsonString { value: "3.1.0".to_string() })
-  root.set("info", info_json(info))
   let ~paths = Dict<String, JsonValue>::init()
   let ~components = Dict<String, JsonValue>::init()
   var index = 0
@@ -27,18 +23,23 @@ pub fn document_json(
     if route.operation.hidden:
       index = index + 1
       continue
-    let ~existing = match(paths.get(route.path))
+    let existing = match(paths.get(route.path))
       Some<JsonValue> { value }:
         value.match(active)
-          JsonObject: copy_json_object(active.value)
+          JsonObject: active.value
           else: Dict<String, JsonValue>::init()
       None: Dict<String, JsonValue>::init()
-    existing.set(
+    let ~operation_components = Dict<String, JsonValue>::init()
+    let path_item = existing.setting(
       method_as_string(route.method).lowered(),
-      operation_json(route.operation, prefix: "Operation".concat(to_string(index).as_slice()), components: components, include_doc_comments: include_doc_comments)
+      operation_json(route.operation, prefix: "Operation".concat(to_string(index).as_slice()), components: operation_components, include_doc_comments: include_doc_comments)
     )
-    paths.set(route.path, JsonObject { value: existing })
+    paths.set(route.path, JsonObject { value: path_item })
+    components.extend(operation_components)
     index = index + 1
+  let ~root = Dict<String, JsonValue>::init()
+  root.set("openapi", JsonString { value: "3.1.0".to_string() })
+  root.set("info", info_json(info))
   root.set("paths", JsonObject { value: paths })
   if not components.is_empty():
     let ~component_root = Dict<String, JsonValue>::init()

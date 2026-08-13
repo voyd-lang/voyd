@@ -23,6 +23,10 @@ pub obj Bytes {
 }
 
 impl Bytes
+  /// Returns an independently owned copy of a scoped byte sequence.
+  api fn copied({ from source: Borrow<Bytes> }): () -> Bytes
+    bytes_from_array(Array::copied(from: source.storage))
+
   /// Returns the number of bytes.
   api fn len(self) -> i32
     self.storage.len()

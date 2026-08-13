@@ -1,5 +1,7 @@
 import type { CodegenContext, FunctionMetadata } from "./context.js";
 import type { HirFunction } from "../semantics/hir/index.js";
+import { incrementCompilerPerfCounter } from "../perf.js";
+import type { DefaultIdentityGuardCompanionFallbackReason } from "../perf-counter-schema.js";
 
 export interface DefaultIdentityGuardEntry {
   base: FunctionMetadata;
@@ -16,6 +18,13 @@ type DefaultIdentityGuardEntryState = {
 const DEFAULT_IDENTITY_GUARD_ENTRY_STATE = Symbol(
   "voyd.codegen.defaultIdentityGuardEntryState",
 );
+
+const recordDefaultIdentityGuardCompanionFallback = (
+  reason: DefaultIdentityGuardCompanionFallbackReason,
+): void =>
+  incrementCompilerPerfCounter(
+    `codegen.default_identity_guard_companion.fallback.${reason}`,
+  );
 
 const stateOf = (ctx: CodegenContext): DefaultIdentityGuardEntryState =>
   ctx.programHelpers.getHelperState<DefaultIdentityGuardEntryState>(
@@ -54,20 +63,27 @@ export const getOrCreateDefaultIdentityGuardEntry = ({
   ctx: CodegenContext;
   meta: FunctionMetadata;
 }): FunctionMetadata => {
+  incrementCompilerPerfCounter(
+    "codegen.default_identity_guard_companion.requested",
+  );
   if (meta.defaultIdentityGuardEntry) {
+    incrementCompilerPerfCounter(
+      "codegen.default_identity_guard_companion.reused",
+    );
     return meta;
   }
   const targetCtx = ctx.moduleContexts.get(meta.moduleId);
-  const protocol = targetCtx?.module.callableRuntimeProtocols.get(
-    meta.symbol,
-  )?.defaultIdentityGuardProtocol;
-  if (protocol !== "presence-conflict-bit-v1") {
+  const targetModule =
+    targetCtx?.module ?? ctx.program.modules.get(meta.moduleId);
+  if (!targetModule?.defaultIdentityGuardTargets.has(meta.symbol)) {
+    recordDefaultIdentityGuardCompanionFallback("missing-protocol");
     throw new Error(
       `callable ${meta.moduleId}::${meta.symbol} does not advertise the default identity-guard protocol`,
     );
   }
   const item = functionItemFor({ ctx, meta });
   if (!item) {
+    recordDefaultIdentityGuardCompanionFallback("missing-body");
     throw new Error(
       `codegen missing default identity-guard target ${meta.moduleId}::${meta.symbol}`,
     );
@@ -76,6 +92,9 @@ export const getOrCreateDefaultIdentityGuardEntry = ({
   const state = stateOf(ctx);
   const existing = state.byBaseName.get(key);
   if (existing) {
+    incrementCompilerPerfCounter(
+      "codegen.default_identity_guard_companion.reused",
+    );
     return existing.meta;
   }
   const guardedMeta: FunctionMetadata = {
@@ -86,6 +105,9 @@ export const getOrCreateDefaultIdentityGuardEntry = ({
   const entry = { base: meta, meta: guardedMeta, item };
   state.byBaseName.set(key, entry);
   state.pending.push(entry);
+  incrementCompilerPerfCounter(
+    "codegen.default_identity_guard_companion.created",
+  );
   return guardedMeta;
 };
 
@@ -114,4 +136,7 @@ export const markDefaultIdentityGuardEntryCompiled = ({
   wasmName: string;
 }): void => {
   stateOf(ctx).compiled.add(wasmName);
+  incrementCompilerPerfCounter(
+    "codegen.default_identity_guard_companion.compiled",
+  );
 };

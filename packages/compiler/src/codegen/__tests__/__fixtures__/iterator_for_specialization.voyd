@@ -129,10 +129,10 @@ fn counted_sequence(~counter: EvaluationCounter) -> FilteredSequence
   FilteredSequence { end: 12, stride: 2 }
 
 trait CustomSequence<T>
-  fn iter(self) -> CustomIterator<T>
+  fn iter(self): () -> CustomIterator<T>
 
 trait CustomIterator<T>
-  fn next(~self) -> Option<T>
+  fn next(~self): () -> Option<T>
 
 obj CustomCounter {
   end: i32
@@ -144,18 +144,26 @@ obj CustomCounterIterator {
 }
 
 impl CustomSequence<i32> for CustomCounter
-  fn iter(self) -> CustomIterator<i32>
+  fn iter(self): () -> CustomIterator<i32>
     CustomCounterIterator { current: 0, end: self.end }
 
 impl CustomIterator<i32> for CustomCounterIterator
-  fn next(~self) -> Option<i32>
+  fn next(~self): () -> Option<i32>
     if self.current >= self.end:
       return None {}
     let value = self.current
     self.current = self.current + 1
     Some<i32> { value }
 
-fn sum_dynamic(sequence: Sequence<i32>) -> i32
+fn sum_dynamic_count() -> i32
+  let sequence: Sequence<i32> = CountSequence { end: 4 }
+  var total = 0
+  for value in sequence:
+    total = total + value
+  total
+
+fn sum_dynamic_filtered() -> i32
+  let sequence: Sequence<i32> = FilteredSequence { end: 10, stride: 2 }
   var total = 0
   for value in sequence:
     total = total + value
@@ -194,10 +202,10 @@ pub fn generic_user_iterator() -> i32
   total
 
 pub fn dynamic_count_fallback() -> i32
-  sum_dynamic(CountSequence { end: 4 })
+  sum_dynamic_count()
 
 pub fn dynamic_filtered_fallback() -> i32
-  sum_dynamic(FilteredSequence { end: 10, stride: 2 })
+  sum_dynamic_filtered()
 
 pub fn noncanonical_fallback() -> i32
   var total = 0

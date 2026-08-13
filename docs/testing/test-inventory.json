@@ -1293,21 +1293,14 @@
     "owner": "compiler-implementation",
     "reviewed": "2026-07-22",
     "disposition": "compiler-local",
-    "rationale": "Keep compiler-local: exercises HIR-level borrow facts, interprocedural contracts, place overlap, effect-boundary validation, and diagnostic structure; portable source behavior is separately covered by conformance cases."
+    "rationale": "Keep compiler-local: exercises finite ordinary mutation summaries, scoped Borrow origins, local place overlap, runtime identity guards, effect-boundary validation, and diagnostic structure; portable source behavior is separately covered by conformance cases."
   },
   {
-    "file": "packages/compiler/src/semantics/borrowing/__tests__/callable-result-provenance.test.ts",
+    "file": "packages/compiler/src/semantics/borrowing/__tests__/ordinary-mutation-summary.test.ts",
     "owner": "compiler-implementation",
-    "reviewed": "2026-07-29",
+    "reviewed": "2026-08-12",
     "disposition": "compiler-local",
-    "rationale": "Compiler-local result provenance, callback composition, separate-compilation privacy, path correlation, variant narrowing, defaults, and recursive widening."
-  },
-  {
-    "file": "packages/compiler/src/semantics/borrowing/__tests__/capability.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-08-03",
-    "disposition": "compiler-local",
-    "rationale": "Compiler-local capability lattice and pure classifier contracts, including HIR-free routing inputs, monotonic joins, and conservative unknown behavior."
+    "rationale": "Compiler-local finite ordinary mutation-summary extraction, SCC worklist convergence, dynamic declaration bounds, and fixed-size metrics."
   },
   {
     "file": "packages/compiler/src/semantics/effects/__tests__/effect-table.test.ts",
@@ -2497,6 +2490,12 @@
     "reviewed": "2026-07-30"
   },
   {
+    "file": "scripts/testing/benchmark-report.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Protects benchmark JSON artifact writing, compiler performance-summary capture, and peak-process-memory reporting without compiling benchmark workloads."
+  },
+  {
     "file": "scripts/testing/compiler-test-shards.test.mjs",
     "owner": "package-unit",
     "disposition": "package-local",
@@ -2670,6 +2669,12 @@
     "owner": "cross-package-integration",
     "disposition": "cross-package-integration",
     "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/performance/scripts/web-openapi-package-scale.test.mjs",
+    "owner": "performance",
+    "disposition": "opt-in-performance",
+    "rationale": "Keep opt-in: protects the Web package-scale benchmark's base/head sample ordering and distribution-report contract without compiling the workload in default correctness CI."
   },
   {
     "file": "tests/performance/src/memory-mutation-safety.test.ts",

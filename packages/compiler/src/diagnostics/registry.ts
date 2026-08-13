@@ -488,81 +488,35 @@ type DiagnosticParamsMap = {
   };
   TY0051:
     | { kind: "explicit-borrow-escape"; binding: string; through: string }
-    | { kind: "borrow-origin"; binding: string };
-  TY0052:
-    | { kind: "borrow-across-effect"; binding: string }
-    | { kind: "borrow-origin"; binding: string };
-  TY0053:
+    | { kind: "borrow-origin"; binding: string }
+    | { kind: "invalid-borrow-position"; context: string }
+    | { kind: "nested-borrow" }
     | {
-        kind: "borrowed-callback-escape";
-        binding: string;
-        through: string;
+        kind: "borrow-signature-boundary";
+        boundary: "effect operation" | "external function";
       }
-    | { kind: "borrow-origin"; binding: string };
-  TY0054:
+    | { kind: "borrowed-callable-effect"; context: string }
+    | { kind: "borrow-capture"; binding: string };
+  TY0055:
     | {
-        kind: "duplicate-region";
-        declaration: string;
-        region: string;
-      }
-    | {
-        kind: "unknown-region";
-        declaration: string;
-        region: string;
-        clause: string;
+        kind: "ordinary-parameter-count";
+        callable: string;
+        actual: number;
+        allowed: number;
       }
     | {
-        kind: "missing-returns-from";
-        declaration: string;
+        kind: "ordinary-parameter-bound";
+        callable: string;
+        parameter: number;
+        actual: "read" | "write";
+        allowed: "unused" | "read" | "write";
       }
     | {
-        kind: "returns-from-without-borrow";
-        declaration: string;
-        regions: string;
-      }
-    | {
-        kind: "missing-region-mapping";
-        declaration: string;
-        region: string;
-      }
-    | {
-        kind: "invalid-region-mapping";
-        declaration: string;
-        region: string;
-        place: string;
-        reason: string;
-      }
-    | {
-        kind: "false-disjointness";
-        declaration: string;
-        leftRegion: string;
-        leftPlace: string;
-        rightRegion: string;
-        rightPlace: string;
-      }
-    | {
-        kind: "self-disjointness";
-        declaration: string;
-        region: string;
-      }
-    | {
-        kind: "contract-excess";
-        declaration: string;
-        clause: "reads" | "mutates" | "returns_from";
-        place: string;
-        regions: string;
-      }
-    | {
-        kind: "implementation-contract";
-        declaration: string;
-      }
-    | {
-        kind: "invalid-contract-target";
-        declaration: string;
-      }
-    | {
-        kind: "static-contract-target";
-        declaration: string;
+        kind:
+          | "ordinary-ambient-access"
+          | "ordinary-unknown-callback"
+          | "ordinary-suspension";
+        callable: string;
       };
   TY9999: { kind: "unexpected-error"; message: string };
 };
@@ -1403,81 +1357,22 @@ export const diagnosticsRegistry: {
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0050"]>,
   TY0051: {
     code: "TY0051",
-    message: (params) =>
-      params.kind === "borrow-origin"
-        ? `borrowed value '${params.binding}' originates here`
-        : `borrowed value '${params.binding}' cannot escape through ${params.through}`,
-    severity: "error",
-    phase: "typing",
-    hints: [
-      {
-        message:
-          "Return the borrow through an explicit borrowed result, or finish using it before storing, capturing, or crossing the boundary.",
-      },
-    ],
-  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0051"]>,
-  TY0052: {
-    code: "TY0052",
-    message: (params) =>
-      params.kind === "borrow-across-effect"
-        ? `mutable borrow '${params.binding}' cannot cross a suspending or continuation-escaping effect boundary`
-        : `mutable borrow '${params.binding}' begins here`,
-    severity: "error",
-    phase: "typing",
-    hints: [
-      {
-        message:
-          "Complete effectful work before creating the mutable borrow, then perform a short synchronous update.",
-      },
-      {
-        message:
-          "In a mock handler, snapshot owned response data before tail/resume and keep mutable read/write observations in SharedCell<T> callbacks that finish first.",
-      },
-    ],
-  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0052"]>,
-  TY0053: {
-    code: "TY0053",
-    message: (params) =>
-      params.kind === "borrow-origin"
-        ? `borrowed callback value '${params.binding}' originates here`
-        : `borrowed callback value '${params.binding}' cannot escape ${params.through}`,
-    severity: "error",
-    phase: "typing",
-    hints: [
-      {
-        message:
-          "Return owned data from the callback or finish using the borrowed value before the callback returns.",
-      },
-    ],
-  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0053"]>,
-  TY0054: {
-    code: "TY0054",
     message: (params) => {
       switch (params.kind) {
-        case "duplicate-region":
-          return `borrow contract declaration '${params.declaration}' declares region '${params.region}' more than once`;
-        case "unknown-region":
-          return `borrow contract declaration '${params.declaration}' references undeclared region '${params.region}' in '${params.clause}'`;
-        case "missing-returns-from":
-          return `borrow contract declaration '${params.declaration}' returns an explicit borrow but has no 'returns_from' clause`;
-        case "returns-from-without-borrow":
-          return `borrow contract declaration '${params.declaration}' declares 'returns_from' region(s) ${params.regions}, but its result has no explicit borrowed portion`;
-        case "missing-region-mapping":
-          return `borrow contract implementation '${params.declaration}' has no place mapping for region '${params.region}'`;
-        case "invalid-region-mapping":
-          return `borrow contract implementation '${params.declaration}' maps region '${params.region}' to invalid place '${params.place}': ${params.reason}`;
-        case "false-disjointness":
-          return `borrow contract implementation '${params.declaration}' falsely declares region '${params.leftRegion}' at '${params.leftPlace}' disjoint from region '${params.rightRegion}' at '${params.rightPlace}'`;
-        case "self-disjointness":
-          return `borrow contract declaration '${params.declaration}' falsely declares region '${params.region}' disjoint from itself`;
-        case "contract-excess":
-          return `borrow contract implementation '${params.declaration}' exceeds '${params.clause}' at place '${params.place}'; declared region(s): ${params.regions}`;
-        case "implementation-contract":
-          return `borrow contract implementation '${params.declaration}' repeats '@borrow_contract'; implementations inherit the trait declaration`;
-        case "invalid-contract-target":
-          return `borrow contract declaration '${params.declaration}' is not a trait method; named borrow contracts are declared on trait methods`;
-        case "static-contract-target":
-          return `borrow contract declaration '${params.declaration}' has no instance 'self' receiver; named regions map only through an implementation receiver`;
+        case "explicit-borrow-escape":
+          return `borrowed value '${params.binding}' cannot escape through ${params.through}`;
+        case "borrow-origin":
+          return `borrowed value '${params.binding}' originates here`;
+        case "invalid-borrow-position":
+          return `Borrow<T> is only valid as a complete callable parameter type (${params.context})`;
+        case "nested-borrow":
+          return "Borrow<Borrow<T>> is not supported";
+        case "borrow-signature-boundary":
+          return `Borrow<T> is not allowed in an ${params.boundary} signature`;
+        case "borrowed-callable-effect":
+          return `a callable with a Borrow<T> parameter must have an empty effect row (${params.context})`;
+        case "borrow-capture":
+          return `a closure cannot capture active Borrow<T> value ${params.binding}; pass it through an explicit Borrow-aware parameter`;
       }
       return exhaustive(params);
     },
@@ -1486,10 +1381,36 @@ export const diagnosticsRegistry: {
     hints: [
       {
         message:
-          "Correct the named region mapping or contract clause so the declared caller-visible footprint covers the implementation.",
+          "Finish using the borrowed value before storing, capturing, returning, or crossing the boundary.",
       },
     ],
-  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0054"]>,
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0051"]>,
+  TY0055: {
+    code: "TY0055",
+    message: (params) => {
+      switch (params.kind) {
+        case "ordinary-parameter-count":
+          return `ordinary mutation summary for '${params.callable}' has ${params.actual} parameters, but its declaration has ${params.allowed}`;
+        case "ordinary-parameter-bound":
+          return `ordinary mutation summary for '${params.callable}' ${params.actual}s parameter ${params.parameter + 1}, exceeding its declared '${params.allowed}' access bound`;
+        case "ordinary-ambient-access":
+          return `ordinary mutation summary for '${params.callable}' accesses ambient object state outside its declared bound`;
+        case "ordinary-unknown-callback":
+          return `ordinary mutation summary for '${params.callable}' invokes an unknown callback outside its declared bound`;
+        case "ordinary-suspension":
+          return `ordinary mutation summary for '${params.callable}' may suspend outside its declared bound`;
+      }
+      return exhaustive(params);
+    },
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Keep exclusive mutation within a bounded synchronous call whose callees have compatible mutation summaries.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0055"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

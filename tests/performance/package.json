@@ -7,7 +7,7 @@
   "scripts": {
     "build": "echo 'no build for performance tests'",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo 'performance tests are opt-in'",
+    "test": "node --test scripts/*.test.mjs",
     "test:perf": "VOYD_RUN_PERF_SMOKE=1 vitest run --config ../../vitest.config.ts --testTimeout 300000 --hookTimeout 120000 src",
     "bench:web-openapi": "node scripts/web-openapi-package-scale.mjs",
     "lint": "echo 'no lint configured'"

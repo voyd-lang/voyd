@@ -8,13 +8,19 @@ use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
 use super::contract::{ OpenApiHeader, OpenApiResponseContract, OpenApiResponseSchemaDocs, OpenApiSchemaDocs }
-use super::json_copy::copy_json_value
-use super::schema::{ opaque_schema, schema_for }
+use super::json_copy::{ copy_json_object, copy_json_value }
+use super::schema::{ opaque_schema, render_schema, schema_components, schema_for }
 use super::schema_overlay::apply_schema_docs
 
 obj RenderedContent {
   content_type: String,
   schema: JsonValue
+}
+
+obj PreparedContent {
+  content_type: String,
+  schema: JsonValue,
+  components: Dict<String, JsonValue>
 }
 
 pub fn response_contracts_json(
@@ -74,50 +80,78 @@ fn render_content(
     include_doc_comments: bool
   }
 ) -> Option<RenderedContent>
+  match(prepare_content(candidate, candidate_index: candidate_index, schema_docs: schema_docs, prefix: prefix, include_doc_comments: include_doc_comments))
+    None:
+      None {}
+    Some<PreparedContent> { value }:
+      components.extend(copy_json_object(value.components))
+      Some<RenderedContent> {
+        value: RenderedContent {
+          content_type: value.content_type.as_slice().to_string(),
+          schema: copy_json_value(value.schema)
+        }
+      }
+
+fn prepare_content(
+  candidate: OpenApiResponseContract,
+  {
+    candidate_index: i32,
+    schema_docs: Array<OpenApiResponseSchemaDocs>,
+    prefix: String,
+    include_doc_comments: bool
+  }
+) -> Option<PreparedContent>
   match(candidate.content_type)
     None:
       None {}
     Some<String> { value: content_type }:
-      let inferred_schema = match(candidate.schema)
-        Some<Shape> { value }:
-          schema_for(value, prefix: prefix.concat("Response".as_slice()).concat(to_string(candidate_index).as_slice()), components: components, include_doc_comments: include_doc_comments)
-        None:
-          opaque_schema(content_type)
       let selected_schema_docs = matching_response_schema_docs(
         schema_docs,
         status: candidate.status,
         content_type: content_type
       )
-      let schema = match(candidate.event_schema)
+      let prepared = match(candidate.event_schema)
         Some<Shape> { value: event_shape }:
-          let event_schema = schema_for(
-            event_shape,
-            prefix: prefix.concat("Event".as_slice()).concat(to_string(candidate_index).as_slice()),
-            components: components,
-            include_doc_comments: include_doc_comments
+          let event_prefix = prefix.concat("Event".as_slice()).concat(to_string(candidate_index).as_slice())
+          let event_schema = render_schema(event_shape, prefix: event_prefix, include_doc_comments: include_doc_comments)
+          let event_components = schema_components(event_shape, prefix: event_prefix, include_doc_comments: include_doc_comments)
+          let documented_event_schema = apply_schema_docs(
+            event_schema,
+            selected_schema_docs,
+            components: event_components
           )
           let ~stream = Dict<String, JsonValue>::init()
           stream.set("type", JsonString { value: "string".to_string() })
-          stream.set(
-            "x-voyd-event-schema",
-            apply_schema_docs(
-              event_schema,
-              selected_schema_docs,
-              components: components
-            )
-          )
-          JsonObject { value: stream }
+          stream.set("x-voyd-event-schema", documented_event_schema)
+          PreparedContent {
+            content_type,
+            schema: JsonObject { value: stream },
+            components: event_components
+          }
         None:
-          apply_schema_docs(
+          let response_prefix = prefix.concat("Response".as_slice()).concat(to_string(candidate_index).as_slice())
+          let inferred_schema = match(candidate.schema)
+            Some<Shape> { value }:
+              render_schema(value, prefix: response_prefix, include_doc_comments: include_doc_comments)
+            None:
+              opaque_schema(content_type)
+          let response_components = match(candidate.schema)
+            Some<Shape> { value }:
+              schema_components(value, prefix: response_prefix, include_doc_comments: include_doc_comments)
+            None:
+              Dict<String, JsonValue>::init()
+          let documented_schema = apply_schema_docs(
             inferred_schema,
             selected_schema_docs,
-            components: components
+            components: response_components
           )
-      Some<RenderedContent> {
-        value: RenderedContent {
-          content_type,
-          schema
-        }
+          PreparedContent {
+            content_type,
+            schema: documented_schema,
+            components: response_components
+          }
+      Some<PreparedContent> {
+        value: prepared
       }
 
 fn merge_media_schemas(existing_media: JsonValue, alternative: JsonValue) -> JsonValue

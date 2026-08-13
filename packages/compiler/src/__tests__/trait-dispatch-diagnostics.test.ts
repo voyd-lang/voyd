@@ -95,7 +95,7 @@ impl HitRecord
     HitRecord { t: 0 }
 
 pub trait Hittable
-  fn hit(self, { ray: i32, ray_tmin: i32, ray_tmax: i32, ~rec: HitRecord }) -> bool
+  fn hit(self, { ray: i32, ray_tmin: i32, ray_tmax: i32, ~rec: HitRecord }): () -> bool
 
 obj Dummy {}
 

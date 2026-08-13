@@ -144,14 +144,20 @@ const resolveProviderFunctions = ({
 
   const result = {} as Record<CompilerTraitMethodRole, ProgramSymbolId>;
   HOST_TRANSPORT_PROVIDER_CONTRACT.methods.forEach((method) => {
-    const symbol = methods.get(method.role);
+    const role = method.role;
+    if (!role) {
+      throw new Error(
+        `HostTransportProvider method '${method.name}' has no compiler role`,
+      );
+    }
+    const symbol = methods.get(role);
     if (symbol === undefined) {
       throw new Error(
         `the selected HostTransportProvider implementation is missing '${method.name}'`,
       );
     }
     const expected = expectedSignature({
-      role: method.role,
+      role,
       program,
       readerTypeId,
       writerTypeId,
@@ -163,7 +169,7 @@ const resolveProviderFunctions = ({
       expectedParameters: expected.parameters,
       expectedResult: expected.result,
     });
-    result[method.role] = symbol;
+    result[role] = symbol;
   });
   return result;
 };

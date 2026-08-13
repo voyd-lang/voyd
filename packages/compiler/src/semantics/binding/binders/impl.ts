@@ -57,11 +57,6 @@ export const bindImplDecl = (
   rememberSyntax(decl.target, ctx);
   rememberSyntax(decl.trait, ctx);
   rememberSyntax(decl.body, ctx);
-  decl.regionMappings.forEach((mapping) => {
-    rememberSyntax(mapping.form, ctx);
-    rememberSyntax(mapping.name, ctx);
-    rememberSyntax(mapping.place, ctx);
-  });
 
   const implName = isIdentifierAtom(decl.target)
     ? `${decl.target.value}::impl`
@@ -299,11 +294,6 @@ export const bindImplDecl = (
     target: decl.target,
     trait: decl.trait,
     typeParameters,
-    regionMappings: decl.regionMappings.map((mapping) => ({
-      name: mapping.name.value,
-      ast: mapping.form,
-      place: mapping.place,
-    })),
     methods,
     scope: implScope,
     moduleIndex: ctx.nextModuleIndex++,
@@ -324,10 +314,17 @@ const resolveCompilerImplementation = ({
 }): { id: string; version: number } | undefined => {
   const implementation = decl.compilerImplementation;
   if (!implementation) return undefined;
-  if (!decl.trait || !traitResolution) {
+  if (!decl.trait) {
     throw new Error(
       `@compiler_impl '${implementation.id}' must implement a compiler-contract trait`,
     );
+  }
+  // A cyclic export seed, or a dependency that already failed analysis, can
+  // expose the trait name before its declaration metadata is available. The
+  // import/type diagnostic owns that unresolved state. SCC stabilization will
+  // bind this implementation again once the exact source declaration exists.
+  if (!traitResolution) {
+    return undefined;
   }
   const traitMetadata = traitResolution.sourceSymbolTable.getSymbol(
     traitResolution.sourceSymbol,

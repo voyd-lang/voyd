@@ -61,6 +61,22 @@ const summaryFor = ({
 };
 
 describe("type display", () => {
+  it("formats scoped borrows with generic syntax", () => {
+    const context = createTypeDisplayTestContext(
+      `fn inspect(value: Borrow<i32>) -> i32\n  1\n`,
+    );
+
+    expect(
+      summaryFor({
+        context,
+        symbol: rootSymbolNamed({
+          semantics: context.semantics,
+          name: "inspect",
+        }),
+      }),
+    ).toBe("fn inspect(value: Borrow<i32>) -> i32");
+  });
+
   it("formats generic function signatures", () => {
     const context = createTypeDisplayTestContext(`fn identity<T>(value: T) -> T\n  value\n`);
 
