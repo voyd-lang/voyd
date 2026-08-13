@@ -937,26 +937,31 @@ use std::array::Array
 obj MutationBox { value: i32 }
 
 trait MutationStep
-  fn step(~self) -> void
+  fn step(~self) : () -> void
 
 impl MutationStep for MutationBox
-  fn step(~self) -> void
+  fn step(~self) : () -> void
     self.value = self.value + 1
 
-fn dynamic_step(~value: MutationStep) -> void
+fn dynamic_step(~value: MutationStep) : () -> void
   value.step()
 
-fn callback_step(~value: MutationBox) -> void
-  value.value = value.value + 1
+fn callback_step(value: i32) -> i32
+  value + 1
 
 fn apply_callback(
-  ~value: MutationBox,
-  callback: fn(~item: MutationBox) : () -> void
-) -> void
-  callback(~value)
+  value: i32,
+  callback: fn(item: i32) : () -> i32
+) : (open) -> i32
+  callback(value)
 
-fn apply_reader(callback: fn() : () -> i32) -> i32
+fn apply_reader(callback: fn() : () -> i32) : (open) -> i32
   callback()
+
+fn callback_and_ambient_sites(value: i32, ambient: MutationBox) : (open) -> i32
+${lines(scale, (index) => `  let callback_${index} = apply_callback(value, callback_step)`)}
+${lines(scale, (index) => `  let observed_${index} = apply_reader(() => ambient.value)`)}
+  ${Array.from({ length: scale }, (_, index) => `callback_${index}`).join(" + ")} + ${Array.from({ length: scale }, (_, index) => `observed_${index}`).join(" + ")}
 
 fn mutate_pair(~left: MutationBox, ~right: MutationBox) -> void
   left.value = left.value + 1
@@ -975,7 +980,6 @@ pub fn main() -> i32
   let ~box = MutationBox { value: 1 }
   direct_${scale - 1}(~box)
 ${lines(scale, () => "  dynamic_step(~box)")}
-${lines(scale, () => "  apply_callback(~box, callback_step)")}
   cycle_0(~box, ${scale})
 
   let ~values = Array<MutationBox>::with_capacity(2)
@@ -983,15 +987,14 @@ ${lines(scale, () => "  apply_callback(~box, callback_step)")}
   values.push(MutationBox { value: 5 })
 ${lines(scale, () => "  guarded_pair(~values, 0, 1)")}
 
-${lines(scale, (index) => `  let observed_${index} = apply_reader(() => box.value)`)}
-  box.value + values.at(0).value + values.at(1).value + ${Array.from({ length: scale }, (_, index) => `observed_${index}`).join(" + ")}
+  box.value + values.at(0).value + values.at(1).value
 `;
   return {
     name: `mutation-mixed-${scale}`,
     family: "mutation-mixed",
     scale,
     source,
-    expected: 10 + 8 * scale + 3 * scale * scale,
+    expected: 10 + 5 * scale,
     dimensions: {
       directCallDepth: scale,
       dynamicCallSites: scale,
