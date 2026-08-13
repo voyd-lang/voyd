@@ -1666,6 +1666,7 @@ const parseControllerOptions = (): ControllerOptions => {
 
 const runController = (options: ControllerOptions): void => {
   const samples = new Map<string, Sample[]>();
+  const startedAt = Date.now();
   const keyFor = (label: string, scenario: string, mode: string): string =>
     `${label}\0${scenario}\0${mode}`;
 
@@ -1713,6 +1714,12 @@ const runController = (options: ControllerOptions): void => {
           samples.set(key, [...(samples.get(key) ?? []), result.sample]);
         }
       }
+      process.stderr.write(
+        `[v500] completed ${scenario.name}/${mode} after ${(
+          (Date.now() - startedAt) /
+          1000
+        ).toFixed(1)}s\n`,
+      );
     }
   }
 
