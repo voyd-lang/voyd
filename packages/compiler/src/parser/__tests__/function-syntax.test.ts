@@ -32,11 +32,7 @@ fn view(value: Borrow<Box>) -> i32
   const ast = toPlain(code);
   t.expect(ast).toContainEqual([
     "fn",
-    [
-      "->",
-      ["view", [":", "value", ["Borrow", ["generics", "Box"]]]],
-      "i32",
-    ],
+    ["->", ["view", [":", "value", ["Borrow", ["generics", "Box"]]]], "i32"],
     ["block", "1"],
   ]);
 });
@@ -46,14 +42,7 @@ test("parses a nested generic Borrow inner type without special handling", (t) =
     "ast",
     [
       "type",
-      [
-        "=",
-        "X",
-        [
-          "Borrow",
-          ["generics", ["Option", ["generics", "i32"]]],
-        ],
-      ],
+      ["=", "X", ["Borrow", ["generics", ["Option", ["generics", "i32"]]]]],
     ],
   ]);
 });
@@ -215,9 +204,7 @@ trait Key<K>
   @isolated
   fn hash(self): () -> i32
 `);
-  const form = ast.rest.find(
-    (entry) => isForm(entry) && entry.calls("trait"),
-  );
+  const form = ast.rest.find((entry) => isForm(entry) && entry.calls("trait"));
   const declaration = isForm(form) ? parseTraitDecl(form) : null;
 
   t.expect(declaration?.methods[0]?.isolated).toBe(true);
@@ -229,9 +216,7 @@ trait Key<K>
   @isolated
   fn hash(self) -> i32
 `);
-  const form = ast.rest.find(
-    (entry) => isForm(entry) && entry.calls("trait"),
-  );
+  const form = ast.rest.find((entry) => isForm(entry) && entry.calls("trait"));
 
   t.expect(() => (isForm(form) ? parseTraitDecl(form) : null)).toThrow(
     /explicit empty effect row/,
@@ -244,9 +229,7 @@ test("rejects isolated on ordinary functions", (t) => {
 fn hash() : () -> i32
   1
 `);
-  const form = ast.rest.find(
-    (entry) => isForm(entry) && entry.calls("fn"),
-  );
+  const form = ast.rest.find((entry) => isForm(entry) && entry.calls("fn"));
 
   t.expect(() => (isForm(form) ? parseFunctionDecl(form) : null)).toThrow(
     /only annotate trait methods/,
@@ -261,6 +244,157 @@ trait Key
   fn hash(self): () -> i32
 `),
   ).toThrow(/does not accept arguments/);
+});
+
+test("parses finite result identity contracts on functions and trait methods", (t) => {
+  const ast = parse(`
+@result(detached)
+fn detached(value: i32) -> i32
+  value
+
+trait Builder<T>
+  @result(fresh)
+  fn build(value: T) -> T
+`);
+  const fnForm = ast.rest.find((entry) => isForm(entry) && entry.calls("fn"));
+  const traitForm = ast.rest.find(
+    (entry) => isForm(entry) && entry.calls("trait"),
+  );
+  const fn = isForm(fnForm) ? parseFunctionDecl(fnForm) : null;
+  const trait = isForm(traitForm) ? parseTraitDecl(traitForm) : null;
+
+  t.expect(fn?.signature.resultIdentity).toEqual({ kind: "detached" });
+  t.expect(trait?.methods[0]?.signature.resultIdentity).toEqual({
+    kind: "fresh",
+  });
+});
+
+test("parses a same-place return as the referenced mutable parameter type", (t) => {
+  const ast = parse(`
+fn update<T>(other: i32, ~target: T) -> ~target
+  target
+`);
+  const form = ast.rest.find((entry) => isForm(entry) && entry.calls("fn"));
+  const declaration = isForm(form) ? parseFunctionDecl(form) : null;
+
+  t.expect(declaration?.signature.resultIdentity).toEqual({
+    kind: "same-place",
+    parameterIndex: 1,
+  });
+  t.expect(declaration?.signature.returnType?.toJSON()).toBe("T");
+});
+
+test("parses staged overlap contracts on functions and trait methods", (t) => {
+  const ast = parse(`
+@result(fresh)
+@staged(into: out)
+fn append(source: Box, ~out: Box) -> Box
+  out
+
+trait Append
+  @staged(into: self)
+  fn append(~self, source: Box): () -> void
+`);
+  const fnForm = ast.rest.find((entry) => isForm(entry) && entry.calls("fn"));
+  const traitForm = ast.rest.find(
+    (entry) => isForm(entry) && entry.calls("trait"),
+  );
+  const fn = isForm(fnForm) ? parseFunctionDecl(fnForm) : null;
+  const trait = isForm(traitForm) ? parseTraitDecl(traitForm) : null;
+
+  t.expect(fn?.signature.stagedAccess).toEqual({
+    destinationParameterIndex: 1,
+  });
+  t.expect(fn?.signature.resultIdentity).toEqual({ kind: "fresh" });
+  t.expect(trait?.methods[0]?.signature.stagedAccess).toEqual({
+    destinationParameterIndex: 0,
+  });
+});
+
+test("rejects invalid staged overlap contracts", (t) => {
+  const parseDeclaration = (source: string) => {
+    const ast = parse(source);
+    const form = ast.rest.find((entry) => isForm(entry) && entry.calls("fn"));
+    return isForm(form) ? parseFunctionDecl(form) : null;
+  };
+  t.expect(() =>
+    parse(`@staged(source: out)
+fn bad(~out: i32) -> i32
+  out`),
+  ).toThrow(/labeled 'into:'/);
+  t.expect(() =>
+    parseDeclaration(`@staged(into: missing)
+fn bad(~out: i32) -> i32
+  out`),
+  ).toThrow(/unknown parameter 'missing'/);
+  t.expect(() =>
+    parseDeclaration(`@staged(into: out)
+fn bad(out: i32) -> i32
+  out`),
+  ).toThrow(/must be declared with '~'/);
+});
+
+test("parses builder ownership contracts and validates their destination", (t) => {
+  const ast = parse(`
+@builder(into: out)
+fn write(source: Box, ~out: Box) -> void
+  out.value = source.value
+`);
+  const form = ast.rest.find((entry) => isForm(entry) && entry.calls("fn"));
+  const declaration = isForm(form) ? parseFunctionDecl(form) : null;
+  t.expect(declaration?.signature.builderAccess).toEqual({
+    destinationParameterIndex: 1,
+  });
+  t.expect(() =>
+    parse(`@builder(source: out)
+fn bad(~out: i32) -> void
+  void`),
+  ).toThrow(/labeled 'into:'/);
+  t.expect(() => {
+    const invalid = parse(`@builder(into: out)
+fn bad(out: i32) -> void
+  void`);
+    const invalidForm = invalid.rest.find(
+      (entry) => isForm(entry) && entry.calls("fn"),
+    );
+    if (isForm(invalidForm)) parseFunctionDecl(invalidForm);
+  }).toThrow(/must be declared with '~'/);
+});
+
+test("rejects invalid or conflicting result identity contracts", (t) => {
+  t.expect(() =>
+    parse(`@result(stable)
+fn bad() -> i32
+  0`),
+  ).toThrow(/unknown @result identity 'stable'/);
+  t.expect(() =>
+    parse(`@result(detached, fresh)
+fn bad() -> i32
+  0`),
+  ).toThrow(/exactly one identity argument/);
+  t.expect(() =>
+    parse(`@result(detached)
+let bad = 0`),
+  ).toThrow(/must precede a function/);
+
+  const parseDeclaration = (source: string) => {
+    const ast = parse(source);
+    const form = ast.rest.find((entry) => isForm(entry) && entry.calls("fn"));
+    return isForm(form) ? parseFunctionDecl(form) : null;
+  };
+  t.expect(() =>
+    parseDeclaration(`fn bad(value: i32) -> ~missing
+  value`),
+  ).toThrow(/unknown parameter 'missing'/);
+  t.expect(() =>
+    parseDeclaration(`fn bad(value: i32) -> ~value
+  value`),
+  ).toThrow(/must be declared with '~'/);
+  t.expect(() =>
+    parseDeclaration(`@result(fresh)
+fn bad(~value: i32) -> ~value
+  value`),
+  ).toThrow(/cannot be combined/);
 });
 
 test("rejects removed trait region declarations", (t) => {

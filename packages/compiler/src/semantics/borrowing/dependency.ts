@@ -2,10 +2,12 @@ import type { SymbolId } from "../ids.js";
 import type { FunctionSignature } from "../typing/index.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import type { OrdinaryMutationSummary } from "./ordinary-mutation-summary.js";
+import type { ResultIdentity } from "../../result-identity.js";
 
 export type BorrowingCallableDependency = {
   name: string;
   signature?: FunctionSignature;
+  resultIdentity?: ResultIdentity;
 };
 
 export type BorrowingDependency = {

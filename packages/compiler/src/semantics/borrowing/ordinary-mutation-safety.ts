@@ -139,6 +139,27 @@ export const planOrdinaryMutationSafety = ({
         ) {
           continue;
         }
+        const staged = stagedPairDisposition({ call, left, right });
+        if (staged === "accepted") {
+          incrementCompilerPerfCounter("borrowing.staged.calls.accepted");
+          continue;
+        }
+        if (staged === "conservative") {
+          incrementCompilerPerfCounter("borrowing.staged.calls.conservative");
+        }
+        const builder = builderPairDisposition({
+          call,
+          left,
+          right,
+          caller: index,
+        });
+        if (builder === "accepted") {
+          incrementCompilerPerfCounter("borrowing.builder.calls.accepted");
+          continue;
+        }
+        if (builder === "conservative") {
+          incrementCompilerPerfCounter("borrowing.builder.calls.conservative");
+        }
         const outcome = compareCallAccesses({
           left,
           right,
@@ -182,6 +203,82 @@ export const planOrdinaryMutationSafety = ({
   });
 
   return { guards, mutableStorageSymbols, diagnostics };
+};
+
+const stagedPairDisposition = ({
+  call,
+  left,
+  right,
+}: {
+  call: CallableBorrowIndexCall;
+  left: OrdinaryAccess;
+  right: OrdinaryAccess;
+}): "accepted" | "conservative" | "unrelated" => {
+  const staged = call.signature?.stagedAccess;
+  if (!staged) return "unrelated";
+  const involvesDestination =
+    left.parameter === staged.destinationParameterIndex ||
+    right.parameter === staged.destinationParameterIndex;
+  if (!involvesDestination) return "unrelated";
+  if (
+    call.openTraitDispatch ||
+    call.ordinaryDynamicBound ||
+    call.argumentPlanAmbiguous ||
+    call.targets.length !== 1 ||
+    call.maySuspend
+  ) {
+    return "conservative";
+  }
+  return "accepted";
+};
+
+const builderPairDisposition = ({
+  call,
+  left,
+  right,
+  caller,
+}: {
+  call: CallableBorrowIndexCall;
+  left: OrdinaryAccess;
+  right: OrdinaryAccess;
+  caller: CallableBorrowIndex;
+}): "accepted" | "conservative" | "unrelated" => {
+  const builder = call.signature?.builderAccess;
+  if (!builder) return "unrelated";
+  const involvesDestination =
+    left.parameter === builder.destinationParameterIndex ||
+    right.parameter === builder.destinationParameterIndex;
+  if (!involvesDestination) return "unrelated";
+  const destination = indexCallArgumentFor(
+    call,
+    builder.destinationParameterIndex,
+  );
+  const other =
+    left.parameter === builder.destinationParameterIndex ? right : left;
+  const sourceComesFromDestination = Boolean(
+    destination?.place &&
+    (other.argument.place?.root === destination.place.root ||
+      other.argument.builderSourceRoots?.includes(destination.place.root)),
+  );
+  const callerBuilder = caller.signature?.builderAccess;
+  const forwardsCallerDestination = Boolean(
+    callerBuilder &&
+    destination?.place &&
+    caller.parameterPlaces.get(destination.place.root)?.parameter ===
+      callerBuilder.destinationParameterIndex,
+  );
+  if (
+    call.openTraitDispatch ||
+    call.ordinaryDynamicBound ||
+    call.argumentPlanAmbiguous ||
+    call.targets.length !== 1 ||
+    call.maySuspend ||
+    sourceComesFromDestination ||
+    (destination?.provenanceFreeFresh !== true && !forwardsCallerDestination)
+  ) {
+    return "conservative";
+  }
+  return "accepted";
 };
 
 const importedKey = ({ moduleId, symbol }: SymbolRef): string =>

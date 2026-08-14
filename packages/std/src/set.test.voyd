@@ -7,6 +7,15 @@ fn accepts_sequence({ values: Sequence<String> }) -> bool
   true
 
 test "set inserting contains removing clear":
+  let ~mutable = Set<String>::init()
+  assert(mutable.insert("a"), eq: true)
+  assert(mutable.insert("a"), eq: false)
+  assert(mutable.insert("b"), eq: true)
+  assert(mutable.remove("a"), eq: true)
+  assert(mutable.remove("a"), eq: false)
+  assert(mutable.contains("a"), eq: false)
+  assert(mutable.len(), eq: 1)
+
   let empty = Set<String>::init()
   assert(empty.is_empty(), eq: true)
 

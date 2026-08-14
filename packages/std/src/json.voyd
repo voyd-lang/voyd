@@ -66,12 +66,10 @@ use std::meta::{
   shape_of
 }
 use std::math::{ floor, is_finite }
-use std::fixed_array::fns::new_fixed_array
 use std::number::cast::{ to_f32, to_i32_checked, to_i64_checked }
 use std::number::cast::self as number_cast
 use std::optional::types::all
 use std::result::types::{ Result, Ok, Err, Unit }
-use std::shared_cell::SharedCell
 use std::string::{ String, StringSlice, new_string }
 
 pub obj JsonError {
@@ -545,30 +543,8 @@ pub type JsonValue = JsonNull | JsonBool | JsonNumber | JsonString | JsonArray |
 
 obj JsonParser {
   source: StringSlice,
-  state: SharedCell<JsonParserState>
-}
-
-obj JsonParserState {
   index: i32
 }
-
-obj JsonOutput {
-  state: SharedCell<JsonOutputState>
-}
-
-obj JsonOutputState {
-  bytes: JsonOutputByteLink,
-  byte_count: i32
-}
-
-obj JsonOutputByte {
-  value: i32,
-  previous: JsonOutputByteLink
-}
-
-obj JsonOutputEnd {}
-
-type JsonOutputByteLink = JsonOutputByte | JsonOutputEnd
 
 obj JsonArrayCountStatus {
   status: i32,
@@ -576,51 +552,18 @@ obj JsonArrayCountStatus {
 }
 
 impl JsonParser
+  @result(fresh)
   fn init(source: StringSlice, index: i32) -> JsonParser
-    JsonParser {
-      source,
-      state: SharedCell(JsonParserState { index })
-    }
+    JsonParser { source, index }
 
   fn position(self) -> i32
-    self.state.with((state) => state.index)
+    self.index
 
-  fn set_position(self, index: i32) -> void
-    self.state.with_mut((~state) -> void => state.index = index)
+  fn set_position(~self, index: i32) -> void
+    self.index = index
 
-  fn advance(self, count: i32) -> void
-    self.state.with_mut((~state) -> void => state.index = state.index + count)
-
-impl JsonOutput
-  fn init() -> JsonOutput
-    JsonOutput {
-      state: SharedCell(JsonOutputState {
-        bytes: JsonOutputEnd {},
-        byte_count: 0
-      })
-    }
-
-  fn push(self, value: i32) -> void
-    self.state.with_mut((~state) -> void =>
-      state.bytes = JsonOutputByte { value, previous: state.bytes }
-      state.byte_count = state.byte_count + 1
-    )
-
-  fn finish(self) -> String
-    self.state.with((state) -> String =>
-      let storage = new_fixed_array<i32>(state.byte_count)
-      var index = state.byte_count - 1
-      var current: JsonOutputByteLink = state.bytes
-      while index >= 0:
-        current.match(byte)
-          JsonOutputByte:
-            __array_set(storage, index, byte.value)
-            current = byte.previous
-          JsonOutputEnd:
-            return "".to_string()
-        index = index - 1
-      new_string(storage)
-    )
+  fn advance(~self, count: i32) -> void
+    self.index = self.index + count
 
 /// Pull reader over one JSON source without constructing a `JsonValue` tree.
 pub obj JsonReader {
@@ -635,9 +578,11 @@ pub obj JsonReader {
 
 impl JsonReader
   /// Creates a reader over borrowed JSON source text.
+  @result(fresh)
   pub fn init(source: StringSlice) -> JsonReader
     JsonReader::init(source, limits: default_decode_limits())
 
+  @result(fresh)
   fn init(source: StringSlice, { limits: DecodeLimits }) -> JsonReader
     JsonReader {
       parser: JsonParser::init(source, 0),
@@ -650,6 +595,7 @@ impl JsonReader
     }
 
   /// Creates a reader over owned JSON source text.
+  @result(fresh)
   pub fn init(source: String) -> JsonReader
     JsonReader::init(source.as_slice())
 
@@ -657,10 +603,11 @@ impl JsonReader
   api fn is_complete(self) -> bool
     if self.failed or self.root_consumed == false or self.container_kinds.is_empty() == false:
       return false
-    let probe = JsonParser::init(self.parser.source, self.parser.position())
+    let ~probe = JsonParser::init(self.parser.source, self.parser.position())
     skip_whitespace(probe)
     probe.position() == probe.source.byte_len()
 
+  @result(detached)
   fn fail<T>(~self, message: String) -> Result<T, JsonError>
     self.failed = true
     json_reader_failure<T>(message)
@@ -768,7 +715,7 @@ impl DataReader<JsonError> for JsonReader
     void
 
   fn kind(self) -> Result<DataKind, JsonError>
-    let probe = JsonParser::init(self.parser.source, self.parser.position())
+    let ~probe = JsonParser::init(self.parser.source, self.parser.position())
     skip_whitespace(probe)
     if self.container_kinds.is_empty() == false:
       let index = self.container_kinds.len() - 1
@@ -869,6 +816,7 @@ impl DataReader<JsonError> for JsonReader
   fn read_f64(~self) -> Result<f64, JsonError>
     self.read_number_value()
 
+  @result(detached)
   fn read_string(~self) -> Result<String, JsonError>
     let prepare_status = self.prepare_value()
     if prepare_status != 0:
@@ -904,7 +852,7 @@ impl DataReader<JsonError> for JsonReader
     let index = self.container_kinds.len() - 1
     if self.container_kinds.at(index) != 0:
       return json_reader_failure<bool>("json reader is outside an array")
-    let probe = JsonParser::init(self.parser.source, self.parser.position())
+    let ~probe = JsonParser::init(self.parser.source, self.parser.position())
     skip_whitespace(probe)
     if self.consumed_values.at(index) > 0:
       if consume_byte(probe, 44) == false:
@@ -921,6 +869,7 @@ impl DataReader<JsonError> for JsonReader
       return json_reader_status_failure<Unit>(begin_status)
     json_reader_success()
 
+  @result(detached)
   fn next_field(~self) -> Result<Option<String>, JsonError>
     if self.container_kinds.is_empty():
       return self.fail<Option<String>>("json reader is outside a record")
@@ -946,18 +895,11 @@ impl DataReader<JsonError> for JsonReader
         self.failed = true
         Err<JsonError> { error }
       Ok<String> { value: name }:
-        let name_slice = name.as_slice()
-        let ~name_bytes = Array<i32>::with_capacity(name_slice.byte_len())
-        var name_index = 0
-        while name_index < name_slice.byte_len():
-          name_bytes.push(byte_at_or(name_slice, name_index, 0))
-          name_index = name_index + 1
-        let stable_name = new_string(name_bytes.to_fixed_array())
         skip_whitespace(self.parser)
         if consume_byte(self.parser, 58) == false:
           return self.fail<Option<String>>("json reader expected ':' after a field")
         self.pending_fields.replace(index, with: 1)
-        Ok<Option<String>> { value: Some<String> { value: stable_name } }
+        Ok<Option<String>> { value: Some<String> { value: name } }
 
   fn skip_value(~self) -> Result<Unit, JsonError>
     let prepare_status = self.prepare_value()
@@ -976,8 +918,9 @@ impl DataReader<JsonError> for JsonReader
   fn end_record(~self) -> Result<Unit, JsonError>
     self.end_container(kind: 1)
 
+  @result(detached)
   fn begin_variant(~self) -> Result<String, JsonError>
-    let probe = JsonParser::init(self.parser.source, self.parser.position())
+    let ~probe = JsonParser::init(self.parser.source, self.parser.position())
     skip_whitespace(probe)
     if peek_byte_or(probe, -1) == 34:
       let prepare_status = self.prepare_value()
@@ -988,17 +931,10 @@ impl DataReader<JsonError> for JsonReader
           self.failed = true
           return Err<JsonError> { error }
         Ok<String> { value }:
-          let value_slice = value.as_slice()
-          let ~value_bytes = Array<i32>::with_capacity(value_slice.byte_len())
-          var value_index = 0
-          while value_index < value_slice.byte_len():
-            value_bytes.push(byte_at_or(value_slice, value_index, 0))
-            value_index = value_index + 1
-          let stable_value = new_string(value_bytes.to_fixed_array())
           self.container_kinds.push(3)
           self.consumed_values.push(0)
           self.pending_fields.push(0)
-          return Ok<String> { value: stable_value }
+          return Ok<String> { value }
     let begin_status = self.begin_container(kind: 2)
     if begin_status != 0:
       return json_reader_status_failure<String>(begin_status)
@@ -1027,6 +963,7 @@ impl DataReader<JsonError> for JsonReader
 fn json_reader_success() -> Result<Unit, JsonError>
   Ok<Unit> { value: Unit {} }
 
+@result(detached)
 fn json_reader_status_failure<T>(status: i32) -> Result<T, JsonError>
   if status == 1:
     return json_reader_failure<T>("json reader session has failed")
@@ -1040,6 +977,7 @@ fn json_reader_status_failure<T>(status: i32) -> Result<T, JsonError>
     return json_reader_failure<T>("json nesting exceeds configured depth limit")
   json_reader_failure<T>("json reader expected a container")
 
+@result(detached)
 fn json_reader_failure<T>(message: String) -> Result<T, JsonError>
   Err<JsonError> { error: json_parse_error(message) }
 
@@ -1067,11 +1005,13 @@ fn json_array_count_status_failure<T>(status: i32) -> Result<T, JsonError>
 ///
 /// let parsed = json::parse("{\"ok\":true}")
 /// ```
+@result(detached)
 pub fn parse(source: String) -> Result<JsonValue, JsonError>
   parse(source.as_slice())
 
+@result(detached)
 pub fn parse(source: StringSlice) -> Result<JsonValue, JsonError>
-  let parser = JsonParser::init(source, 0)
+  let ~parser = JsonParser::init(source, 0)
   skip_whitespace(parser)
   let value_result = parse_value(parser)
   match(value_result)
@@ -1097,11 +1037,12 @@ pub fn parse(source: StringSlice) -> Result<JsonValue, JsonError>
 ///
 /// let text = json::stringify(JsonBool { value: true })
 /// ```
+@result(detached)
 pub fn stringify(value: JsonValue) -> Result<String, JsonError>
-  let bytes = JsonOutput::init()
+  let ~bytes = Array<i32>::with_capacity(64)
   match(write_json_value(bytes, value, false, 0))
     Ok<Unit>:
-      Ok<String> { value: bytes.finish() }
+      Ok<String> { value: new_string(bytes.to_fixed_array()) }
     Err<JsonError> { error }:
       Err<JsonError> { error: error }
 
@@ -1111,11 +1052,12 @@ pub fn stringify(value: JsonValue) -> Result<String, JsonError>
 /// - `value`: JSON value to serialize.
 ///
 /// Returns `Err(JsonError)` when serialization would produce invalid JSON.
+@result(detached)
 pub fn stringify_pretty(value: JsonValue) -> Result<String, JsonError>
-  let bytes = JsonOutput::init()
+  let ~bytes = Array<i32>::with_capacity(64)
   match(write_json_value(bytes, value, true, 0))
     Ok<Unit>:
-      Ok<String> { value: bytes.finish() }
+      Ok<String> { value: new_string(bytes.to_fixed_array()) }
     Err<JsonError> { error }:
       Err<JsonError> { error: error }
 
@@ -1487,7 +1429,7 @@ fn data_fields_to_json(
   fields: Array<DataField>,
   path: String
 ): () -> Result<JsonValue, JsonError>
-  var out = Dict<String, JsonValue>::init()
+  let ~out = Dict<String, JsonValue>::init()
   var index = 0
   while index < fields.len():
     let field = fields.at(index)
@@ -1495,7 +1437,7 @@ fn data_fields_to_json(
       Err<JsonError> { error }:
         return Err<JsonError> { error }
       Ok<JsonValue> { value }:
-        out = out.setting(field.name, value)
+        let _ = out.set(field.name, value)
     index = index + 1
   Ok<JsonValue> { value: JsonObject { value: out } }
 
@@ -1509,13 +1451,13 @@ fn data_variant_to_json(
     Ok<JsonValue> { value: object }:
       object.match(decoded)
         JsonObject:
+          let ~fields = decoded.value.copied()
+          let _ = fields.set(
+            "$variant",
+            JsonString { value: value.name }
+          )
           Ok<JsonValue> {
-            value: JsonObject {
-              value: decoded.value.setting(
-                "$variant",
-                JsonString { value: value.name }
-              )
-            }
+            value: JsonObject { value: fields }
           }
         else:
           Err<JsonError> {
@@ -1784,7 +1726,7 @@ fn decode_failure<T>(
     error: JsonDecodeError { kind, path, message }
   }
 
-fn json_object_starts_variant(parser: JsonParser) -> bool
+fn json_object_starts_variant(~parser: JsonParser) -> bool
   if consume_byte(parser, 123) == false:
     return false
   skip_whitespace(parser)
@@ -1799,7 +1741,7 @@ fn count_json_array_values(
   index: i32,
   { depth: i32, limits: DecodeLimits }
 ) -> JsonArrayCountStatus
-  let parser = JsonParser::init(source, index)
+  let ~parser = JsonParser::init(source, index)
   skip_whitespace(parser)
   if consume_byte(parser, 93):
     return JsonArrayCountStatus { status: 0, count: 0 }
@@ -1820,7 +1762,7 @@ fn count_json_array_values(
   JsonArrayCountStatus { status: 102, count }
 
 fn skip_json_value(
-  parser: JsonParser,
+  ~parser: JsonParser,
   { depth: i32, limits: DecodeLimits }
 ) -> i32
   skip_whitespace(parser)
@@ -1896,7 +1838,7 @@ fn skip_json_value(
     Ok<JsonValue>:
       0
 
-fn skip_json_string_status(parser: JsonParser) -> i32
+fn skip_json_string_status(~parser: JsonParser) -> i32
   match(parse_string(parser))
     Err<JsonError> { error }:
       json_skip_parse_error_status(error.message)
@@ -1953,7 +1895,8 @@ fn json_skip_status_failure<T>(status: i32) -> Result<T, JsonError>
     return json_reader_failure<T>("json parse error: invalid exponent")
   json_reader_failure<T>("json parse error: invalid number")
 
-fn parse_value(parser: JsonParser): () -> Result<JsonValue, JsonError>
+@result(detached)
+fn parse_value(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   skip_whitespace(parser)
   match(peek(parser))
     Some<i32> { value: byte }:
@@ -1973,33 +1916,38 @@ fn parse_value(parser: JsonParser): () -> Result<JsonValue, JsonError>
     None:
       Err<JsonError> { error: json_parse_error("json parse error: unexpected end of input") }
 
-fn parse_literal_null(parser: JsonParser): () -> Result<JsonValue, JsonError>
+@result(detached)
+fn parse_literal_null(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   if consume_literal(parser, "null".as_slice()):
     return Ok<JsonValue> { value: JsonNull {} }
   Err<JsonError> { error: json_parse_error("json parse error: invalid literal") }
 
-fn parse_literal_true(parser: JsonParser): () -> Result<JsonValue, JsonError>
+@result(detached)
+fn parse_literal_true(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   if consume_literal(parser, "true".as_slice()):
     return Ok<JsonValue> { value: JsonBool { value: true } }
   Err<JsonError> { error: json_parse_error("json parse error: invalid literal") }
 
-fn parse_literal_false(parser: JsonParser): () -> Result<JsonValue, JsonError>
+@result(detached)
+fn parse_literal_false(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   if consume_literal(parser, "false".as_slice()):
     return Ok<JsonValue> { value: JsonBool { value: false } }
   Err<JsonError> { error: json_parse_error("json parse error: invalid literal") }
 
-fn parse_string_value(parser: JsonParser): () -> Result<JsonValue, JsonError>
+@result(detached)
+fn parse_string_value(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   match(parse_string(parser))
     Ok<String> { value }:
       Ok<JsonValue> { value: JsonString { value: value } }
     Err<JsonError> { error }:
       Err<JsonError> { error: error }
 
-fn parse_string(parser: JsonParser): () -> Result<String, JsonError>
+@result(detached)
+fn parse_string(~parser: JsonParser): () -> Result<String, JsonError>
   if not consume_byte(parser, 34):
     return Err<JsonError> { error: json_parse_error("json parse error: expected string") }
 
-  let bytes = JsonOutput::init()
+  let ~bytes = Array<i32>::with_capacity(16)
   while true:
     let byte = next_byte_or(parser, -1)
     if byte < 0:
@@ -2022,7 +1970,8 @@ fn parse_string(parser: JsonParser): () -> Result<String, JsonError>
 
   Err<JsonError> { error: json_parse_error("json parse error: unterminated string") }
 
-fn parse_array(parser: JsonParser): () -> Result<JsonValue, JsonError>
+@result(detached)
+fn parse_array(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   parser.advance(1)
   skip_whitespace(parser)
 
@@ -2047,31 +1996,25 @@ fn parse_array(parser: JsonParser): () -> Result<JsonValue, JsonError>
 
   Err<JsonError> { error: json_parse_error("json parse error: expected ',' or ']' in array") }
 
-fn parse_object(parser: JsonParser): () -> Result<JsonValue, JsonError>
+@result(detached)
+fn parse_object(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   parser.advance(1)
   skip_whitespace(parser)
 
-  var fields = Dict<String, JsonValue>::init()
+  let ~fields = Dict<String, JsonValue>::init()
   if consume_byte(parser, 125):
     return Ok<JsonValue> { value: JsonObject { value: fields } }
 
   while true:
     match(parse_string(parser))
       Ok<String> { value: key }:
-        let key_slice = key.as_slice()
-        let ~key_bytes = Array<i32>::with_capacity(key_slice.byte_len())
-        var key_index = 0
-        while key_index < key_slice.byte_len():
-          key_bytes.push(byte_at_or(key_slice, key_index, 0))
-          key_index = key_index + 1
-        let stable_key = new_string(key_bytes.to_fixed_array())
         skip_whitespace(parser)
         if not consume_byte(parser, 58):
           return Err<JsonError> { error: json_parse_error("json parse error: expected ':' after object key") }
         skip_whitespace(parser)
         match(parse_value(parser))
           Ok<JsonValue> { value }:
-            fields = fields.setting(stable_key, value)
+            let _ = fields.set(key, value)
           Err<JsonError> { error }:
             return Err<JsonError> { error: error }
       Err<JsonError> { error }:
@@ -2087,7 +2030,8 @@ fn parse_object(parser: JsonParser): () -> Result<JsonValue, JsonError>
 
   Err<JsonError> { error: json_parse_error("json parse error: expected ',' or '}' in object") }
 
-fn parse_number(parser: JsonParser): () -> Result<JsonValue, JsonError>
+@result(detached)
+fn parse_number(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   let start = parser.position()
   if consume_byte(parser, 45):
     void
@@ -2144,7 +2088,9 @@ fn parse_number(parser: JsonParser): () -> Result<JsonValue, JsonError>
 /// - `value`: Value to serialize.
 /// - `pretty`: Enables indentation/newlines when `true`.
 /// - `depth`: Current indentation depth.
-fn write_json_value(out: JsonOutput, value: JsonValue, pretty: bool, depth: i32) -> Result<Unit, JsonError>
+@result(detached)
+@builder(into: out)
+fn write_json_value(~out: Array<i32>, value: JsonValue, pretty: bool, depth: i32) -> Result<Unit, JsonError>
   value.match(active)
     JsonNull:
       append_ascii(out, "null".as_slice())
@@ -2168,8 +2114,10 @@ fn write_json_value(out: JsonOutput, value: JsonValue, pretty: bool, depth: i32)
     JsonObject:
       append_json_object(out, active.value, pretty, depth)
 
+@result(detached)
+@builder(into: out)
 fn append_json_array(
-  out: JsonOutput,
+  ~out: Array<i32>,
   items: Array<JsonValue>,
   pretty: bool,
   depth: i32
@@ -2207,8 +2155,10 @@ fn append_json_array(
   out.push(93)
   Ok<Unit> { value: Unit {} }
 
+@result(detached)
+@builder(into: out)
 fn append_json_object(
-  out: JsonOutput,
+  ~out: Array<i32>,
   value: Dict<String, JsonValue>,
   pretty: bool,
   depth: i32
@@ -2249,6 +2199,7 @@ fn append_json_object(
   out.push(125)
   Ok<Unit> { value: Unit {} }
 
+@builder(into: out)
 fn append_json_string(~out: Array<i32>, value: StringSlice) -> void
   out.push(34)
   var index = 0
@@ -2305,16 +2256,11 @@ fn append_indent(~out: Array<i32>, depth: i32) -> void
     out.push(32)
     index = index + 1
 
+@builder(into: out)
 fn append_ascii(~out: Array<i32>, value: StringSlice) -> void
-  var index = 0
-  while index < value.byte_len():
-    match(value.get_byte(index))
-      Some<i32> { value: byte }:
-        out.push(byte)
-      None:
-        return void
-    index = index + 1
+  append_string(out, value)
 
+@builder(into: out)
 fn append_string(~out: Array<i32>, value: StringSlice) -> void
   var index = 0
   while index < value.byte_len():
@@ -2325,76 +2271,7 @@ fn append_string(~out: Array<i32>, value: StringSlice) -> void
         return void
     index = index + 1
 
-fn append_json_string(out: JsonOutput, value: StringSlice) -> void
-  out.push(34)
-  var index = 0
-  while index < value.byte_len():
-    let byte = byte_at_or(value, index, -1)
-    if not append_json_escape(out, byte):
-      out.push(byte)
-    index = index + 1
-  out.push(34)
-
-fn append_json_escape(out: JsonOutput, byte: i32) -> bool
-  if byte == 34:
-    out.push(92)
-    out.push(34)
-    return true
-  if byte == 92:
-    out.push(92)
-    out.push(92)
-    return true
-  if byte == 8:
-    out.push(92)
-    out.push(98)
-    return true
-  if byte == 12:
-    out.push(92)
-    out.push(102)
-    return true
-  if byte == 10:
-    out.push(92)
-    out.push(110)
-    return true
-  if byte == 13:
-    out.push(92)
-    out.push(114)
-    return true
-  if byte == 9:
-    out.push(92)
-    out.push(116)
-    return true
-  if byte >= 0 and byte < 32:
-    out.push(92)
-    out.push(117)
-    out.push(48)
-    out.push(48)
-    out.push(hex_digit(byte / 16))
-    out.push(hex_digit(byte - (byte / 16) * 16))
-    return true
-  false
-
-fn append_indent(out: JsonOutput, depth: i32) -> void
-  var index = 0
-  while index < depth:
-    out.push(32)
-    out.push(32)
-    index = index + 1
-
-fn append_ascii(out: JsonOutput, value: StringSlice) -> void
-  append_string(out, value)
-
-fn append_string(out: JsonOutput, value: StringSlice) -> void
-  var index = 0
-  while index < value.byte_len():
-    match(value.get_byte(index))
-      Some<i32> { value: byte }:
-        out.push(byte)
-      None:
-        return void
-    index = index + 1
-
-fn consume_digits(parser: JsonParser) -> void
+fn consume_digits(~parser: JsonParser) -> void
   while true:
     match(peek(parser))
       Some<i32> { value }:
@@ -2405,7 +2282,7 @@ fn consume_digits(parser: JsonParser) -> void
       None:
         break
 
-fn consume_literal(parser: JsonParser, literal: StringSlice) -> bool
+fn consume_literal(~parser: JsonParser, literal: StringSlice) -> bool
   let start = parser.position()
   var index = 0
   while index < literal.byte_len():
@@ -2420,7 +2297,7 @@ fn consume_literal(parser: JsonParser, literal: StringSlice) -> bool
     index = index + 1
   true
 
-fn skip_whitespace(parser: JsonParser) -> void
+fn skip_whitespace(~parser: JsonParser) -> void
   while true:
     match(peek(parser))
       Some<i32> { value }:
@@ -2441,7 +2318,7 @@ fn peek_byte_or(parser: JsonParser, fallback: i32) -> i32
     None:
       fallback
 
-fn next_byte(parser: JsonParser): () -> Option<i32>
+fn next_byte(~parser: JsonParser): () -> Option<i32>
   match(parser.source.get_byte(parser.position()))
     Some<i32> { value }:
       parser.advance(1)
@@ -2449,14 +2326,14 @@ fn next_byte(parser: JsonParser): () -> Option<i32>
     None:
       None {}
 
-fn next_byte_or(parser: JsonParser, fallback: i32) -> i32
+fn next_byte_or(~parser: JsonParser, fallback: i32) -> i32
   match(next_byte(parser))
     Some<i32> { value }:
       value
     None:
       fallback
 
-fn consume_byte(parser: JsonParser, expected: i32) -> bool
+fn consume_byte(~parser: JsonParser, expected: i32) -> bool
   match(peek(parser))
     Some<i32> { value }:
       if value != expected:
@@ -2466,9 +2343,10 @@ fn consume_byte(parser: JsonParser, expected: i32) -> bool
     None:
       false
 
+@builder(into: out)
 fn append_escaped(
-  out: JsonOutput,
-  parser: JsonParser,
+  ~out: Array<i32>,
+  ~parser: JsonParser,
   { escaped: i32 }
 ) -> i32
   if escaped == 34:
@@ -2519,7 +2397,7 @@ fn append_escaped(
   append_codepoint(out, lead)
   0
 
-fn read_unicode_escape(parser: JsonParser) -> i32
+fn read_unicode_escape(~parser: JsonParser) -> i32
   var codepoint = 0
   var index = 0
   while index < 4:
@@ -2534,7 +2412,7 @@ fn read_unicode_escape(parser: JsonParser) -> i32
     index = index + 1
   codepoint
 
-fn append_codepoint(out: JsonOutput, codepoint: i32) -> void
+fn append_codepoint(~out: Array<i32>, codepoint: i32) -> void
   if codepoint < 0:
     append_replacement(out)
     return void
@@ -2561,13 +2439,14 @@ fn append_codepoint(out: JsonOutput, codepoint: i32) -> void
     return void
   append_replacement(out)
 
-fn append_replacement(out: JsonOutput) -> void
+fn append_replacement(~out: Array<i32>) -> void
   out.push(239)
   out.push(191)
   out.push(189)
 
-fn string_from_utf8(bytes: JsonOutput): () -> Result<String, JsonError>
-  Ok<String> { value: bytes.finish() }
+@result(detached)
+fn string_from_utf8(bytes: Array<i32>): () -> Result<String, JsonError>
+  Ok<String> { value: new_string(bytes.to_fixed_array()) }
 
 fn byte_at_or(value: StringSlice, index: i32, fallback: i32) -> i32
   match(value.get_byte(index))
@@ -2782,8 +2661,10 @@ fn pow10_negative_i32(value: i32) -> f64
     remaining = half
   out
 
+@result(detached)
 fn json_parse_error(message: String) -> JsonError
-  JsonError { code: 1, message: message }
+  JsonError { code: 1, message: message.as_slice().to_string() }
 
+@result(fresh)
 fn json_stringify_error(message: String) -> JsonError
   JsonError { code: 2, message: message }

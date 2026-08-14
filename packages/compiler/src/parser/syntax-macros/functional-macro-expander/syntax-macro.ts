@@ -55,6 +55,7 @@ const RESERVED_ATTRIBUTE_NAMES = new Set([
   "intrinsic_type",
   "isolated",
   "operation",
+  "result",
   "type",
 ]);
 

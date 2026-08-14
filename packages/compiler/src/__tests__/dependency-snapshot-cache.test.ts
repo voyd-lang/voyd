@@ -182,12 +182,39 @@ describe("compiler dependency snapshots", () => {
         "use pkg::dep::all",
         "",
         "pub fn main() -> i32",
-        "  read(PackageBox { value: 7 })",
+        "  let ~builder = PackageBuilder<i32> { value: 7, count: 0 }",
+        "  builder.bump().bump().finish() + read(PackageBox { value: 7 })",
       ].join("\n"),
       [packageRootPath]: ["#!no_prelude", "pub use src::api::all"].join("\n"),
       [packageApiPath]: [
         "#!no_prelude",
         "pub obj PackageBox { api value: i32 }",
+        "pub obj PackageBuilder<T> { api value: T, api count: i32 }",
+        "",
+        "impl<T> PackageBuilder<T>",
+        "  api fn bump(~self) -> ~self",
+        "    self.count = self.count + 1",
+        "    self",
+        "",
+        "  api fn finish(~self) -> i32",
+        "    self.count",
+        "",
+        "@result(detached)",
+        "pub fn detached<T>(value: T) -> i32",
+        "  0",
+        "",
+        "@result(fresh)",
+        "pub fn fresh_box() -> PackageBox",
+        "  PackageBox { value: 0 }",
+        "",
+        "pub fn replace(~value: i32) -> ~value",
+        "  value",
+        "",
+        "@staged(into: out)",
+        "pub fn copy_value(source: PackageBox, ~out: PackageBox) -> i32",
+        "  let snapshot = source.value",
+        "  out.value = snapshot",
+        "  snapshot",
         "",
         "pub fn read(value: Borrow<PackageBox>) -> i32",
         "  value.value",
@@ -213,6 +240,27 @@ describe("compiler dependency snapshots", () => {
     expect(packageInterface).not.toHaveProperty("summaries");
     expect(packageInterface).not.toHaveProperty("coercions");
 
+    const resultIdentityFor = (name: string) => {
+      const declaration = packageInterface.exports.find(
+        (entry) => entry.name === name,
+      )?.declarations[0];
+      expect(declaration?.signature).toBeDefined();
+      const roundTripped = JSON.parse(JSON.stringify(packageInterface));
+      return projectPackageSemanticInterface(roundTripped).callables.get(
+        declaration!.key,
+      )?.signature?.resultIdentity;
+    };
+    expect(resultIdentityFor("detached")).toEqual({ kind: "detached" });
+    expect(resultIdentityFor("fresh_box")).toEqual({ kind: "fresh" });
+    expect(resultIdentityFor("replace")).toEqual({
+      kind: "same-place",
+      parameterIndex: 0,
+    });
+    expect(
+      packageInterface.exports.find((entry) => entry.name === "copy_value")
+        ?.declarations[0]?.signature?.stagedAccess,
+    ).toEqual({ destinationParameterIndex: 1 });
+
     const editedFiles = {
       ...files,
       [mainPath]: files[mainPath]!.replace("value: 7", "value: 8"),
@@ -221,6 +269,20 @@ describe("compiler dependency snapshots", () => {
 
     expect(second.prepared.hit).toBe(true);
     expect(second.analyzed.recomputedModuleIds).toEqual(["src::main"]);
+    expect(
+      second.analyzed.semantics
+        .get("pkg:dep::api")!
+        .exports.packageSemanticInterface!.exports.find(
+          (entry) => entry.name === "detached",
+        )?.declarations[0]?.signature?.resultIdentity,
+    ).toEqual({ kind: "detached" });
+    expect(
+      second.analyzed.semantics
+        .get("pkg:dep::api")!
+        .exports.packageSemanticInterface!.exports.find(
+          (entry) => entry.name === "copy_value",
+        )?.declarations[0]?.signature?.stagedAccess,
+    ).toEqual({ destinationParameterIndex: 1 });
   });
 
   it("isolates lazy source-import metadata between snapshot hits", async () => {
@@ -270,6 +332,7 @@ describe("compiler dependency snapshots", () => {
 pub obj PublicBox { api visible: i32, hidden: i32 }
 
 pub trait Reader
+  @result(detached)
   fn read(self, value: i32) -> i32
   fn read(self, value: bool) -> i32
   @isolated
@@ -284,6 +347,16 @@ pub fn identity(value: i32) -> i32
 
 pub fn defaulted(value: i32 = 0) -> i32
   value
+
+@staged(into: out)
+pub fn copy_value(source: PublicBox, ~out: PublicBox) -> i32
+  let snapshot = source.visible
+  out.visible = snapshot
+  snapshot
+
+@builder(into: out)
+pub fn build_value(source: PublicBox, ~out: PublicBox) -> void
+  out.visible = source.visible
 `;
     const interfaceFor = async (privatePrefix: string) => {
       const graph = await loadModuleGraph({
@@ -316,10 +389,42 @@ pub fn defaulted(value: i32 = 0) -> i32
         expect.objectContaining({ name: "stable", kind: "trait-method" }),
       ]),
     );
+    expect(
+      first.exports
+        .find((entry) => entry.name === "Reader")
+        ?.members.find((member) => member.resultIdentity?.kind === "detached")
+        ?.resultIdentity,
+    ).toEqual({ kind: "detached" });
+    const detachedTraitMethod = first.exports
+      .find((entry) => entry.name === "Reader")
+      ?.members.find((member) => member.resultIdentity?.kind === "detached");
+    expect(
+      projected.callables.get(detachedTraitMethod!.key)?.resultIdentity,
+    ).toEqual({ kind: "detached" });
+    const stagedDeclaration = first.exports.find(
+      (entry) => entry.name === "copy_value",
+    )?.declarations[0];
+    expect(stagedDeclaration?.signature?.stagedAccess).toEqual({
+      destinationParameterIndex: 1,
+    });
+    expect(
+      projected.callables.get(stagedDeclaration!.key)?.signature?.stagedAccess,
+    ).toEqual({ destinationParameterIndex: 1 });
+    const builderDeclaration = first.exports.find(
+      (entry) => entry.name === "build_value",
+    )?.declarations[0];
+    expect(builderDeclaration?.signature?.builderAccess).toEqual({
+      destinationParameterIndex: 1,
+    });
+    expect(
+      projected.callables.get(builderDeclaration!.key)?.signature
+        ?.builderAccess,
+    ).toEqual({ destinationParameterIndex: 1 });
     const isolatedSummaryId = first.exports
       .find((entry) => entry.name === "Reader")
-      ?.members.find((member) => member.name === "stable")
-      ?.ordinaryMutationSummaryId;
+      ?.members.find(
+        (member) => member.name === "stable",
+      )?.ordinaryMutationSummaryId;
     const isolatedSummary = first.ordinaryMutationSummaries.find(
       (entry) => entry.id === isolatedSummaryId,
     )?.summary;
@@ -348,7 +453,7 @@ pub fn defaulted(value: i32 = 0) -> i32
     ).toBeGreaterThanOrEqual(4);
     expect(JSON.stringify(first)).toContain("visible");
     expect(JSON.stringify(first)).not.toContain("hidden");
-    expect(first.version).toBe(4);
+    expect(first.version).toBe(5);
     expect(first.ordinaryMutationSummaries.length).toBeGreaterThan(0);
     first.ordinaryMutationSummaries.forEach(({ summary }) => {
       expect(Object.keys(summary).sort()).toEqual([

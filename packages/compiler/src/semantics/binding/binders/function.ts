@@ -106,6 +106,19 @@ export const bindFunctionDecl = (
   });
 
   const visibility = options.visibilityOverride ?? decl.visibility;
+  const resultIdentity = decl.signature.resultIdentity;
+  const returnTypeExpr =
+    resultIdentity?.kind === "same-place"
+      ? boundParams[resultIdentity.parameterIndex]?.typeExpr
+      : decl.signature.returnType;
+  if (resultIdentity?.kind === "same-place" && !returnTypeExpr) {
+    const parameterName =
+      boundParams[resultIdentity.parameterIndex]?.name ??
+      `#${resultIdentity.parameterIndex + 1}`;
+    throw new Error(
+      `same-place return parameter '${parameterName}' must have a known type`,
+    );
+  }
   const fnDecl = ctx.decls.registerFunction({
     name: decl.signature.name.value,
     form: decl.form,
@@ -115,7 +128,10 @@ export const bindFunctionDecl = (
     memberVisibility: options.memberVisibility,
     params: boundParams,
     typeParameters,
-    returnTypeExpr: decl.signature.returnType,
+    returnTypeExpr,
+    resultIdentity,
+    stagedAccess: decl.signature.stagedAccess,
+    builderAccess: decl.signature.builderAccess,
     effectTypeExpr: decl.signature.effectType,
     body: decl.body,
     moduleIndex: options.moduleIndex ?? ctx.nextModuleIndex++,

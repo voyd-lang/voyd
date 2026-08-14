@@ -34,46 +34,46 @@ pub fn operation_json(
   operation: Operation,
   { prefix: String, include_doc_comments: bool }
 ) -> RenderedOperation
-  var components = Dict<String, JsonValue>::init()
-  var out = Dict<String, JsonValue>::init()
-  out = setting_optional_string(out, "summary", operation.summary)
-  out = setting_optional_string(out, "description", operation.description)
-  out = setting_optional_string(out, "operationId", operation.operation_id)
+  let ~components = Dict<String, JsonValue>::init()
+  let ~out = Dict<String, JsonValue>::init()
+  set_optional_string(out, "summary", operation.summary)
+  set_optional_string(out, "description", operation.description)
+  set_optional_string(out, "operationId", operation.operation_id)
   if not operation.tags.is_empty():
     let ~tags = Array<JsonValue>::with_capacity(operation.tags.len())
     var tag_index = 0
     while tag_index < operation.tags.len():
       tags.push(JsonString { value: operation.tags.at(tag_index) })
       tag_index = tag_index + 1
-    out = out.setting("tags", JsonArray { value: tags })
+    let _ = out.set("tags", JsonArray { value: tags })
 
-  var parameters = Array<JsonValue>::init()
+  let ~parameters = Array<JsonValue>::init()
   let path_parameters = render_parameters(operation.path_params, location: "path".as_slice(), required: true, prefix: prefix.concat("Path".as_slice()), include_doc_comments: include_doc_comments)
-  parameters = parameters.extended(path_parameters.value)
-  components = components.merged(path_parameters.components)
+  parameters.extend(path_parameters.value)
+  components.extend(path_parameters.components)
   let query_parameters = render_parameters(operation.query_params, location: "query".as_slice(), required: false, prefix: prefix.concat("Query".as_slice()), include_doc_comments: include_doc_comments)
-  parameters = parameters.extended(query_parameters.value)
-  components = components.merged(query_parameters.components)
+  parameters.extend(query_parameters.value)
+  components.extend(query_parameters.components)
   let header_parameters = render_parameters(operation.header_params, location: "header".as_slice(), required: false, prefix: prefix.concat("Header".as_slice()), include_doc_comments: include_doc_comments)
-  parameters = parameters.extended(header_parameters.value)
-  components = components.merged(header_parameters.components)
+  parameters.extend(header_parameters.value)
+  components.extend(header_parameters.components)
   let cookie_parameters = render_parameters(operation.cookie_params, location: "cookie".as_slice(), required: false, prefix: prefix.concat("Cookie".as_slice()), include_doc_comments: include_doc_comments)
-  parameters = parameters.extended(cookie_parameters.value)
-  components = components.merged(cookie_parameters.components)
+  parameters.extend(cookie_parameters.value)
+  components.extend(cookie_parameters.components)
   let rendered_parameter_overrides = render_parameter_overrides(operation.parameter_overrides, prefix: prefix, include_doc_comments: include_doc_comments)
-  components = components.merged(rendered_parameter_overrides.components)
-  parameters = apply_parameter_overrides(parameters, rendered_parameter_overrides.values)
-  if not parameters.is_empty():
-    out = out.setting("parameters", JsonArray { value: parameters })
+  components.extend(rendered_parameter_overrides.components)
+  let overridden_parameters = apply_parameter_overrides(parameters, rendered_parameter_overrides.values)
+  if not overridden_parameters.is_empty():
+    let _ = out.set("parameters", JsonArray { value: overridden_parameters })
 
   if operation.has_request_body:
-    var body = Dict<String, JsonValue>::init()
-    body = body.setting("required", JsonBool { value: operation.request_required })
-    body = setting_optional_string(body, "description", operation.request_description)
+    let ~body = Dict<String, JsonValue>::init()
+    let _ = body.set("required", JsonBool { value: operation.request_required })
+    set_optional_string(body, "description", operation.request_description)
     let request_content = match(operation.request_body)
       Some<Shape> { value }:
         let rendered_request_schema = schema_for(value, prefix: prefix.concat("Request".as_slice()), include_doc_comments: include_doc_comments)
-        components = components.merged(rendered_request_schema.components)
+        components.extend(rendered_request_schema.components)
         let inferred_request_schema = rendered_request_schema.value
         let request_schema = apply_schema_docs(
           inferred_request_schema,
@@ -96,30 +96,30 @@ pub fn operation_json(
           )
         else:
           content_without_schema(operation.request_content_type)
-    body = body.setting("content", request_content)
-    out = out.setting("requestBody", JsonObject { value: body })
+    let _ = body.set("content", request_content)
+    let _ = out.set("requestBody", JsonObject { value: body })
 
   if not operation.responses.is_empty():
     let rendered_responses = response_contracts_json(operation.responses, schema_docs: operation.response_schema_docs, prefix: prefix, include_doc_comments: include_doc_comments)
-    components = components.merged(rendered_responses.components)
-    out = out.setting("responses", rendered_responses.value)
+    components.extend(rendered_responses.components)
+    let _ = out.set("responses", rendered_responses.value)
     return RenderedOperation { value: JsonObject { value: out }, components: components }
 
   if operation.opaque_response:
-    var opaque_responses = Dict<String, JsonValue>::init()
-    var opaque_response = Dict<String, JsonValue>::init()
-    opaque_response = opaque_response.setting("description", JsonString { value: "Opaque response".to_string() })
-    opaque_responses = opaque_responses.setting("default", JsonObject { value: opaque_response })
-    out = out.setting("responses", JsonObject { value: opaque_responses })
+    let ~opaque_responses = Dict<String, JsonValue>::init()
+    let ~opaque_response = Dict<String, JsonValue>::init()
+    let _ = opaque_response.set("description", JsonString { value: "Opaque response".to_string() })
+    let _ = opaque_responses.set("default", JsonObject { value: opaque_response })
+    let _ = out.set("responses", JsonObject { value: opaque_responses })
     return RenderedOperation { value: JsonObject { value: out }, components: components }
 
-  var responses = Dict<String, JsonValue>::init()
-  var response = Dict<String, JsonValue>::init()
-  response = response.setting("description", JsonString { value: operation.response_description })
+  let ~responses = Dict<String, JsonValue>::init()
+  let ~response = Dict<String, JsonValue>::init()
+  let _ = response.set("description", JsonString { value: operation.response_description })
   match(operation.response_body)
     Some<Shape> { value }:
       let rendered_response_schema = schema_for(value, prefix: prefix.concat("Response".as_slice()), include_doc_comments: include_doc_comments)
-      components = components.merged(rendered_response_schema.components)
+      components.extend(rendered_response_schema.components)
       let inferred_response_schema = rendered_response_schema.value
       let schema = apply_schema_docs(
         inferred_response_schema,
@@ -131,16 +131,16 @@ pub fn operation_json(
         components: components
       )
       if operation.response_content_type.equals("text/event-stream"):
-        var stream_schema = Dict<String, JsonValue>::init()
-        stream_schema = stream_schema.setting("type", json_string("string"))
-        stream_schema = stream_schema.setting("x-voyd-event-schema", schema)
-        response = response.setting("content", content_json(operation.response_content_type, JsonObject { value: stream_schema }))
+        let ~stream_schema = Dict<String, JsonValue>::init()
+        let _ = stream_schema.set("type", json_string("string"))
+        let _ = stream_schema.set("x-voyd-event-schema", schema)
+        let _ = response.set("content", content_json(operation.response_content_type, JsonObject { value: stream_schema }))
       else:
-        response = response.setting("content", content_json(operation.response_content_type, schema))
+        let _ = response.set("content", content_json(operation.response_content_type, schema))
     None:
       void
-  responses = responses.setting(to_string(operation.response_status), JsonObject { value: response })
-  out = out.setting("responses", JsonObject { value: responses })
+  let _ = responses.set(to_string(operation.response_status), JsonObject { value: response })
+  let _ = out.set("responses", JsonObject { value: responses })
   RenderedOperation { value: JsonObject { value: out }, components: components }
 
 fn apply_parameter_overrides(
@@ -185,7 +185,7 @@ fn render_parameter_overrides(
   { prefix: String, include_doc_comments: bool }
 ) -> RenderedParameterOverrides
   let ~rendered = Array<RenderedParameterOverride>::with_capacity(overrides.len())
-  var components = Dict<String, JsonValue>::init()
+  let ~components = Dict<String, JsonValue>::init()
   var override_index = 0
   while override_index < overrides.len():
     let override = overrides.at(override_index)
@@ -194,7 +194,7 @@ fn render_parameter_overrides(
       prefix: prefix.concat("Parameter".as_slice()),
       include_doc_comments: include_doc_comments
     )
-    components = components.merged(result.components)
+    components.extend(result.components)
     rendered.push(RenderedParameterOverride {
       name: override.name,
       location: override.location,
@@ -207,20 +207,20 @@ fn render_parameter_override(
   parameter: OpenApiParameterContract,
   { prefix: String, include_doc_comments: bool }
 ) -> RenderedSchema
-  var out = Dict<String, JsonValue>::init()
-  var components = Dict<String, JsonValue>::init()
-  out = out.setting("name", JsonString { value: parameter.name })
-  out = out.setting("in", JsonString { value: parameter.location })
+  let ~out = Dict<String, JsonValue>::init()
+  let ~components = Dict<String, JsonValue>::init()
+  let _ = out.set("name", JsonString { value: parameter.name })
+  let _ = out.set("in", JsonString { value: parameter.location })
   let required = parameter.required or parameter.location.equals("path")
-  out = out.setting("required", JsonBool { value: required })
-  out = setting_optional_string(out, "description", parameter.description)
+  let _ = out.set("required", JsonBool { value: required })
+  set_optional_string(out, "description", parameter.description)
   match(parameter.schema)
     Some<Shape> { value }:
       let rendered_schema = schema_for(value, prefix: prefix, include_doc_comments: include_doc_comments)
-      components = components.merged(rendered_schema.components)
-      out = out.setting("schema", rendered_schema.value)
+      components.extend(rendered_schema.components)
+      let _ = out.set("schema", rendered_schema.value)
     None:
-      out = out.setting("schema", JsonObject { value: Dict<String, JsonValue>::init() })
+      let _ = out.set("schema", JsonObject { value: Dict<String, JsonValue>::init() })
   RenderedSchema {
     value: JsonObject { value: out },
     components: components
@@ -243,15 +243,17 @@ fn string_value(fields: Dict<String, JsonValue>, key: StringSlice) -> String
 fn string_value(fields: Dict<String, JsonValue>, key: String) -> String
   string_value(fields, key.as_slice())
 
-fn setting_optional_string(target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> Dict<String, JsonValue>
+@staged(into: target)
+fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> void
   match(value)
     Some<String> { value }:
-      target.setting(key.to_string(), JsonString { value: value })
+      let _ = target.set(key.to_string(), JsonString { value: value })
     None:
-      target
+      void
 
-fn setting_optional_string(target: Dict<String, JsonValue>, key: String, value: Option<String>) -> Dict<String, JsonValue>
-  setting_optional_string(target, key.as_slice(), value)
+@staged(into: target)
+fn set_optional_string(~target: Dict<String, JsonValue>, key: String, value: Option<String>) -> void
+  set_optional_string(target, key.as_slice(), value)
 
 fn json_string(value: StringSlice) -> JsonValue
   JsonString { value: value.to_string() }

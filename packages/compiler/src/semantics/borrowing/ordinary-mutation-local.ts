@@ -45,6 +45,8 @@ type LocalResultAliasOrigin = {
   targetPath: readonly PlaceProjection[];
   formation: number;
   scopeRoot?: HirExprId;
+  /** A fresh result owns its outer identity; only values selected from it retain this origin. */
+  outerIndependent?: true;
 };
 
 export const checkOrdinaryLocalMutationSafety = ({
@@ -174,6 +176,39 @@ export const checkOrdinaryLocalMutationSafety = ({
     typing,
     resolveContext,
   });
+  const exactStagedDestinationCallerParameters = (
+    call: CallableBorrowIndexCall,
+  ): readonly number[] => {
+    const staged = call.signature?.stagedAccess;
+    if (
+      !staged ||
+      call.openTraitDispatch ||
+      call.ordinaryDynamicBound ||
+      call.argumentPlanAmbiguous ||
+      call.targets.length !== 1 ||
+      call.maySuspend
+    ) {
+      return [];
+    }
+    const destination = indexCallArgumentFor(
+      call,
+      staged.destinationParameterIndex,
+    );
+    if (!destination) return [];
+    const direct = destination.place
+      ? index.parameterPlaces.get(resolvePlace(destination.place).root)?.parameter
+      : undefined;
+    const assigned = destination.place
+      ? (assignedCallerOrigins.get(destination.place.root) ?? [])
+      : [];
+    return Array.from(
+      new Set([
+        ...(direct === undefined ? [] : [direct]),
+        ...(destination.callerParameterOrigins ?? []),
+        ...assigned,
+      ]),
+    );
+  };
 
   const mutableRoots = new Set(mutableBindings.map(({ symbol }) => symbol));
   const capturedMutable = lambdas.flatMap((lambda) =>
@@ -389,7 +424,7 @@ export const checkOrdinaryLocalMutationSafety = ({
       });
 
       if (!callResultMayCarryReference(call, typing)) return;
-      if (callResultIsIndependentStableHandle(call, typing, symbolTable)) {
+      if (callResultHasIndependentOuterIdentity(call, typing, symbolTable)) {
         return;
       }
       const borrowedArguments = call.arguments.filter((argument) => {
@@ -456,6 +491,43 @@ export const checkOrdinaryLocalMutationSafety = ({
   const callsByExpression = new Map(
     index.calls.map((call) => [call.exprId, call]),
   );
+  index.calls.forEach((call) => {
+    const identity = resultIdentityForCall(call)?.kind ?? "conservative";
+    incrementCompilerPerfCounter(
+      `borrowing.resultIdentity.calls.${identity === "same-place" ? "samePlace" : identity}`,
+    );
+    if (identity !== "same-place") return;
+    if (call.resultUse === "ignored") return;
+    if (
+      returnedExpressions.has(call.exprId) &&
+      index.signature?.resultIdentity?.kind === "same-place"
+    ) {
+      return;
+    }
+    const parentId = parentByExpression.get(call.exprId);
+    const parentCall =
+      typeof parentId === "number"
+        ? callsByExpression.get(parentId)
+        : undefined;
+    const consumingArgument = parentCall?.arguments.find(
+      (argument) => argument.expression === call.exprId,
+    );
+    if (consumingArgument?.bindingKind === "mutable-ref") return;
+    incrementCompilerPerfCounter(
+      "borrowing.resultIdentity.samePlace.invalidUses",
+    );
+    diagnostics.push(
+      diagnosticFromCode({
+        code: "TY0056",
+        params: {
+          kind: "invalid-same-place-use",
+          reason:
+            "the transferred capability must be consumed immediately by a mutable receiver or argument",
+        },
+        span: call.span,
+      }),
+    );
+  });
   const resultAliasOriginsBySymbol = new Map<
     SymbolId,
     readonly LocalResultAliasOrigin[]
@@ -472,7 +544,8 @@ export const checkOrdinaryLocalMutationSafety = ({
       call.resultUse === "ignored" ||
       call.ordinaryMutationFreeConstruction === true ||
       !callResultMayCarryReference(call, typing) ||
-      callResultIsIndependentStableHandle(call, typing, symbolTable)
+      callResultIsDetached(call, typing, symbolTable) ||
+      resultIdentityForCall(call)?.kind === "same-place"
     ) {
       return [];
     }
@@ -543,6 +616,9 @@ export const checkOrdinaryLocalMutationSafety = ({
         source,
         targetPath: [],
         formation: positionByExpression.get(call.exprId) ?? -1,
+        ...(resultIdentityForCall(call)?.kind === "fresh"
+          ? { outerIndependent: true as const }
+          : {}),
       }));
     });
   };
@@ -569,7 +645,8 @@ export const checkOrdinaryLocalMutationSafety = ({
         call.resultUse !== "ignored" &&
         call.ordinaryMutationFreeConstruction !== true &&
         callResultMayCarryReference(call, typing) &&
-        !callResultIsIndependentStableHandle(call, typing, symbolTable),
+        !callResultIsDetached(call, typing, symbolTable) &&
+        resultIdentityForCall(call)?.kind !== "same-place",
       callArgumentCanCarryOrigin: (call, argument) => {
         const returnType = call.signature?.returnType;
         return (
@@ -822,8 +899,10 @@ export const checkOrdinaryLocalMutationSafety = ({
             kind: mutablyAssignedPlaceExpressions.has(expressionId)
               ? ("write" as const)
               : ("read" as const),
+            endpoint: "direct" as const,
             place: resolvePlace(place),
             span: expression.span,
+            stagedDestinationCallerParameters: [] as readonly number[],
           },
         ]
       : [];
@@ -835,9 +914,15 @@ export const checkOrdinaryLocalMutationSafety = ({
       localSummaries,
       importedSummaries,
     });
+    const stagedDestinationCallerParameters =
+      exactStagedDestinationCallerParameters(call);
     return call.arguments.flatMap((argument) => {
-      const access = localAccessForCallArgument({ call, argument, summary });
-      if (access === OrdinaryParameterAccess.Unused) return [];
+      const accesses = localAccessesForCallArgument({
+        call,
+        argument,
+        summary,
+      });
+      if (accesses.length === 0) return [];
       const placesForArgument = argument.place
         ? [resolvePlace(argument.place)]
         : [];
@@ -903,24 +988,29 @@ export const checkOrdinaryLocalMutationSafety = ({
               ];
             });
           })();
-      return Array.from(
+      const argumentPlaces = Array.from(
         new Map(
           [...placesForArgument, ...originPlaces].map((place) => [
             placeKey(place),
             place,
           ]),
         ).values(),
-      ).map((place) => ({
-        expressionId: call.exprId,
-        position: positionByExpression.get(call.exprId) ?? -1,
-        retainedReachableAlias,
-        kind:
-          access === OrdinaryParameterAccess.Write
-            ? ("write" as const)
-            : ("read" as const),
-        place,
-        span: call.span,
-      }));
+      );
+      return argumentPlaces.flatMap((place) =>
+        accesses.map(({ access, endpoint }) => ({
+          expressionId: call.exprId,
+          position: positionByExpression.get(call.exprId) ?? -1,
+          retainedReachableAlias,
+          endpoint,
+          kind:
+            access === OrdinaryParameterAccess.Write
+              ? ("write" as const)
+              : ("read" as const),
+          place,
+          span: call.span,
+          stagedDestinationCallerParameters,
+        })),
+      );
     });
   });
   const localAccesses = [...directAccesses, ...callAccesses];
@@ -933,6 +1023,9 @@ export const checkOrdinaryLocalMutationSafety = ({
       .filter(
         (access) =>
           access.retainedReachableAlias === true &&
+          !access.stagedDestinationCallerParameters.includes(
+            mutableParameter.parameter,
+          ) &&
           access.place.root === mutableParameter.symbol &&
           projectionPathsOverlap(
             access.place.projections,
@@ -960,6 +1053,14 @@ export const checkOrdinaryLocalMutationSafety = ({
         access.position > alias.formation &&
         isWithinAliasScope(access.expressionId) &&
         access.place.root === alias.symbol &&
+        !(
+          alias.outerIndependent === true &&
+          access.kind === "write" &&
+          access.endpoint === "direct" &&
+          // Replacing the fresh outer or one of its slots does not reach a
+          // retained child. Reads and deeper projections still carry origins.
+          access.place.projections.length <= 1
+        ) &&
         resultAliasPathsOverlap(access.place.projections, alias.targetPath),
     );
     const sourceAccesses = localAccesses.filter(
@@ -993,6 +1094,7 @@ export const checkOrdinaryLocalMutationSafety = ({
           ),
         )
       : undefined;
+    const sourceParameter = index.parameterPlaces.get(alias.source.root)?.parameter;
     const conflict = [
       ...(firstAliasWrite && firstSourceAccessAfterAliasWrite
         ? [
@@ -1010,11 +1112,23 @@ export const checkOrdinaryLocalMutationSafety = ({
             },
           ]
         : []),
-    ].sort(
+    ]
+      .filter(
+        ({ aliasAccess, sourceAccess }) =>
+          aliasAccess.expressionId !== sourceAccess.expressionId ||
+          sourceParameter === undefined ||
+          !aliasAccess.stagedDestinationCallerParameters.includes(
+            sourceParameter,
+          ) ||
+          !sourceAccess.stagedDestinationCallerParameters.includes(
+            sourceParameter,
+          ),
+      )
+      .sort(
       (left, right) =>
         Math.max(left.aliasAccess.position, left.sourceAccess.position) -
         Math.max(right.aliasAccess.position, right.sourceAccess.position),
-    )[0];
+      )[0];
     if (!conflict) return;
     const aliasIsMutable = conflict.aliasAccess.kind === "write";
     const mutableAccess = aliasIsMutable
@@ -1433,15 +1547,20 @@ const localResultAliasOriginsForExpression = ({
       if (!call) return [];
       const directOrigins = callOrigins(call);
       if (!callCanCarryOrigin(call)) return [];
-      return distinctResultAliasOrigins([
-        ...directOrigins,
-        ...call.arguments.flatMap((argument) =>
-          typeof argument.expression === "number" &&
-          callArgumentCanCarryOrigin(call, argument)
-            ? originsOf(argument.expression)
-            : [],
-        ),
-      ]);
+      const resultIsFresh =
+        (call.resultIdentity ?? call.signature?.resultIdentity)?.kind ===
+        "fresh";
+      const argumentOrigins = call.arguments.flatMap((argument) =>
+        typeof argument.expression === "number" &&
+        callArgumentCanCarryOrigin(call, argument)
+          ? originsOf(argument.expression).map((origin) =>
+              resultIsFresh
+                ? { ...origin, outerIndependent: true as const }
+                : origin,
+            )
+          : [],
+      );
+      return distinctResultAliasOrigins([...directOrigins, ...argumentOrigins]);
     }
     case "block":
       return typeof expression.value === "number"
@@ -1512,10 +1631,13 @@ const selectResultAliasProjection = (
   projection: PlaceProjection,
 ): readonly LocalResultAliasOrigin[] =>
   origins.flatMap((origin) => {
-    if (origin.targetPath.length === 0) return [origin];
+    if (origin.targetPath.length === 0) {
+      const { outerIndependent: _outerIndependent, ...selected } = origin;
+      return [selected];
+    }
     const [head, ...tail] = origin.targetPath;
     return head && projectionPathsOverlap([head], [projection])
-      ? [{ ...origin, targetPath: tail }]
+      ? [{ ...origin, targetPath: tail, outerIndependent: undefined }]
       : [];
   });
 
@@ -1538,7 +1660,9 @@ const distinctResultAliasOrigins = (
       origins.map((origin) => [
         `${placeKey(origin.source)}=>${origin.targetPath
           .map((projection) => JSON.stringify(projection))
-          .join("/")}@${origin.formation}#${origin.scopeRoot ?? "callable"}`,
+          .join(
+            "/",
+          )}@${origin.formation}#${origin.scopeRoot ?? "callable"}#${origin.outerIndependent === true ? "outer" : "whole"}`,
         origin,
       ]),
     ).values(),
@@ -1549,7 +1673,7 @@ const widenResultAliasOrigins = (
 ): readonly LocalResultAliasOrigin[] => {
   const widened = new Map<string, LocalResultAliasOrigin>();
   origins.forEach((origin) => {
-    const key = `${placeKey(origin.source)}#${origin.scopeRoot ?? "callable"}`;
+    const key = `${placeKey(origin.source)}#${origin.scopeRoot ?? "callable"}#${origin.outerIndependent === true ? "outer" : "whole"}`;
     const current = widened.get(key);
     if (!current) {
       widened.set(key, origin);
@@ -1560,6 +1684,7 @@ const widenResultAliasOrigins = (
       targetPath: commonProjectionPrefix(current.targetPath, origin.targetPath),
       formation: Math.min(current.formation, origin.formation),
       scopeRoot: current.scopeRoot,
+      outerIndependent: current.outerIndependent,
     });
   });
   return Array.from(widened.values());
@@ -1590,19 +1715,23 @@ const resultAliasOriginSetsEqual = (
       (origin) =>
         `${placeKey(origin.source)}=>${origin.targetPath
           .map((projection) => JSON.stringify(projection))
-          .join("/")}@${origin.formation}#${origin.scopeRoot ?? "callable"}`,
+          .join(
+            "/",
+          )}@${origin.formation}#${origin.scopeRoot ?? "callable"}#${origin.outerIndependent === true ? "outer" : "whole"}`,
     ),
   );
   return left.every((origin) =>
     rightKeys.has(
       `${placeKey(origin.source)}=>${origin.targetPath
         .map((projection) => JSON.stringify(projection))
-        .join("/")}@${origin.formation}#${origin.scopeRoot ?? "callable"}`,
+        .join(
+          "/",
+        )}@${origin.formation}#${origin.scopeRoot ?? "callable"}#${origin.outerIndependent === true ? "outer" : "whole"}`,
     ),
   );
 };
 
-const localAccessForCallArgument = ({
+const localAccessesForCallArgument = ({
   call,
   argument,
   summary,
@@ -1610,11 +1739,20 @@ const localAccessForCallArgument = ({
   call: CallableBorrowIndexCall;
   argument: CallableBorrowIndexCall["arguments"][number];
   summary: OrdinaryMutationSummary | undefined;
-}): OrdinaryParameterAccess => {
+}): readonly {
+  access: OrdinaryParameterAccess;
+  endpoint: "direct" | "reachable";
+}[] => {
   if (call.intrinsicName === "__array_set") {
-    return argument.parameter === 0
-      ? OrdinaryParameterAccess.Write
-      : OrdinaryParameterAccess.Read;
+    return [
+      {
+        access:
+          argument.parameter === 0
+            ? OrdinaryParameterAccess.Write
+            : OrdinaryParameterAccess.Read,
+        endpoint: "direct",
+      },
+    ];
   }
   if (
     call.intrinsicName === "__array_get" ||
@@ -1622,25 +1760,31 @@ const localAccessForCallArgument = ({
     call.intrinsicName === "__ref_is_null"
   ) {
     return argument.parameter === 0
-      ? OrdinaryParameterAccess.Read
-      : OrdinaryParameterAccess.Unused;
+      ? [{ access: OrdinaryParameterAccess.Read, endpoint: "direct" }]
+      : [];
   }
   if (call.compilerArrayIteratorNext === true && argument.parameter === 0) {
-    return OrdinaryParameterAccess.Read;
+    return [{ access: OrdinaryParameterAccess.Read, endpoint: "direct" }];
   }
-  return (
-    (summary
-      ? (Math.max(
+  if (summary) {
+    return [
+      {
+        access:
           summary.directAccesses[argument.parameter] ??
-            OrdinaryParameterAccess.Unused,
+          OrdinaryParameterAccess.Unused,
+        endpoint: "direct" as const,
+      },
+      {
+        access:
           summary.reachableAccesses[argument.parameter] ??
-            OrdinaryParameterAccess.Unused,
-        ) as OrdinaryParameterAccess)
-      : undefined) ??
-    (callHasUncertainDispatch(call) && argument.referenceCapable === true
-      ? OrdinaryParameterAccess.Write
-      : OrdinaryParameterAccess.Unused)
-  );
+          OrdinaryParameterAccess.Unused,
+        endpoint: "reachable" as const,
+      },
+    ].filter(({ access }) => access !== OrdinaryParameterAccess.Unused);
+  }
+  return callHasUncertainDispatch(call) && argument.referenceCapable === true
+    ? [{ access: OrdinaryParameterAccess.Write, endpoint: "reachable" }]
+    : [];
 };
 
 const summaryForCall = ({
@@ -1784,6 +1928,9 @@ const ambientRootMayOverlap = ({
 const targetKey = ({ moduleId, symbol }: SymbolRef): string =>
   `${moduleId}::${symbol}`;
 
+const resultIdentityForCall = (call: CallableBorrowIndexCall) =>
+  call.resultIdentity ?? call.signature?.resultIdentity;
+
 const callResultMayCarryReference = (
   call: CallableBorrowIndexCall,
   typing: TypingResult,
@@ -1791,11 +1938,12 @@ const callResultMayCarryReference = (
   typeof call.signature?.returnType !== "number" ||
   typeCanCarryReference(call.signature.returnType, typing);
 
-const callResultIsIndependentStableHandle = (
+const callResultIsDetached = (
   call: CallableBorrowIndexCall,
   typing: TypingResult,
   symbolTable: SymbolTable,
 ): boolean => {
+  if (resultIdentityForCall(call)?.kind === "detached") return true;
   const returnType = call.signature?.returnType;
   if (typeof returnType !== "number") return false;
   const nominal = typing.arena.nominalComponent(returnType);
@@ -1814,6 +1962,15 @@ const callResultIsIndependentStableHandle = (
     | undefined;
   return metadata?.intrinsicType === "voyd.std.string-slice";
 };
+
+const callResultHasIndependentOuterIdentity = (
+  call: CallableBorrowIndexCall,
+  typing: TypingResult,
+  symbolTable: SymbolTable,
+): boolean =>
+  callResultIsDetached(call, typing, symbolTable) ||
+  resultIdentityForCall(call)?.kind === "fresh" ||
+  resultIdentityForCall(call)?.kind === "same-place";
 
 const typesMayShareAllocation = (
   left: TypeId | undefined,

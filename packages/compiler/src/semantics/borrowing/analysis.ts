@@ -40,6 +40,9 @@ import {
   type OrdinaryMutationSummary,
 } from "./ordinary-mutation-summary.js";
 import { checkScopedBorrowLocal } from "./scoped-borrow-local.js";
+import { validateResultIdentityContracts } from "./result-identity-validation.js";
+import { validateStagedAccessContracts } from "./staged-access-validation.js";
+import { validateBuilderAccessContracts } from "./builder-access-validation.js";
 
 /**
  * Analyze source-level mutation and scoped borrows with bounded state.
@@ -132,6 +135,23 @@ export const analyzeBorrowing = ({
     }),
   ]);
 
+  const resultIdentityStartedAt = startCompilerPerfPhase();
+  const resultIdentityDiagnostics = checkBodies
+    ? validateResultIdentityContracts({
+        functions,
+        indexes,
+        hir: summaryHir,
+        typing,
+        symbolTable,
+        moduleId,
+        imports: importMap,
+      })
+    : [];
+  markCompilerPerfPhaseDuration(
+    "analyzeBorrowing.resultIdentity",
+    resultIdentityStartedAt,
+  );
+
   const ordinaryStartedAt = startCompilerPerfPhase();
   const ordinaryInputs = new Map(
     Array.from(indexes, ([symbol, index]) => [
@@ -179,6 +199,40 @@ export const analyzeBorrowing = ({
     ordinaryStartedAt,
   );
 
+  const stagedStartedAt = startCompilerPerfPhase();
+  const stagedDiagnostics = checkBodies
+    ? validateStagedAccessContracts({
+        functions,
+        indexes,
+        hir: summaryHir,
+        typing,
+        symbolTable,
+        moduleId,
+        dependencies,
+        localSummaries: ordinaryMutationSummaries,
+      })
+    : [];
+  markCompilerPerfPhaseDuration(
+    "analyzeBorrowing.stagedAccess",
+    stagedStartedAt,
+  );
+
+  const builderStartedAt = startCompilerPerfPhase();
+  const builderDiagnostics = checkBodies
+    ? validateBuilderAccessContracts({
+        functions,
+        indexes,
+        hir: summaryHir,
+        typing,
+        symbolTable,
+        localSummaries: ordinaryMutationSummaries,
+      })
+    : [];
+  markCompilerPerfPhaseDuration(
+    "analyzeBorrowing.builderAccess",
+    builderStartedAt,
+  );
+
   const defaultIdentityGuardTargets = new Set(
     Array.from(indexes).flatMap(([symbol, index]) =>
       index.flags.hasDefaultArgument && !index.flags.hasDefaultBorrowFlow
@@ -202,6 +256,9 @@ export const analyzeBorrowing = ({
 
   const diagnostics = checkBodies
     ? [
+        ...resultIdentityDiagnostics,
+        ...stagedDiagnostics,
+        ...builderDiagnostics,
         ...ordinaryMutationDiagnostics({
           violations,
           functions,
@@ -366,7 +423,7 @@ const buildOrdinaryDeclarationBounds = ({
                       method.symbol,
                       symbolTable,
                     ),
-                  method.isolated === true,
+                  method.isolated === true || method.stagedAccess !== undefined,
                 ),
               ] as const,
           )
@@ -431,7 +488,7 @@ const addDeclarationOrdinaryMutationSummaries = ({
             }),
             traitMethodAllowsUnknownCallback(method, typing) ||
               traitMethodInvokesUnknownCallback(method.symbol, symbolTable),
-            method.isolated === true,
+            method.isolated === true || method.stagedAccess !== undefined,
           ),
         ),
       );
@@ -748,6 +805,8 @@ const hirWithTraitDefaultFunctions = (hir: HirGraph): HirGraph => {
         type: parameter.type,
       })),
       returnType: method.returnType,
+      resultIdentity: method.resultIdentity,
+      stagedAccess: method.stagedAccess,
       effectType: method.effectType,
       body: method.defaultBody!,
     });

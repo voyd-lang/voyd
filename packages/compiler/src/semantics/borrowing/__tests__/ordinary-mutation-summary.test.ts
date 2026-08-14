@@ -477,6 +477,74 @@ fn invalid(~source: Child) -> i32
     expect(analyzeAccess("write")).toThrow(/TY0048|TY0055/);
   });
 
+  it("keeps mutation of a declared fresh outer result off retained inputs", () => {
+    const result = analyzeStd(`
+obj Bytes { value: i32 }
+obj Reader { bytes: Bytes, offset: i32 }
+
+impl Reader
+  @result(fresh)
+  fn init(bytes: Bytes) -> Reader
+    Reader { bytes, offset: 0 }
+
+  fn advance(~self) -> void
+    self.offset = self.offset + 1
+
+fn decode(bytes: Bytes) -> i32
+  let ~reader = Reader::init(bytes)
+  reader.advance()
+  reader.offset
+`);
+    const decode = Array.from(result.hir.items.values()).find(
+      (item) =>
+        item.kind === "function" &&
+        result.binding.symbolTable.getSymbol(item.symbol).name === "decode",
+    );
+    const decodeSummary =
+      decode?.kind === "function"
+        ? result.borrowing.ordinaryMutationSummaries.get(decode.symbol)
+        : undefined;
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(decodeSummary?.directAccesses).not.toContain(Access.Write);
+    expect(decodeSummary?.reachableAccesses).not.toContain(Access.Write);
+  });
+
+  it("keeps a discarded same-place result from aliasing its fresh receiver", () => {
+    const result = analyzeStd(`
+obj Source { value: i32 }
+obj Builder { retained: Source, count: i32 }
+
+impl Builder
+  @result(fresh)
+  fn init(source: Source) -> Builder
+    Builder { retained: source, count: 0 }
+
+  fn replace(~self, source: Source) -> ~self
+    self.retained = source
+    self
+
+fn build(source: Source, replacement: Source) -> i32
+  let ~builder = Builder::init(source)
+  let _ = builder.replace(replacement)
+  builder.count = builder.count + 1
+  builder.count
+`);
+    const build = Array.from(result.hir.items.values()).find(
+      (item) =>
+        item.kind === "function" &&
+        result.binding.symbolTable.getSymbol(item.symbol).name === "build",
+    );
+    const buildSummary =
+      build?.kind === "function"
+        ? result.borrowing.ordinaryMutationSummaries.get(build.symbol)
+        : undefined;
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(buildSummary?.directAccesses).not.toContain(Access.Write);
+    expect(buildSummary?.reachableAccesses).not.toContain(Access.Write);
+  });
+
   it("does not retain compiler-known stable slices through fresh wrappers", () => {
     const stable = analyzeStd(`obj Backing { value: i32 }
 @intrinsic_type(type: "voyd.std.string-slice")
@@ -871,6 +939,70 @@ fn replaced<T>(source: Array<T>, value: T) -> Array<T>
         dependencies: new Map([[dependency.id, dependencyResult]]),
       }),
     ).toThrow(/TY0055/);
+  });
+
+  it("keeps an all-fresh match spine unique after an imported child lookup", () => {
+    const dependency: ModuleNode = {
+      id: "src::ordinary_fresh_spine",
+      path: { namespace: "src", segments: ["ordinary_fresh_spine"] },
+      origin: {
+        kind: "file",
+        filePath: "ordinary-fresh-spine-dependency.test.voyd",
+      },
+      source: "",
+      dependencies: [],
+      ast: parse(
+        `pub obj Child { value: i32 }
+pub obj SomeChild { value: Child }
+pub obj None {}
+pub type OptionalChild = SomeChild | None
+pub obj Store { value: Child }
+
+impl Store
+  api fn get(self) -> OptionalChild
+    SomeChild { value: self.value }
+`,
+        "ordinary-fresh-spine-dependency.test.voyd",
+      ),
+    };
+    const consumer: ModuleNode = {
+      id: "src::ordinary_fresh_spine_consumer",
+      path: {
+        namespace: "src",
+        segments: ["ordinary_fresh_spine_consumer"],
+      },
+      origin: {
+        kind: "file",
+        filePath: "ordinary-fresh-spine-consumer.test.voyd",
+      },
+      source: "",
+      dependencies: [{ kind: "use", path: dependency.path }],
+      ast: parse(
+        `use src::ordinary_fresh_spine::{ Child, None, SomeChild, Store }
+
+fn replace_spine(source: Store, fallback: Child, replacement: Child) -> i32
+  let ~copy = match(source.get())
+    SomeChild { value }: Store { value }
+    None: Store { value: fallback }
+  let existing = match(copy.get())
+    SomeChild { value }: value
+    None: fallback
+  let observed = existing.value
+  copy.value = replacement
+  observed
+`,
+        "ordinary-fresh-spine-consumer.test.voyd",
+      ),
+    };
+    const graph: ModuleGraph = {
+      entry: consumer.id,
+      modules: new Map([
+        [dependency.id, dependency],
+        [consumer.id, consumer],
+      ]),
+      diagnostics: [],
+    };
+    expect(analyzeModules({ graph }).diagnostics).toHaveLength(0);
   });
 
   it("separates disjoint call results from identities reachable through mutable inputs", () => {
@@ -2029,5 +2161,132 @@ fn run_effectful(runner: Runner): Tick -> i32
       },
       { kind: "unknown-callback", symbol: 7 },
     ]);
+  });
+
+  it("uses detached and fresh result contracts without erasing retained child aliases", () => {
+    const accepted = analyzeStd(`
+obj Cursor { offset: i32 }
+obj Token { value: i32 }
+obj Box { item: Token }
+
+@result(detached)
+fn token(~cursor: Cursor) -> Token
+  Token { value: cursor.offset }
+
+@result(fresh)
+fn boxed(item: Token) -> Box
+  Box { item }
+
+fn parse(~cursor: Cursor) -> i32
+  let result = token(~cursor)
+  cursor.offset = cursor.offset + 1
+  result.value
+
+fn replace_outer(~item: Token) -> i32
+  let ~result = boxed(item)
+  result.item = Token { value: 7 }
+  item.value = item.value + 1
+  7
+`);
+    expect(accepted.diagnostics).toHaveLength(0);
+
+    expect(() =>
+      analyzeStd(`
+obj Token { value: i32 }
+obj Box { item: Token }
+
+@result(fresh)
+fn boxed(item: Token) -> Box
+  Box { item }
+
+fn invalid(~item: Token) -> i32
+  let result = boxed(item)
+  let retained = result.item
+  item.value = item.value + 1
+  retained.value
+`),
+    ).toThrow(/TY0048/);
+  });
+
+  it("threads same-place results only through immediate mutable calls", () => {
+    const accepted = analyzeStd(`
+obj Builder { count: i32 }
+
+impl Builder
+  fn bump(~self) -> ~self
+    self.count = self.count + 1
+    self
+
+fn build() -> i32
+  let ~builder = Builder { count: 0 }
+  builder.bump().bump().bump()
+  builder.count
+`);
+    expect(accepted.diagnostics).toHaveLength(0);
+
+    expect(() =>
+      analyzeStd(`
+obj Builder { count: i32 }
+
+impl Builder
+  fn bump(~self) -> ~self
+    self.count = self.count + 1
+    self
+
+fn invalid() -> i32
+  let ~builder = Builder { count: 0 }
+  let saved = builder.bump()
+  saved.count
+`),
+    ).toThrow(/TY0056/);
+  });
+
+  it("threads instantiated generic same-place receivers", () => {
+    const accepted = analyzeStd(`
+obj Builder<T> { value: T, count: i32 }
+
+impl<T> Builder<T>
+  @staged(into: self)
+  fn bump(~self) -> ~self
+    self.count = self.count + 1
+    self
+
+fn build() -> i32
+  let ~builder = Builder<i32> { value: 7, count: 0 }
+  builder.bump().bump().bump()
+  builder.count
+`);
+    expect(accepted.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects escaping or aggregating a same-place capability", () => {
+    const escape = () =>
+      analyzeStd(`
+obj Builder { count: i32 }
+
+impl Builder
+  fn bump(~self) -> ~self
+    self.count = self.count + 1
+    self
+
+fn invalid(~builder: Builder) -> Builder
+  builder.bump()
+`);
+    const aggregate = () =>
+      analyzeStd(`
+obj Builder { count: i32 }
+
+impl Builder
+  fn bump(~self) -> ~self
+    self.count = self.count + 1
+    self
+
+fn invalid() -> (Builder, i32)
+  let ~builder = Builder { count: 0 }
+  (builder.bump(), 1)
+`);
+
+    expect(escape).toThrow(/TY0056/);
+    expect(aggregate).toThrow(/TY0056/);
   });
 });

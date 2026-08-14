@@ -14,6 +14,9 @@ import type {
   TypeAliasDeclId,
 } from "../ids.js";
 import type { IntrinsicAttribute } from "../../parser/attributes.js";
+import type { ResultIdentity } from "../../result-identity.js";
+import type { StagedAccess } from "../../staged-access.js";
+import type { BuilderAccess } from "../../builder-access.js";
 
 export type HirVisibilityLevel = "object" | "module" | "package" | "public";
 
@@ -229,6 +232,9 @@ export interface HirFunction extends HirItemBase {
   typeParameters?: readonly HirTypeParameter[];
   parameters: readonly HirParameter[];
   returnType?: HirTypeExpr;
+  resultIdentity?: ResultIdentity;
+  stagedAccess?: StagedAccess;
+  builderAccess?: BuilderAccess;
   effectType?: HirTypeExpr;
   body: HirExprId;
   effectRow?: EffectRowId;
@@ -330,6 +336,9 @@ export interface HirTraitMethod {
   typeParameters?: readonly HirTypeParameter[];
   parameters: readonly HirMethodParameter[];
   returnType?: HirTypeExpr;
+  resultIdentity?: ResultIdentity;
+  stagedAccess?: StagedAccess;
+  builderAccess?: BuilderAccess;
   effectType?: HirTypeExpr;
   defaultBody?: HirExprId;
   /** Checked full-invocation promise for safe open dispatch under exclusivity. */

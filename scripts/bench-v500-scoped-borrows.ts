@@ -14,7 +14,13 @@ type WorkloadFamily =
   | "borrow-calls"
   | "borrow-depth"
   | "borrow-callbacks"
-  | "mutation-mixed";
+  | "mutation-mixed"
+  | "result-count"
+  | "result-chain"
+  | "result-projection"
+  | "result-forwarding"
+  | "result-overloads"
+  | "result-callgraph";
 
 type Scenario = {
   name: string;
@@ -147,6 +153,10 @@ type RequiredMetrics = {
   ordinaryLivenessStateInsertions: number | null;
   ordinaryLivenessWorkItems: number | null;
   explicitBorrowFactCount: number | null;
+  resultIdentityDeclarations: number | null;
+  resultIdentityPaths: number | null;
+  resultIdentityForwarding: number | null;
+  samePlaceCalls: number | null;
   projectionFamilyCount: number | null;
   wideningCount: number | null;
   retainedSummaryBytes: number | null;
@@ -232,7 +242,8 @@ Options:
 
 Families:
   ordinary-fields, ordinary-topology, borrow-calls, borrow-depth,
-  borrow-callbacks, mutation-mixed
+  borrow-callbacks, mutation-mixed, result-count, result-chain,
+  result-projection, result-forwarding, result-overloads, result-callgraph
 
 Every measured compile runs in a fresh Node process. With multiple --repo
 arguments, repository order alternates for each sample. The first repository
@@ -249,9 +260,28 @@ const ALL_FAMILIES: readonly WorkloadFamily[] = [
   "borrow-depth",
   "borrow-callbacks",
   "mutation-mixed",
+  "result-count",
+  "result-chain",
+  "result-projection",
+  "result-forwarding",
+  "result-overloads",
+  "result-callgraph",
 ];
 
 const ACCEPTANCE_WORKLOADS: readonly AcceptanceWorkload[] = [
+  {
+    id: "v504-result-contract-scaling",
+    adrCriterion: "V-504",
+    owner: "bench:v500",
+    command:
+      "npm run bench:v500 -- --families result-count,result-chain,result-projection,result-forwarding,result-overloads,result-callgraph --sizes 2,4,8,16 --modes none --samples 7 --warmups 1 --output /tmp/v504-result-contracts.json",
+    coverage: "ready",
+    requiredEvidence: [
+      "independent result-count, fluent-chain, projection-depth, generic-forwarding, overload-fanout, and unrelated-callgraph series",
+      "result-contract counters, compiler phases, cold compile time, and peak RSS distributions",
+      "largest two structural doublings remain at or below 2.25x",
+    ],
+  },
   {
     id: "generated-ordinary-dto-scaling",
     adrCriterion: "1-2",
@@ -1015,6 +1045,176 @@ ${lines(scale, () => "  guarded_pair(~values, 0, 1)")}
   };
 };
 
+const resultCountScenario = (scale: number): Scenario => {
+  const factories = lines(
+    scale,
+    (index) => `@result(fresh)
+fn make_${index}() -> ResultBox
+  ResultBox { value: ${index + 1} }
+`,
+  );
+  const bindings = lines(
+    scale,
+    (index) => `  let value_${index} = make_${index}().value`,
+  );
+  const sum = lines(scale, (index) => `value_${index}`).replaceAll(
+    "\n",
+    " + ",
+  );
+  return {
+    name: `result-count-${scale}`,
+    family: "result-count",
+    scale,
+    source: `obj ResultBox { value: i32 }
+
+${factories}
+pub fn main() -> i32
+${bindings}
+  ${sum}
+`,
+    expected: (scale * (scale + 1)) / 2,
+    dimensions: { resultDeclarations: scale, selectedResultCalls: scale },
+    explicitBorrow: false,
+  };
+};
+
+const resultChainScenario = (scale: number): Scenario => {
+  const chain = lines(scale, () => ".bump()").replaceAll("\n", "");
+  return {
+    name: `result-chain-${scale}`,
+    family: "result-chain",
+    scale,
+    source: `obj ResultBuilder { value: i32 }
+
+impl ResultBuilder
+  fn bump(~self) -> ~self
+    self.value = self.value + 1
+    self
+
+pub fn main() -> i32
+  let ~builder = ResultBuilder { value: 0 }
+  let _ = builder${chain}
+  builder.value
+`,
+    expected: scale,
+    dimensions: { samePlaceChainLength: scale },
+    explicitBorrow: false,
+  };
+};
+
+const resultProjectionScenario = (scale: number): Scenario => {
+  const layers = lines(
+    scale,
+    (index) =>
+      `obj ResultLayer${index} { child: ${index === 0 ? "ResultLeaf" : `ResultLayer${index - 1}`} }`,
+  );
+  let wrapped = "source";
+  for (let index = 0; index < scale; index += 1) {
+    wrapped = `ResultLayer${index} { child: ${wrapped} }`;
+  }
+  const projection = lines(scale, () => ".child").replaceAll("\n", "");
+  return {
+    name: `result-projection-${scale}`,
+    family: "result-projection",
+    scale,
+    source: `obj ResultLeaf { value: i32 }
+${layers}
+
+@result(fresh)
+fn wrap(source: ResultLeaf) -> ResultLayer${scale - 1}
+  ${wrapped}
+
+pub fn main() -> i32
+  let source = ResultLeaf { value: 7 }
+  let wrapped = wrap(source)
+  source.value + wrapped${projection}.value
+`,
+    expected: 14,
+    dimensions: { resultDeclarations: 1, projectionDepth: scale + 1 },
+    explicitBorrow: false,
+  };
+};
+
+const resultForwardingScenario = (scale: number): Scenario => {
+  const forwarding = lines(
+    scale,
+    (index) => `fn forward_${index}<T>(~value: T) -> ~value
+  ${index === 0 ? "value" : `forward_${index - 1}(~value)`}
+`,
+  );
+  return {
+    name: `result-forwarding-${scale}`,
+    family: "result-forwarding",
+    scale,
+    source: `obj ResultBox { value: i32 }
+
+${forwarding}
+pub fn main() -> i32
+  let ~value = ResultBox { value: 7 }
+  let _ = forward_${scale - 1}(~value)
+  value.value
+`,
+    expected: 7,
+    dimensions: { genericForwardingDepth: scale },
+    explicitBorrow: false,
+  };
+};
+
+const resultOverloadScenario = (scale: number): Scenario => {
+  const types = lines(
+    scale,
+    (index) => `obj ResultChoice${index} { value: i32 }`,
+  );
+  const overloads = lines(
+    scale,
+    (index) => `@result(fresh)
+fn choose(value: ResultChoice${index}) -> ResultChoice${index}
+  ResultChoice${index} { value: value.value }
+`,
+  );
+  return {
+    name: `result-overloads-${scale}`,
+    family: "result-overloads",
+    scale,
+    source: `${types}
+
+${overloads}
+pub fn main() -> i32
+  choose(ResultChoice${scale - 1} { value: 7 }).value
+`,
+    expected: 7,
+    dimensions: { overloadFanout: scale, selectedResultCalls: 1 },
+    explicitBorrow: false,
+  };
+};
+
+const resultCallgraphScenario = (scale: number): Scenario => {
+  const callables = lines(
+    scale,
+    (index) => `fn unrelated_${index}() -> i32
+  ${index === 0 ? "0" : `unrelated_${index - 1}() + 1`}
+`,
+  );
+  return {
+    name: `result-callgraph-${scale}`,
+    family: "result-callgraph",
+    scale,
+    source: `obj ResultBox { value: i32 }
+
+@result(fresh)
+fn make_result() -> ResultBox
+  ResultBox { value: 7 }
+
+${callables}
+pub fn main() -> i32
+  make_result().value + unrelated_${scale - 1}()
+`,
+    expected: scale + 6,
+    dimensions: { resultDeclarations: 1, unrelatedCallables: scale },
+    explicitBorrow: false,
+  };
+};
+
 const generateScenarios = (sizes: readonly number[]): Scenario[] =>
   sizes.flatMap((size) => [
     ordinaryFieldsScenario(size),
@@ -1023,6 +1223,12 @@ const generateScenarios = (sizes: readonly number[]): Scenario[] =>
     borrowDepthScenario(size),
     borrowCallbacksScenario(size),
     mutationMixedScenario(size),
+    resultCountScenario(size),
+    resultChainScenario(size),
+    resultProjectionScenario(size),
+    resultForwardingScenario(size),
+    resultOverloadScenario(size),
+    resultCallgraphScenario(size),
   ]);
 
 const median = (values: readonly number[]): number => {
@@ -1137,6 +1343,18 @@ const requiredMetrics = ({
     "borrowing.explicit.provenanceFacts",
     "borrowing.explicit.factCount",
     "borrowing.explicitBorrowFacts",
+  ]),
+  resultIdentityDeclarations: metricValue(counters, [
+    "borrowing.resultIdentity.declarations",
+  ]),
+  resultIdentityPaths: metricValue(counters, [
+    "borrowing.resultIdentity.paths",
+  ]),
+  resultIdentityForwarding: metricValue(counters, [
+    "borrowing.resultIdentity.forwarding",
+  ]),
+  samePlaceCalls: metricValue(counters, [
+    "borrowing.resultIdentity.calls.samePlace",
   ]),
   projectionFamilyCount: metricValue(counters, [
     "borrowing.ordinary.projectionFamilies",
@@ -1415,6 +1633,22 @@ const scalingSeriesFor = (rows: readonly ResultRow[]) => {
           explicitBorrowFactRatio: ratio(
             row.requiredMetrics.explicitBorrowFactCount,
             previous.requiredMetrics.explicitBorrowFactCount,
+          ),
+          resultDeclarationRatio: ratio(
+            row.requiredMetrics.resultIdentityDeclarations,
+            previous.requiredMetrics.resultIdentityDeclarations,
+          ),
+          resultPathRatio: ratio(
+            row.requiredMetrics.resultIdentityPaths,
+            previous.requiredMetrics.resultIdentityPaths,
+          ),
+          resultForwardingRatio: ratio(
+            row.requiredMetrics.resultIdentityForwarding,
+            previous.requiredMetrics.resultIdentityForwarding,
+          ),
+          samePlaceCallRatio: ratio(
+            row.requiredMetrics.samePlaceCalls,
+            previous.requiredMetrics.samePlaceCalls,
           ),
         };
       }),

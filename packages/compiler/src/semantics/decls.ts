@@ -15,6 +15,9 @@ import type {
 } from "./ids.js";
 import type { IdentifierAtom } from "../parser/ast/atom.js";
 import type { IntrinsicAttribute } from "../parser/attributes.js";
+import type { ResultIdentity } from "../result-identity.js";
+import type { StagedAccess } from "../staged-access.js";
+import type { BuilderAccess } from "../builder-access.js";
 
 export interface ParameterDecl {
   id: ParameterDeclId;
@@ -53,6 +56,9 @@ export interface FunctionDecl {
   params: ParameterDecl[];
   typeParameters?: TypeParameterDecl[];
   returnTypeExpr?: Expr;
+  resultIdentity?: ResultIdentity;
+  stagedAccess?: StagedAccess;
+  builderAccess?: BuilderAccess;
   effectTypeExpr?: Expr;
   body: Expr;
   memberVisibility?: HirVisibility;
@@ -135,6 +141,9 @@ export interface TraitMethodDecl {
   params: ParameterDecl[];
   typeParameters?: TypeParameterDecl[];
   returnTypeExpr?: Expr;
+  resultIdentity?: ResultIdentity;
+  stagedAccess?: StagedAccess;
+  builderAccess?: BuilderAccess;
   effectTypeExpr?: Expr;
   defaultBody?: Expr;
   intrinsic?: IntrinsicAttribute;

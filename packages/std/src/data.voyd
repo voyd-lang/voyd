@@ -144,6 +144,7 @@ pub obj DecodeLimits {
 }
 
 /// Returns conservative default encoding limits.
+@result(detached)
 pub fn default_encode_limits() -> EncodeLimits
   EncodeLimits {
     max_depth: 128,
@@ -152,6 +153,7 @@ pub fn default_encode_limits() -> EncodeLimits
   }
 
 /// Returns conservative default decoding limits.
+@result(detached)
 pub fn default_decode_limits() -> DecodeLimits
   DecodeLimits {
     max_depth: 128,

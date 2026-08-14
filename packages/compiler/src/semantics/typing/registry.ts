@@ -585,6 +585,60 @@ export const registerFunctionSignatures = (
         paramMap,
       ) ?? ctx.primitives.unknown;
 
+    const samePlaceParameter =
+      item.resultIdentity?.kind === "same-place"
+        ? parameters[item.resultIdentity.parameterIndex]
+        : undefined;
+    if (item.resultIdentity?.kind === "same-place") {
+      if (!samePlaceParameter) {
+        throw new Error(
+          `same-place result references missing parameter ${item.resultIdentity.parameterIndex}`,
+        );
+      }
+      if (samePlaceParameter.bindingKind !== "mutable-ref") {
+        throw new Error("same-place result must reference a mutable parameter");
+      }
+      if (samePlaceParameter.type === ctx.primitives.unknown) {
+        throw new Error("same-place result parameter must have a known type");
+      }
+      if (item.returnType) {
+        ensureTypeMatches(
+          annotatedReturn,
+          samePlaceParameter.type,
+          ctx,
+          state,
+          "same-place return type",
+          item.returnType.span,
+        );
+      }
+    }
+
+    if (item.stagedAccess) {
+      const destination =
+        parameters[item.stagedAccess.destinationParameterIndex];
+      if (!destination) {
+        throw new Error(
+          `staged access references missing parameter ${item.stagedAccess.destinationParameterIndex}`,
+        );
+      }
+      if (destination.bindingKind !== "mutable-ref") {
+        throw new Error("staged access destination must be mutable");
+      }
+    }
+
+    if (item.builderAccess) {
+      const destination =
+        parameters[item.builderAccess.destinationParameterIndex];
+      if (!destination) {
+        throw new Error(
+          `builder access references missing parameter ${item.builderAccess.destinationParameterIndex}`,
+        );
+      }
+      if (destination.bindingKind !== "mutable-ref") {
+        throw new Error("builder access destination must be mutable");
+      }
+    }
+
     if (typeof constructorReturn === "number" && item.returnType) {
       ensureTypeMatches(
         annotatedReturn,
@@ -596,9 +650,12 @@ export const registerFunctionSignatures = (
       );
     }
 
-    const declaredReturn = constructorReturn ?? annotatedReturn;
+    const declaredReturn =
+      constructorReturn ?? samePlaceParameter?.type ?? annotatedReturn;
     const hasExplicitReturn =
-      Boolean(item.returnType) || typeof constructorReturn === "number";
+      Boolean(item.returnType) ||
+      typeof constructorReturn === "number" ||
+      item.resultIdentity?.kind === "same-place";
 
     const functionType = ctx.arena.internFunction({
       parameters: parameters.map(
@@ -623,6 +680,9 @@ export const registerFunctionSignatures = (
       typeId: functionType,
       parameters,
       returnType: declaredReturn,
+      resultIdentity: item.resultIdentity,
+      stagedAccess: item.stagedAccess,
+      builderAccess: item.builderAccess,
       declaredReturnType: item.returnType,
       hasExplicitReturn,
       annotatedReturn: hasExplicitReturn,
@@ -854,6 +914,25 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
                 `incoming: trait=${getSymbolName(incoming.traitSymbol, ctx)}, method=${getSymbolName(incoming.traitMethodSymbol, ctx)}`,
               ].join("\n"),
           });
+          const traitMethod = ctx.traits
+            .getDecl(traitSymbol)
+            ?.methods.find((method) => method.symbol === traitMethodSymbol);
+          const implementationSignature =
+            ctx.functions.getSignature(implMethodSymbol);
+          if (implementationSignature && traitMethod) {
+            ctx.functions.setSignature(implMethodSymbol, {
+              ...implementationSignature,
+              resultIdentity:
+                implementationSignature.resultIdentity ??
+                traitMethod.resultIdentity,
+              stagedAccess:
+                implementationSignature.stagedAccess ??
+                traitMethod.stagedAccess,
+              builderAccess:
+                implementationSignature.builderAccess ??
+                traitMethod.builderAccess,
+            });
+          }
         },
       );
     }

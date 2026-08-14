@@ -518,6 +518,26 @@ type DiagnosticParamsMap = {
           | "ordinary-suspension";
         callable: string;
       };
+  TY0056:
+    | {
+        kind: "invalid-result-contract";
+        contract: "detached" | "fresh" | "same-place";
+        reason: string;
+      }
+    | {
+        kind: "invalid-same-place-use";
+        reason: string;
+      };
+  TY0057: {
+    kind: "invalid-staged-contract";
+    callable: string;
+    reason: string;
+  };
+  TY0058: {
+    kind: "invalid-builder-contract";
+    callable: string;
+    reason: string;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -1411,6 +1431,35 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0055"]>,
+  TY0056: {
+    code: "TY0056",
+    message: (params) =>
+      params.kind === "invalid-result-contract"
+        ? `result contract '${params.contract}' is not satisfied: ${params.reason}`
+        : `same-place result cannot be used here: ${params.reason}`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Keep the result contract explicit and bounded. A same-place result may only be ignored, immediately forwarded through a matching mutable call, or returned by another matching same-place contract.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0056"]>,
+  TY0057: {
+    code: "TY0057",
+    message: (params) =>
+      `invalid @staged contract on ${params.callable}: ${params.reason}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0057"]>,
+  TY0058: {
+    code: "TY0058",
+    message: (params) =>
+      `invalid @builder contract on ${params.callable}: ${params.reason}`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0058"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

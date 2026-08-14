@@ -114,15 +114,38 @@ test "dict setting get contains removing clear":
   cleared.clear()
   assert(cleared.len(), eq: 0)
 
-test "dict set updates fresh mutable dictionaries":
+test "dict mutable updates return results and support subscripts":
   let ~strings = Dict<String, i32>::init()
-  strings.set("a", 1)
-  strings.set("a", 2)
-  strings.set("b", 3)
-  assert(strings.len(), eq: 2)
-  match(strings.get("a"))
+  strings.set("a", 1).set("fluent", 9).remove("fluent")
+  assert(strings.insert("a", 2), eq: false)
+  assert(strings.insert("b", 3), eq: true)
+  strings["c"] = 4
+  assert(strings.insert("c", 5), eq: false)
+  assert(strings.len(), eq: 3)
+
+  match(strings.remove("a"))
     Some<i32> { value }:
       assert(value, eq: 2)
+    None:
+      assert(false)
+  match(strings.remove("missing"))
+    Some<i32>:
+      assert(false)
+    None:
+      void
+
+  assert(strings.len(), eq: 2)
+  match(strings.get("c"))
+    Some<i32> { value }:
+      assert(value, eq: 5)
+    None:
+      assert(false)
+
+  let ~references = Dict<String, String>::init()
+  references.set("key", "value")
+  match(references.remove("key"))
+    Some<String> { value }:
+      assert(value.equals("value"), eq: true)
     None:
       assert(false)
 
@@ -185,7 +208,11 @@ test "dict merged combines entries":
   let left = Dict<String, i32>::init().setting("a", 1)
   let right = Dict<String, i32>::init().setting("b", 2).setting("a", 9)
 
-  let extended = Dict<String, i32>::init().setting("a", 1).merged(right)
+  let ~extended = Dict<String, i32>::init()
+  extended.set("a", 1)
+  extended.extend(right)
+  assert(extended.len(), eq: 2)
+  extended.extend(extended)
   assert(extended.len(), eq: 2)
   match(extended.get("a"))
     Some<i32> { value }:

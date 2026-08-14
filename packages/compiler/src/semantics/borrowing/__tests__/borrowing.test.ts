@@ -1260,6 +1260,71 @@ fn invalid(~value: Box) -> i32
     ).toContain("TY0048");
   });
 
+  it("does not retain detached result aliases through match pattern bindings", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj Some<T> { value: T }
+obj None {}
+type Optional<T> = Some<T> | None
+
+@result(detached)
+fn detached_option(source: Box) -> Optional<Box>
+  Some<Box> { value: Box { value: source.value } }
+
+fn increment(~value: Box) -> void
+  value.value = value.value + 1
+
+fn valid(~value: Box) -> i32
+  let alias = match(detached_option(value))
+    Some<Box> { value: item }: item
+    None: Box { value: 0 }
+  increment(~value)
+  alias.value
+`),
+    ).not.toThrow();
+  });
+
+  it("keeps nested detached match bindings independent at a mutable call", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj Failure { code: i32 }
+obj Ok<T> { value: T }
+obj Err<E> { error: E }
+type Result<T, E> = Ok<T> | Err<E>
+obj Store { count: i32 }
+
+impl Store
+  @result(fresh)
+  fn init() -> Store
+    Store { count: 0 }
+
+  fn set(~self, key: Box, value: Box) -> ~self
+    self.count = key.value + value.value
+    self
+
+@result(detached)
+fn parse(~cursor: Box, offset: i32) -> Result<Box, Failure>
+  cursor.value = cursor.value + 1
+  Ok<Box> { value: Box { value: cursor.value + offset } }
+
+fn valid(~cursor: Box) -> i32
+  let ~store = Store::init()
+  match(parse(cursor, 0))
+    Ok<Box> { value: key }:
+      match(parse(cursor, 1))
+        Ok<Box> { value }:
+          let _ = store.set(key, value)
+        Err<Failure>:
+          void
+    Err<Failure>:
+      void
+  cursor.value + store.count
+`),
+    ).not.toThrow();
+  });
+
   it("does not retain result aliases through scalar projections", () => {
     expect(() =>
       analyze(`
@@ -1931,5 +1996,960 @@ fn reader(slice: SliceLookalike) -> (fn() -> i32)
           )?.ambientAccess
         : undefined,
     ).toBe(1);
+  });
+});
+
+describe("result identity declaration validation", () => {
+  it("accepts detached construction, stable StringSlice, local staging, and forwarding", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+@result(detached)
+fn detached_box(value: i32) -> Box
+  Box { value }
+
+@result(detached)
+fn forwarded(value: i32, flag: bool) -> Box
+  if
+    flag: detached_box(value)
+    else:
+      let staged = detached_box(value + 1)
+      staged
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyzeStd(`
+obj Backing { value: i32 }
+
+@intrinsic_type(type: "voyd.std.string-slice")
+obj StableSlice { source: Backing, start: i32, len: i32 }
+
+@result(detached)
+fn stable(slice: StableSlice) -> StableSlice
+  slice
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects detached declarations that return caller-owned identity", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+@result(detached)
+fn invalid(value: Box) -> Box
+  value
+`),
+    ).toContain("TY0056");
+  });
+
+  it("rejects detached forwarding through an unannotated ambient helper", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let ambient = Box { value: 0 }
+
+fn ambient_box() -> Box
+  ambient
+
+@result(detached)
+fn invalid() -> Box
+  ambient_box()
+`),
+    ).toContain("TY0056");
+  });
+
+  it("rejects mutable staging contaminated by caller identity", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+@result(detached)
+fn make() -> Box
+  Box { value: 0 }
+
+@result(detached)
+fn invalid(input: Box) -> Box
+  var staged = make()
+  staged = input
+  staged
+`),
+    ).toContain("TY0056");
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Wrapper { box: Box }
+
+@result(detached)
+fn make() -> Box
+  Box { value: 0 }
+
+@result(detached)
+fn invalid(input: Box) -> Wrapper
+  let ~staged = Wrapper { box: make() }
+  staged.box = input
+  staged
+`),
+    ).toContain("TY0056");
+  });
+
+  it("keeps checked builder writes from contaminating detached local staging", () => {
+    expect(() =>
+      analyze(`
+obj Source { value: i32 }
+obj Output { value: i32 }
+
+@result(fresh)
+fn make_output() -> Output
+  Output { value: 0 }
+
+@builder(into: output)
+fn append(~output: Output, source: Source) -> void
+  output.value = source.value
+
+@result(detached)
+fn valid(source: Source) -> Output
+  let ~output = make_output()
+  append(output, source)
+  output
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj Source { value: i32 }
+obj Output { source: Source }
+
+@result(fresh)
+fn make_output() -> Output
+  Output { source: Source { value: 0 } }
+
+@builder(into: output)
+fn invalid_builder(~output: Output, source: Source) -> void
+  output.source = source
+
+@result(detached)
+fn invalid(source: Source) -> Output
+  let ~output = make_output()
+  invalid_builder(output, source)
+  output
+`),
+    ).toContain("TY0058");
+  });
+
+  it("accepts a fresh wrapper when every retained input is detached", () => {
+    const source = `
+obj Box { value: i32 }
+obj Wrapper { box: Box }
+
+@result(fresh)
+fn make_box() -> Box
+  Box { value: 0 }
+
+@result(fresh)
+fn wrap(box: Box) -> Wrapper
+  Wrapper { box }
+`;
+    expect(() =>
+      analyze(`${source}
+@result(detached)
+fn valid() -> Wrapper
+  wrap(make_box())
+`),
+    ).not.toThrow();
+    expect(
+      diagnosticCodes(`${source}
+@result(detached)
+fn invalid(box: Box) -> Wrapper
+  wrap(box)
+`),
+    ).toContain("TY0056");
+  });
+
+  it("preserves detached provenance through nested result and option patterns", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj Failure { code: i32 }
+obj Ok<T> { value: T }
+obj Err<E> { error: E }
+obj Some<T> { value: T }
+obj None {}
+type Result<T, E> = Ok<T> | Err<E>
+type Option<T> = Some<T> | None
+
+@result(detached)
+fn source(flag: bool) -> Result<Option<Box>, Failure>
+  if flag
+    then: Err<Failure> { error: Failure { code: 1 } }
+    else: Ok<Option<Box>> { value: Some<Box> { value: Box { value: 7 } } }
+
+@result(detached)
+fn forward(flag: bool) -> Result<Option<Box>, Failure>
+  match(source(flag))
+    Err<Failure> { error }:
+      Err<Failure> { error }
+    Ok<Option<Box>> { value }:
+      match(value)
+        None:
+          Ok<Option<Box>> { value: None {} }
+        Some<Box> { value: box }:
+          Ok<Option<Box>> { value: Some<Box> { value: box } }
+`),
+    ).not.toThrow();
+  });
+
+  it("keeps fresh match spines independent when stored back into their source", () => {
+    expect(() =>
+      analyze(`
+obj Item { value: i32 }
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Store { item: Item }
+obj Container { store: Store }
+
+fn get(store: Store) -> Option<Item>
+  Some<Item> { value: store.item }
+
+@result(fresh)
+fn make_store(item: Item) -> Store
+  Store { item }
+
+@staged(into: container)
+fn store(~container: Container, value: Store) -> void
+  container.store = value
+
+fn replace(~container: Container, fallback: Item, replacement: Item) -> void
+  let ~copy = match(get(container.store))
+    Some<Item> { value }: make_store(value)
+    None: make_store(fallback)
+  copy.item = replacement
+  store(~container, copy)
+`),
+    ).not.toThrow();
+  });
+
+  it("keeps retained children of fresh results alias-sensitive", () => {
+    expect(
+      diagnosticCodes(`
+obj Cell { value: i32 }
+obj Wrapper { child: Cell }
+
+@result(fresh)
+fn wrap(child: Cell) -> Wrapper
+  Wrapper { child }
+
+fn mutate(~cell: Cell) -> void
+  cell.value = cell.value + 1
+
+fn invalid(~child: Cell) -> void
+  let ~wrapper = wrap(child)
+  mutate(~child)
+  wrapper.child.value = wrapper.child.value + 1
+`),
+    ).toContain("TY0048");
+  });
+
+  it("rejects fresh results that hide mutable ambient child identity", () => {
+    expect(
+      diagnosticCodes(`
+obj Cell { value: i32 }
+obj Wrapper { child: Cell }
+let ambient = Cell { value: 0 }
+
+@result(fresh)
+fn wrap() -> Wrapper
+  Wrapper { child: ambient }
+
+fn mutate(~cell: Cell) -> void
+  cell.value = cell.value + 1
+
+fn invalid() -> void
+  let ~wrapped = wrap()
+  mutate(~ambient)
+  wrapped.child.value = wrapped.child.value + 1
+`),
+    ).toContain("TY0056");
+  });
+
+  it("tracks fresh child provenance through exact local helpers", () => {
+    const source = `
+obj Cell { value: i32 }
+obj Wrapper { child: Cell }
+
+fn child_of(wrapper: Wrapper) -> Cell
+  wrapper.child
+
+@result(fresh)
+fn wrap(source: Wrapper) -> Wrapper
+  Wrapper { child: child_of(source) }
+`;
+    expect(() => analyze(source)).not.toThrow();
+    expect(
+      diagnosticCodes(`${source}
+let ambient = Cell { value: 0 }
+
+fn ambient_child() -> Cell
+  ambient
+
+@result(fresh)
+fn invalid() -> Wrapper
+  Wrapper { child: ambient_child() }
+`),
+    ).toContain("TY0056");
+  });
+
+  it("does not launder an unsafe fresh result into detached", () => {
+    const codes = diagnosticCodes(`
+obj Cell { value: i32 }
+obj Wrapper { child: Cell }
+let ambient = Cell { value: 0 }
+
+@result(fresh)
+fn wrap() -> Wrapper
+  Wrapper { child: ambient }
+
+@result(detached)
+fn detached_wrap() -> Wrapper
+  wrap()
+`);
+    expect(codes.filter((code) => code === "TY0056")).toHaveLength(2);
+  });
+
+  it("converges nested match binder origins before indexing calls", () => {
+    expect(() =>
+      analyze(`
+obj Key { value: i32 }
+obj JsonString { value: Key }
+obj JsonOther {}
+type JsonValue = JsonString | JsonOther
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Fields { value: JsonValue }
+obj Seen { value: i32 }
+
+@result(fresh)
+fn copy_fields(source: Fields) -> Fields
+  Fields { value: source.value }
+
+fn get(fields: Fields) -> Option<JsonValue>
+  Some<JsonValue> { value: fields.value }
+
+fn read_key(key: Key) -> i32
+  key.value
+
+fn record(~seen: Seen, value: i32) -> void
+  seen.value = value
+
+fn unique(~seen: Seen, operation: Fields) -> i32
+  let ~fields = copy_fields(operation)
+  match(get(fields))
+    Some<JsonValue> { value }:
+      match(value)
+        JsonString { value: key }:
+          let observed = read_key(key)
+          record(~seen, observed)
+          observed
+        JsonOther:
+          0
+    None:
+      0
+`),
+    ).not.toThrow();
+  });
+
+  it("does not detach projections from conservative destructuring", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Wrapper { box: Box }
+
+@result(detached)
+fn invalid(input: Wrapper) -> Box
+  match(input)
+    Wrapper { box }:
+      box
+`),
+    ).toContain("TY0056");
+  });
+
+  it("does not infer fresh identity for a projected pattern binding", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Wrapper { box: Box }
+
+@result(fresh)
+fn make() -> Wrapper
+  Wrapper { box: Box { value: 1 } }
+
+@result(fresh)
+fn invalid() -> Box
+  match(make())
+    Wrapper { box }:
+      box
+`),
+    ).toContain("TY0056");
+  });
+
+  it("accepts fresh construction and forwarding on every branch", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+@result(fresh)
+fn make(value: i32) -> Box
+  Box { value }
+
+@result(fresh)
+fn choose(value: i32, flag: bool) -> Box
+  if flag then: make(value) else: Box { value: value + 1 }
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects a fresh declaration that returns an input object", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+@result(fresh)
+fn invalid(value: Box, flag: bool) -> Box
+  if flag then:
+    return(Box { value: 0 })
+  value
+`),
+    ).toContain("TY0056");
+  });
+
+  it("accepts exact same-place returns and matching forwarding", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+fn identity(~value: Box) -> ~value
+  value
+
+fn forward(~value: Box) -> ~value
+  identity(~value)
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects a different same-typed parameter and a fresh replacement", () => {
+    const wrongParameter = diagnosticCodes(`
+obj Box { value: i32 }
+
+fn invalid(~left: Box, ~right: Box) -> ~left
+  right
+`);
+    const replacement = diagnosticCodes(`
+obj Box { value: i32 }
+
+fn invalid(~value: Box) -> ~value
+  Box { value: 0 }
+`);
+    expect({ wrongParameter, replacement }).toEqual({
+      wrongParameter: expect.arrayContaining(["TY0056"]),
+      replacement: expect.arrayContaining(["TY0056"]),
+    });
+  });
+
+  it("inherits trait contracts and rejects explicit incompatibility", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj Maker {}
+
+trait Factory
+  @result(fresh)
+  fn build(self) -> Box
+
+impl Factory for Maker
+  fn build(self) -> Box
+    Box { value: 0 }
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Maker {}
+
+trait Factory
+  @result(fresh)
+  fn build(self) -> Box
+
+impl Factory for Maker
+  @result(detached)
+  fn build(self) -> Box
+    Box { value: 0 }
+`),
+    ).toContain("TY0056");
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+trait Copier
+  @result(fresh)
+  fn copy(self) -> Box
+
+impl Copier for Box
+  fn copy(self) -> Box
+    self
+`),
+    ).toContain("TY0056");
+  });
+
+  it("records bounded validation counters", () => {
+    perf.increment.mockClear();
+    analyze(`
+obj Box { value: i32 }
+
+@result(fresh)
+fn make() -> Box
+  Box { value: 0 }
+`);
+    const counter = (name: string) =>
+      perf.increment.mock.calls.find(([candidate]) => candidate === name)?.[1];
+    expect(counter("borrowing.resultIdentity.declarations")).toBe(1);
+    expect(counter("borrowing.resultIdentity.paths")).toBe(1);
+    expect(counter("borrowing.resultIdentity.violations")).toBe(0);
+  });
+});
+
+describe("staged overlap contracts", () => {
+  const prelude = `
+obj Box { value: i32 }
+
+@staged(into: out)
+fn copy_value(source: Box, ~out: Box) -> void
+  let snapshot = source.value
+  out.value = snapshot
+`;
+
+  it("permits exact source and destination overlap after local staging", () => {
+    expect(() =>
+      analyze(`${prelude}
+fn update(~box: Box) -> void
+  copy_value(box, ~box)
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects source access after the first destination write", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+@staged(into: out)
+fn invalid(source: Box, ~out: Box) -> void
+  out.value = 1
+  out.value = source.value
+`),
+    ).toContain("TY0057");
+  });
+
+  it("keeps source children retained through a fresh wrapper", () => {
+    expect(
+      diagnosticCodes(`
+obj Child { value: i32 }
+obj Wrapper { child: Child }
+
+@result(fresh)
+fn snapshot(source: Wrapper) -> Wrapper
+  Wrapper { child: source.child }
+
+@staged(into: out)
+fn invalid(source: Wrapper, ~out: Wrapper) -> void
+  let copy = snapshot(source)
+  out.child.value = 1
+  let observed = copy.child.value
+`),
+    ).toContain("TY0057");
+  });
+
+  it("keeps fresh-wrapper field arguments source-bearing", () => {
+    expect(
+      diagnosticCodes(`
+obj Child { value: i32 }
+obj Wrapper { child: Child }
+
+@result(fresh)
+fn snapshot(source: Wrapper) -> Wrapper
+  Wrapper { child: source.child }
+
+fn read(child: Child) -> i32
+  child.value
+
+@staged(into: out)
+fn invalid(source: Wrapper, ~out: Wrapper) -> void
+  let copy = snapshot(source)
+  out.child.value = 1
+  let observed = read(copy.child)
+`),
+    ).toContain("TY0057");
+  });
+
+  it("keeps whole fresh wrappers source-bearing for reachable reads", () => {
+    expect(
+      diagnosticCodes(`
+obj Child { value: i32 }
+obj Wrapper { child: Child }
+
+@result(fresh)
+fn snapshot(source: Wrapper) -> Wrapper
+  Wrapper { child: source.child }
+
+fn read_wrapper(wrapper: Wrapper) -> i32
+  wrapper.child.value
+
+@staged(into: out)
+fn invalid(source: Wrapper, ~out: Wrapper) -> void
+  let copy = snapshot(source)
+  out.child.value = 1
+  let observed = read_wrapper(copy)
+`),
+    ).toContain("TY0057");
+  });
+
+  it("allows compatible forwarding and rejects uncertified forwarding", () => {
+    expect(() =>
+      analyze(`${prelude}
+@staged(into: out)
+fn forward(source: Box, ~out: Box) -> void
+  copy_value(source, ~out)
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn unbounded(source: Box, ~out: Box) -> void
+  let snapshot = source.value
+  out.value = snapshot
+
+@staged(into: out)
+fn invalid(source: Box, ~out: Box) -> void
+  unbounded(source, ~out)
+`),
+    ).toContain("TY0057");
+  });
+
+  it("publishes a fresh outer that retains destination children", () => {
+    expect(() =>
+      analyze(`
+obj Child { value: i32 }
+obj State { child: Child, count: i32 }
+
+@result(fresh)
+fn copied(source: State) -> State
+  State { child: source.child, count: source.count }
+
+impl State
+  @staged(into: self)
+  fn publish(~self, next: State) -> void
+    let child = next.child
+    let count = next.count
+    self.child = child
+    self.count = count
+
+fn valid(~state: State) -> void
+  let next = copied(state)
+  state.publish(next)
+`),
+    ).not.toThrow();
+  });
+
+  it("validates branches and loop backedges", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+@staged(into: out)
+fn branch(source: Box, ~out: Box, flag: bool) -> void
+  if flag:
+    out.value = 1
+  else:
+    let ignored = source.value
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+@staged(into: out)
+fn looped(source: Box, ~out: Box, count: i32) -> void
+  var index = 0
+  while index < count:
+    let snapshot = source.value
+    out.value = snapshot
+    index = index + 1
+`),
+    ).toContain("TY0057");
+  });
+
+  it("inherits a trait declaration contract without duplicate annotation", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj Copier {}
+
+trait CopyValue
+  @staged(into: out)
+  fn copy(self, source: Box, ~out: Box): () -> void
+
+impl CopyValue for Copier
+  fn copy(self, source: Box, ~out: Box) -> void
+    let snapshot = source.value
+    out.value = snapshot
+`),
+    ).not.toThrow();
+  });
+
+  it("keeps open trait dispatch conservative", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+trait Copier
+  @staged(into: out)
+  fn copy(self, source: Box, ~out: Box): () -> void
+
+fn invalid<T: Copier>(copier: T, ~box: Box): () -> void
+  copier.copy(box, ~box)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("rejects reentrancy and ambient access", () => {
+    const callback = diagnosticCodes(`
+obj Box { value: i32 }
+
+@staged(into: out)
+fn invalid(source: Box, ~out: Box, callback: fn() -> void) -> void
+  callback()
+  out.value = source.value
+`);
+    const ambient = diagnosticCodes(`
+obj Box { value: i32 }
+let shared = Box { value: 0 }
+
+@staged(into: out)
+fn invalid(source: Box, ~out: Box) -> void
+  let snapshot = source.value + shared.value
+  out.value = snapshot
+`);
+    expect({ callback, ambient }).toEqual({
+      callback: expect.arrayContaining(["TY0057"]),
+      ambient: expect.arrayContaining(["TY0057"]),
+    });
+  });
+
+  it("records linear validation counters", () => {
+    perf.increment.mockClear();
+    analyze(prelude);
+    const counter = (name: string) =>
+      perf.increment.mock.calls.find(([candidate]) => candidate === name)?.[1];
+    expect(counter("borrowing.staged.declarations")).toBe(1);
+    expect(counter("borrowing.staged.cfgBlocks")).toBeGreaterThan(0);
+    expect(counter("borrowing.staged.workItems")).toBeGreaterThan(0);
+    expect(counter("borrowing.staged.violations")).toBe(0);
+  });
+});
+
+describe("private builder contracts", () => {
+  const writerPrelude = `
+obj Cell { value: i32 }
+obj Source { cell: Cell }
+obj Writer { cell: Cell }
+
+@result(fresh)
+fn make_writer() -> Writer
+  Writer { cell: Cell { value: 0 } }
+
+@builder(into: out)
+fn write(source: Source, ~out: Writer, remaining: i32) -> void
+  out.cell.value = source.cell.value
+  if remaining > 0:
+    write(source, ~out, remaining - 1)
+`;
+
+  it("permits exact recursive writes into a locally fresh private builder", () => {
+    expect(() =>
+      analyze(`${writerPrelude}
+fn encode(source: Source) -> Writer
+  let ~writer = make_writer()
+  write(source, ~writer, 2)
+  writer
+`),
+    ).not.toThrow();
+  });
+
+  it("accepts a fresh allocation-backed builder beside another mutable input", () => {
+    expect(() =>
+      analyzeStd(`
+@intrinsic_type(type: "voyd.std.array")
+obj Buffer<T> { value: T }
+obj Parser { value: i32 }
+
+@result(fresh)
+fn make_buffer() -> Buffer<i32>
+  Buffer<i32> { value: 0 }
+
+@builder(into: out)
+fn append(~out: Buffer<i32>, ~parser: Parser) -> void
+  out.value = parser.value
+  parser.value = parser.value + 1
+
+fn finish(out: Buffer<i32>) -> Buffer<i32>
+  out
+
+fn parse(~parser: Parser, finish_early: bool) -> Buffer<i32>
+  let ~out = make_buffer()
+  if finish_early:
+    return finish(out)
+  append(out, parser)
+  out
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects source retention and closure capture", () => {
+    const retained = diagnosticCodes(`
+obj Cell { value: i32 }
+obj Source { cell: Cell }
+obj Writer { cell: Cell }
+
+@builder(into: out)
+fn invalid(source: Source, ~out: Writer) -> void
+  out.cell = source.cell
+`);
+    const captured = diagnosticCodes(`
+obj Cell { value: i32 }
+obj Source { cell: Cell }
+obj Writer { cell: Cell }
+
+@builder(into: out)
+fn invalid(source: Source, ~out: Writer) -> void
+  let callback: fn() : () -> i32 = () => source.cell.value
+  out.cell.value = callback()
+`);
+    expect({ retained, captured }).toEqual({
+      retained: expect.arrayContaining(["TY0058"]),
+      captured: expect.arrayContaining(["TY0058"]),
+    });
+  });
+
+  it("keeps non-fresh and open-dispatch destinations conservative", () => {
+    const nonFresh = diagnosticCodes(`${writerPrelude}
+fn invalid(source: Source, ~writer: Writer) -> void
+  write(source, ~writer, 1)
+`);
+    const open = diagnosticCodes(`
+obj Cell { value: i32 }
+obj Source { cell: Cell }
+obj Writer { cell: Cell }
+
+trait Write
+  @builder(into: out)
+  fn write(self, source: Source, ~out: Writer): () -> void
+
+@result(fresh)
+fn make_writer() -> Writer
+  Writer { cell: Cell { value: 0 } }
+
+fn encode<T: Write>(encoder: T, source: Source) -> Writer
+  let ~writer = make_writer()
+  encoder.write(source, ~writer)
+  writer
+`);
+    expect({ nonFresh, open }).toEqual({
+      nonFresh: expect.arrayContaining(["TY0048"]),
+      open: expect.arrayContaining(["TY0048"]),
+    });
+  });
+
+  it("rejects a source selected from the fresh builder itself", () => {
+    expect(
+      diagnosticCodes(`
+obj Cell { value: i32 }
+obj Writer { cell: Cell }
+
+@result(fresh)
+fn make_writer() -> Writer
+  Writer { cell: Cell { value: 0 } }
+
+@builder(into: out)
+fn write(source: Cell, ~out: Writer) -> void
+  out.cell.value = source.value
+
+fn invalid() -> Writer
+  let ~writer = make_writer()
+  write(writer.cell, ~writer)
+  writer
+`),
+    ).toContain("TY0048");
+  });
+
+  it("rejects a fresh outer builder that retains the same source", () => {
+    expect(
+      diagnosticCodes(`
+obj Child { value: i32 }
+obj Builder { child: Child }
+
+@result(fresh)
+fn make_builder(source: Child) -> Builder
+  Builder { child: source }
+
+@builder(into: out)
+fn write(source: Child, ~out: Builder) -> void
+  out.child.value = source.value
+
+fn invalid(source: Child) -> Builder
+  let ~builder = make_builder(source)
+  write(source, ~builder)
+  builder
+`),
+    ).toContain("TY0048");
+  });
+
+  it("inherits a trait declaration contract without duplicate annotation", () => {
+    expect(() =>
+      analyze(`
+obj Cell { value: i32 }
+obj Source { cell: Cell }
+obj Writer { cell: Cell }
+
+trait Encode
+  @builder(into: out)
+  fn encode(self, source: Source, ~out: Writer): () -> void
+
+impl Encode for Writer
+  fn encode(self, source: Source, ~out: Writer) -> void
+    out.cell.value = source.cell.value
+`),
+    ).not.toThrow();
+  });
+
+  it("records bounded validation counters", () => {
+    perf.increment.mockClear();
+    analyze(writerPrelude);
+    const counter = (name: string) =>
+      perf.increment.mock.calls.find(([candidate]) => candidate === name)?.[1];
+    expect(counter("borrowing.builder.declarations")).toBe(1);
+    expect(counter("borrowing.builder.originInsertions")).toBeLessThanOrEqual(
+      3,
+    );
+    expect(counter("borrowing.builder.forwarding")).toBe(1);
+    expect(counter("borrowing.builder.violations")).toBe(0);
   });
 });

@@ -16,6 +16,7 @@ pub use self::type::{ CharSet, ParseFloatError, ParseIntError, String, StringSli
 /// This is the sharp-edge constructor for code that already controls the
 /// underlying bytes. Invalid sequences are normalized into replacement runes
 /// during decoding, so prefer `from_utf8` when bytes come from external input.
+@result(detached)
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   string_type::new_string(from_bytes)
 
@@ -23,5 +24,6 @@ pub fn new_string(from_bytes: FixedArray<i32>): () -> String
 ///
 /// This is the canonical public entry point for converting byte arrays into
 /// strings from untrusted or host-provided data.
+@result(detached)
 pub fn from_utf8(source: Array<i32>) -> Result<String, Utf8Error>
   String::from_utf8(source)

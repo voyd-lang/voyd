@@ -128,9 +128,7 @@ export const expressionTypeFor = (
     context.typing.table.getExprType(expression);
   const symbolic = context.typing.borrowResolvedExprTypes.get(expression);
   const direct =
-    context.borrowIndexMode === "symbolic"
-      ? (symbolic ?? concrete)
-      : concrete;
+    context.borrowIndexMode === "symbolic" ? (symbolic ?? concrete) : concrete;
   if (typeof direct === "number") return direct;
   const instantiated = instantiatedExpressionTypes(context.typing).get(
     expression,
@@ -183,10 +181,7 @@ const uniqueTargets = (
       : symbolic;
   return Array.from(
     new Map(
-      selected.map((target) => [
-        `${target.moduleId}:${target.symbol}`,
-        target,
-      ]),
+      selected.map((target) => [`${target.moduleId}:${target.symbol}`, target]),
     ).values(),
   );
 };
@@ -307,9 +302,8 @@ const projectedTypesCache = new WeakMap<
   Map<TypeId, Map<string, readonly TypeId[]>>
 >();
 
-const projectionPathKey = (
-  projections: readonly PlaceProjection[],
-): string => JSON.stringify(projections);
+const projectionPathKey = (projections: readonly PlaceProjection[]): string =>
+  JSON.stringify(projections);
 
 const projectedTypeFields = (
   type: TypeId,
@@ -351,12 +345,7 @@ export const projectedTypes = (
   const key = projectionPathKey(projections);
   const cached = byPath.get(key);
   if (cached) return cached;
-  const result = resolveProjectedTypes(
-    type,
-    projections,
-    typing,
-    new Set(),
-  );
+  const result = resolveProjectedTypes(type, projections, typing, new Set());
   byPath.set(key, result);
   return result;
 };
@@ -431,7 +420,17 @@ const resolveProjectedTypes = (
 export const signatureForTarget = (
   target: SymbolRef,
   context: ResolveContext,
-): Pick<FunctionSignature, "parameters" | "returnType" | "effectRow"> | undefined =>
+):
+  | Pick<
+      FunctionSignature,
+      | "parameters"
+      | "returnType"
+      | "resultIdentity"
+      | "stagedAccess"
+      | "builderAccess"
+      | "effectRow"
+    >
+  | undefined =>
   target.moduleId === context.moduleId
     ? context.typing.functions.getSignature(target.symbol)
     : context.dependencies.get(target.moduleId)?.callables.get(target.symbol)

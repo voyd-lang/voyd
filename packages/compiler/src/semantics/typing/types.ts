@@ -27,6 +27,9 @@ import type { TypeTable } from "./type-table.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import type { Diagnostic } from "../ids.js";
 import type { SymbolRef } from "./symbol-ref.js";
+import type { ResultIdentity } from "../../result-identity.js";
+import type { StagedAccess } from "../../staged-access.js";
+import type { BuilderAccess } from "../../builder-access.js";
 
 export type TypeCheckMode = "relaxed" | "strict";
 export type SymbolRefKey = string;
@@ -136,6 +139,9 @@ export interface FunctionSignature {
   typeId: TypeId;
   parameters: readonly ParamSignature[];
   returnType: TypeId;
+  resultIdentity?: ResultIdentity;
+  stagedAccess?: StagedAccess;
+  builderAccess?: BuilderAccess;
   declaredReturnType?: HirTypeExpr;
   hasExplicitReturn: boolean;
   annotatedReturn: boolean;
@@ -849,6 +855,9 @@ const cloneFunctionSignature = (
   typeId: signature.typeId,
   parameters: signature.parameters.map((param) => ({ ...param })),
   returnType: signature.returnType,
+  resultIdentity: signature.resultIdentity,
+  stagedAccess: signature.stagedAccess,
+  builderAccess: signature.builderAccess,
   declaredReturnType: signature.declaredReturnType,
   hasExplicitReturn: signature.hasExplicitReturn,
   annotatedReturn: signature.annotatedReturn,

@@ -24,8 +24,9 @@ pub obj Bytes {
 
 impl Bytes
   /// Returns an independently owned copy of a scoped byte sequence.
+  @result(detached)
   api fn copied({ from source: Borrow<Bytes> }): () -> Bytes
-    bytes_from_array(Array::copied(from: source.storage))
+    Bytes { storage: Array::copied(from: source.storage) }
 
   /// Returns the number of bytes.
   api fn len(self) -> i32
@@ -54,21 +55,14 @@ impl Bytes
     self.slice(range)
 
   /// Returns a copied array of bytes.
+  @result(detached)
   api fn to_array(self) -> Array<Byte>
-    self.storage.copied()
+    Array::copied(from: self.storage)
 
   /// Returns an independently owned copy of these bytes.
+  @result(detached)
   api fn copied(self) -> Bytes
-    let ~copy = Array<Byte>::with_capacity(self.len())
-    var index = 0
-    while index < self.len():
-      match(self.get(index))
-        Some<Byte> { value }:
-          copy.push(value)
-        None:
-          void
-      index = index + 1
-    bytes_from_array(copy)
+    Bytes::copied(from: self)
 
 /// A mutable, growable byte buffer.
 pub obj ByteBuffer {
@@ -77,12 +71,14 @@ pub obj ByteBuffer {
 
 impl ByteBuffer
   /// Creates an empty byte buffer.
+  @result(fresh)
   api fn init() -> ByteBuffer
     ByteBuffer { storage: Array<Byte>::init() }
 
   /// Creates an empty byte buffer with at least `bytes` capacity.
   ///
   /// Negative values are clamped to `0`.
+  @result(fresh)
   api fn with_capacity(bytes: i32) -> ByteBuffer
     let capacity = if bytes > 0 then: bytes else: 0
     ByteBuffer { storage: Array<Byte>::with_capacity(capacity) }
@@ -102,8 +98,9 @@ impl ByteBuffer
   /// Returns an immutable bytes snapshot.
   ///
   /// The returned `Bytes` is a copy of the current buffer contents.
+  @result(detached)
   api fn as_bytes(self) -> Bytes
-    bytes_from_array(self.storage.copied())
+    Bytes { storage: Array::copied(from: self.storage) }
 
   /// Appends one byte.
   api fn push(~self, value: Byte) -> void
@@ -114,6 +111,7 @@ impl ByteBuffer
   /// Appends all bytes from `bytes`.
   ///
   /// This is useful for concatenating previously captured `Bytes` values.
+  @staged(into: self)
   api fn extend(~self, bytes: Bytes) -> void
     self.storage.extend(bytes.to_array())
 
@@ -121,5 +119,6 @@ impl ByteBuffer
   api fn clear(~self) -> void
     self.storage.clear()
 
+@result(fresh)
 fn bytes_from_array(storage: Array<Byte>) -> Bytes
   Bytes { storage: storage }

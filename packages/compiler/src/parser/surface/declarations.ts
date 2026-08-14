@@ -16,6 +16,18 @@ import type {
 } from "../attributes.js";
 import { ParserSyntaxError } from "../errors.js";
 import { normalizeNestedFunctionTypeAnnotation } from "./function-type-annotations.js";
+import type {
+  ResultIdentity,
+  ResultIdentityAttribute,
+} from "../../result-identity.js";
+import type {
+  StagedAccess,
+  StagedAccessAttribute,
+} from "../../staged-access.js";
+import type {
+  BuilderAccess,
+  BuilderAccessAttribute,
+} from "../../builder-access.js";
 
 export type SurfaceVisibility = {
   level: "object" | "module" | "package" | "public";
@@ -144,6 +156,9 @@ interface ParsedFunctionSignature {
   returnType?: Expr;
   typeParameters: readonly ParsedTypeParameter[];
   effectType?: Expr;
+  resultIdentity?: ResultIdentity;
+  stagedAccess?: StagedAccess;
+  builderAccess?: BuilderAccess;
 }
 
 interface SignatureParam {
@@ -211,6 +226,7 @@ export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
     "fn signature must be a form",
   );
   const signature = parseFunctionSignature(signatureForm);
+  attachResultIdentityAttribute(signature, form);
   if (!bodyExpr && form.attributes?.external) {
     const args = signature.params.map((param) => {
       const value = new IdentifierAtom(param.name);
@@ -282,6 +298,7 @@ const parseTraitMethod = (form: Form): ParsedTraitMethod => {
     "fn signature must be a form",
   );
   const signature = parseFunctionSignature(signatureForm);
+  attachResultIdentityAttribute(signature, form);
 
   if (
     form.attributes?.isolated === true &&
@@ -610,22 +627,28 @@ const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
   const effectTail = form.calls(":") ? form.at(2) : undefined;
   if (form.calls(":") && isForm(effectTail) && effectTail.calls("->")) {
     const head = parseFunctionHead(form.at(1));
+    const params = head.params.flatMap(parseParameter);
+    const result = parseReturnIdentity(effectTail.at(2), params);
     return {
       name: head.name,
       typeParameters: head.typeParameters,
-      params: head.params.flatMap(parseParameter),
+      params,
       effectType: effectTail.at(1),
-      returnType: effectTail.at(2),
+      returnType: result.returnType,
+      resultIdentity: result.resultIdentity,
     };
   }
 
   if (form.calls("->")) {
     const head = parseFunctionHead(form.at(1));
+    const params = head.params.flatMap(parseParameter);
+    const result = parseReturnIdentity(form.at(2), params);
     return {
       name: head.name,
       typeParameters: head.typeParameters,
-      params: head.params.flatMap(parseParameter),
-      returnType: form.at(2),
+      params,
+      returnType: result.returnType,
+      resultIdentity: result.resultIdentity,
     };
   }
 
@@ -635,6 +658,115 @@ const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
     typeParameters: head.typeParameters,
     params: head.params.flatMap(parseParameter),
   };
+};
+
+const parseReturnIdentity = (
+  returnType: Expr | undefined,
+  params: readonly SignatureParam[],
+): { returnType?: Expr; resultIdentity?: ResultIdentity } => {
+  if (!isForm(returnType) || !returnType.calls("~")) {
+    return { returnType };
+  }
+  if (returnType.length !== 2 || !isIdentifierAtom(returnType.at(1))) {
+    throw new ParserSyntaxError(
+      "same-place return must name one mutable-reference parameter",
+      returnType.location,
+    );
+  }
+  const target = returnType.at(1) as IdentifierAtom;
+  const parameterIndex = params.findIndex(
+    (param) => param.name === target.value,
+  );
+  if (parameterIndex < 0) {
+    throw new ParserSyntaxError(
+      `same-place return references unknown parameter '${target.value}'`,
+      target.location,
+    );
+  }
+  const parameter = params[parameterIndex]!;
+  if (parameter.bindingKind !== "mutable-ref") {
+    throw new ParserSyntaxError(
+      `same-place return parameter '${target.value}' must be declared with '~'`,
+      target.location,
+    );
+  }
+  return {
+    returnType: parameter.typeExpr,
+    resultIdentity: { kind: "same-place", parameterIndex },
+  };
+};
+
+const attachResultIdentityAttribute = (
+  signature: ParsedFunctionSignature,
+  form: Form,
+): void => {
+  attachStagedAccessAttribute(signature, form);
+  const attribute = form.attributes?.resultIdentity as
+    | ResultIdentityAttribute
+    | undefined;
+  if (!attribute) return;
+  if (signature.resultIdentity) {
+    throw new ParserSyntaxError(
+      "@result cannot be combined with a same-place return",
+      form.location,
+    );
+  }
+  signature.resultIdentity = attribute;
+};
+
+const attachStagedAccessAttribute = (
+  signature: ParsedFunctionSignature,
+  form: Form,
+): void => {
+  attachBuilderAccessAttribute(signature, form);
+  const attribute = form.attributes?.stagedAccess as
+    | StagedAccessAttribute
+    | undefined;
+  if (!attribute) return;
+  const destinationParameterIndex = signature.params.findIndex(
+    (parameter) => parameter.name === attribute.destinationParameterName,
+  );
+  if (destinationParameterIndex < 0) {
+    throw new ParserSyntaxError(
+      `@staged references unknown parameter '${attribute.destinationParameterName}'`,
+      form.location,
+    );
+  }
+  const destination = signature.params[destinationParameterIndex]!;
+  if (destination.bindingKind !== "mutable-ref") {
+    throw new ParserSyntaxError(
+      `@staged destination '${attribute.destinationParameterName}' must be declared with '~'`,
+      form.location,
+    );
+  }
+  signature.stagedAccess = { destinationParameterIndex };
+};
+
+const attachBuilderAccessAttribute = (
+  signature: ParsedFunctionSignature,
+  form: Form,
+): void => {
+  const attribute = form.attributes?.builderAccess as
+    | BuilderAccessAttribute
+    | undefined;
+  if (!attribute) return;
+  const destinationParameterIndex = signature.params.findIndex(
+    (parameter) => parameter.name === attribute.destinationParameterName,
+  );
+  if (destinationParameterIndex < 0) {
+    throw new ParserSyntaxError(
+      `@builder references unknown parameter '${attribute.destinationParameterName}'`,
+      form.location,
+    );
+  }
+  const destination = signature.params[destinationParameterIndex]!;
+  if (destination.bindingKind !== "mutable-ref") {
+    throw new ParserSyntaxError(
+      `@builder destination '${attribute.destinationParameterName}' must be declared with '~'`,
+      form.location,
+    );
+  }
+  signature.builderAccess = { destinationParameterIndex };
 };
 
 export const normalizeIntrinsicAttribute = (

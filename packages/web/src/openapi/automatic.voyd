@@ -17,11 +17,6 @@ obj PreparedRoute {
   operation: JsonValue
 }
 
-obj UniqueOperation {
-  operation: JsonValue,
-  seen: Dict<String, bool>
-}
-
 /// Renders an OpenAPI 3.1 document from an app's concrete routes.
 pub fn render_openapi(
   routes: Array<RecordedOpenApiRoute>,
@@ -32,13 +27,13 @@ pub fn render_openapi(
     title: "API".as_slice(),
     version: "0.0.0".as_slice()
   )
-  var root = Dict<String, JsonValue>::init()
-  root = root.setting("openapi", JsonString { value: "3.1.0".to_string() })
-  root = root.setting("info", info_json(api_config))
-  var paths = Dict<String, JsonValue>::init()
-  var components = Dict<String, JsonValue>::init()
-  var operation_ids = Dict<String, bool>::init()
-  var runtime_routes = Dict<String, bool>::init()
+  let ~root = Dict<String, JsonValue>::init()
+  let _ = root.set("openapi", JsonString { value: "3.1.0".to_string() })
+  let _ = root.set("info", info_json(api_config))
+  let ~paths = Dict<String, JsonValue>::init()
+  let ~components = Dict<String, JsonValue>::init()
+  let ~operation_ids = Dict<String, bool>::init()
+  let ~runtime_routes = Dict<String, bool>::init()
   var index = 0
   while index < routes.len():
     let route = routes.at(index)
@@ -49,7 +44,7 @@ pub fn render_openapi(
       Some<bool>:
         void
       None:
-        runtime_routes = runtime_routes.setting(runtime_key, true)
+        let _ = runtime_routes.set(runtime_key, true)
         if not contract.hidden and not contract.operation.hidden and not literal_hidden(contract.literal_docs):
           let inferred = operation_json(
             contract.operation,
@@ -61,17 +56,16 @@ pub fn render_openapi(
             Some<PreparedRoute> { value: prepared }:
               if path_method_available(paths, prepared.path, method):
                 let unique = unique_operation_id(operation_ids, prepared.operation)
-                operation_ids = unique.seen
-                paths = append_route(paths, prepared.path, method, unique.operation)
-                components = merge_components(components, inferred.components)
+                append_route(paths, prepared.path, method, unique)
+                components.extend(inferred.components)
             None:
               void
     index = index + 1
-  root = root.setting("paths", JsonObject { value: paths })
+  let _ = root.set("paths", JsonObject { value: paths })
   if not components.is_empty():
-    let component_root = Dict<String, JsonValue>::init()
-      .setting("schemas".to_string(), JsonObject { value: components })
-    root = root.setting("components", JsonObject { value: component_root })
+    let ~component_root = Dict<String, JsonValue>::init()
+    let _ = component_root.set("schemas".to_string(), JsonObject { value: components })
+    let _ = root.set("components", JsonObject { value: component_root })
   JsonObject { value: root }
 
 fn literal_hidden(docs: Option<JsonValue>) -> bool
@@ -88,11 +82,11 @@ fn apply_literal_docs(operation: JsonValue, docs: Option<JsonValue>) -> JsonValu
     Some<JsonValue> { value }:
       let source = object_entries(value)
       reject_advanced_literal_docs(source)
-      var target = object_entries(operation)
-      target = copy_if_present(source, target, from: "summary", to: "summary")
-      target = copy_if_present(source, target, from: "description", to: "description")
-      target = copy_if_present(source, target, from: "operation_id", to: "operationId")
-      target = copy_if_present(source, target, from: "tags", to: "tags")
+      let ~target = object_entries(operation).copied()
+      copy_if_present(source, target, from: "summary", to: "summary")
+      copy_if_present(source, target, from: "description", to: "description")
+      copy_if_present(source, target, from: "operation_id", to: "operationId")
+      copy_if_present(source, target, from: "tags", to: "tags")
       JsonObject { value: target }
 
 fn reject_advanced_literal_docs(docs: Dict<String, JsonValue>) -> void
@@ -106,16 +100,17 @@ fn reject_advanced_literal_docs(docs: Dict<String, JsonValue>) -> void
         void
     index = index + 1
 
+@staged(into: target)
 fn copy_if_present(
   source: Dict<String, JsonValue>,
-  target: Dict<String, JsonValue>,
+  ~target: Dict<String, JsonValue>,
   { from source_name: String, to target_name: String }
-) -> Dict<String, JsonValue>
+) -> void
   match(source.get(source_name))
     Some<JsonValue> { value }:
-      target.setting(target_name, value)
+      let _ = target.set(target_name, value)
     None:
-      target
+      void
 
 fn prepare_route(path: String, operation: JsonValue) -> Option<PreparedRoute>
   let normalized = openapi_path(path.as_slice())
@@ -138,30 +133,21 @@ fn path_method_available(paths: Dict<String, JsonValue>, path: String, method: S
     None:
       true
 
+@staged(into: paths)
 fn append_route(
-  paths: Dict<String, JsonValue>,
+  ~paths: Dict<String, JsonValue>,
   path: String,
   method: String,
   operation: JsonValue
-) -> Dict<String, JsonValue>
-  let path_item = match(paths.get(path))
-    Some<JsonValue> { value }: object_entries(value)
+) -> void
+  let ~path_item = match(paths.get(path))
+    Some<JsonValue> { value }: object_entries(value).copied()
     None: Dict<String, JsonValue>::init()
-  let updated_path_item = path_item.setting(method, operation)
-  paths.setting(path, JsonObject { value: updated_path_item })
-
-fn merge_components(target: Dict<String, JsonValue>, source: Dict<String, JsonValue>) -> Dict<String, JsonValue>
-  let entries = source.entries()
-  var result = target
-  var index = 0
-  while index < entries.len():
-    let entry = entries.at(index)
-    result = result.setting(entry.0.as_slice().to_string(), entry.1)
-    index = index + 1
-  result
+  let _ = path_item.set(method, operation)
+  let _ = paths.set(path, JsonObject { value: path_item })
 
 fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
-  var fields = object_entries(operation)
+  let ~fields = object_entries(operation).copied()
   let existing_parameters = match(fields.get("parameters"))
     Some<JsonValue> { value }:
       value.match(active)
@@ -170,13 +156,13 @@ fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
     None:
       Array<JsonValue>::init()
   let ~added_parameters = Array<JsonValue>::init()
-  var documented = Dict<String, bool>::init()
+  let ~documented = Dict<String, bool>::init()
   var parameter_index = 0
   while parameter_index < existing_parameters.len():
     let parameter = object_entries(existing_parameters.at(parameter_index))
     if string_field(parameter, "in").equals("path"):
       let parameter_name = string_field(parameter, "name").as_slice().to_string()
-      documented = documented.setting(parameter_name, true)
+      let _ = documented.set(parameter_name, true)
     parameter_index = parameter_index + 1
 
   let segments = path.as_slice().split(on: 47, keep_empty: false)
@@ -189,26 +175,26 @@ fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
         Some<bool>:
           void
         None:
-          var schema = Dict<String, JsonValue>::init()
-          schema = schema.setting("type", JsonString { value: "string".to_string() })
-          var parameter = Dict<String, JsonValue>::init()
-          parameter = parameter.setting("name", JsonString { value: name })
-            .setting("in", JsonString { value: "path".to_string() })
-            .setting("required", JsonBool { value: true })
-            .setting("schema", JsonObject { value: schema })
+          let ~schema = Dict<String, JsonValue>::init()
+          let _ = schema.set("type", JsonString { value: "string".to_string() })
+          let ~parameter = Dict<String, JsonValue>::init()
+          let _ = parameter.set("name", JsonString { value: name })
+          let _ = parameter.set("in", JsonString { value: "path".to_string() })
+          let _ = parameter.set("required", JsonBool { value: true })
+          let _ = parameter.set("schema", JsonObject { value: schema })
           added_parameters.push(JsonObject { value: parameter })
     segment_index = segment_index + 1
   if added_parameters.is_empty():
-    return operation
+    return JsonObject { value: fields }
   let parameters = existing_parameters.extended(added_parameters)
-  fields = fields.setting("parameters", JsonArray { value: parameters })
+  let _ = fields.set("parameters", JsonArray { value: parameters })
   JsonObject { value: fields }
 
 /// Operation IDs are optional. The first occurrence keeps a duplicate ID;
 /// later operations remain documented without that ID.
-fn unique_operation_id(seen: Dict<String, bool>, operation: JsonValue) -> UniqueOperation
-  var fields = object_entries(operation)
-  var updated_seen = seen
+@staged(into: seen)
+fn unique_operation_id(~seen: Dict<String, bool>, operation: JsonValue) -> JsonValue
+  let ~fields = object_entries(operation).copied()
   match(fields.get("operationId"))
     Some<JsonValue> { value }:
       value.match(active)
@@ -216,21 +202,18 @@ fn unique_operation_id(seen: Dict<String, bool>, operation: JsonValue) -> Unique
           let operation_id = active.value.as_slice().to_string()
           match(seen.get(operation_id))
             Some<bool>:
-              fields = fields.removing("operationId")
+              let _ = fields.remove("operationId")
             None:
-              updated_seen = seen.setting(operation_id, true)
+              let _ = seen.set(operation_id, true)
         else:
           void
     None:
       void
-  UniqueOperation {
-    operation: JsonObject { value: fields },
-    seen: updated_seen
-  }
+  JsonObject { value: fields }
 
 fn valid_path_parameters(path: String, operation: JsonValue) -> bool
   let fields = object_entries(operation)
-  var documented = Dict<String, bool>::init()
+  let ~documented = Dict<String, bool>::init()
   var has_documented_path_parameters = false
   match(fields.get("parameters"))
     Some<JsonValue> { value }:
@@ -249,7 +232,7 @@ fn valid_path_parameters(path: String, operation: JsonValue) -> bool
                 return false
               if not bool_field(parameter, "required"):
                 return false
-              documented = documented.setting(name, true)
+              let _ = documented.set(name, true)
             index = index + 1
         else:
           void
@@ -278,12 +261,12 @@ fn string_field(fields: Dict<String, JsonValue>, name: String) -> String
     None:
       String::init()
 fn info_json(config: OpenApiConfig) -> JsonValue
-  var out = Dict<String, JsonValue>::init()
-  out = out.setting("title", JsonString { value: config.title })
-  out = out.setting("version", JsonString { value: config.version })
+  let ~out = Dict<String, JsonValue>::init()
+  let _ = out.set("title", JsonString { value: config.title })
+  let _ = out.set("version", JsonString { value: config.version })
   match(config.description)
     Some<String> { value }:
-      out = out.setting("description", JsonString { value: value })
+      let _ = out.set("description", JsonString { value: value })
     None:
       void
   JsonObject { value: out }

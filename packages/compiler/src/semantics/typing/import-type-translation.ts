@@ -151,6 +151,9 @@ export const translateFunctionSignature = ({
       typeId,
       parameters,
       returnType,
+      resultIdentity: signature.resultIdentity,
+      stagedAccess: signature.stagedAccess,
+      builderAccess: signature.builderAccess,
       hasExplicitReturn: signature.hasExplicitReturn,
       annotatedReturn: signature.annotatedReturn ?? false,
       effectRow: translateEffectRow({

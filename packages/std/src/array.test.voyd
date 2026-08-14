@@ -441,3 +441,6 @@ test "array extend array overload":
   let ~extend_target = Array<i32>::init()
   extend_target.extend(source)
   assert(extend_target.len(), eq: source.len())
+  extend_target.extend(extend_target)
+  assert(extend_target.len(), eq: source.len() * 2)
+  assert(optional_i32_or(extend_target.get(4), -1), eq: 3)
