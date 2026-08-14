@@ -156,6 +156,15 @@ export const buildPackageSemanticInterface = ({
         ...(parameter.synthetic ? { synthetic: parameter.synthetic } : {}),
       })),
       returnType: typeEncoder.encodeType(signature.returnType),
+      ...(signature.resultIdentity
+        ? { resultIdentity: signature.resultIdentity }
+        : {}),
+      ...(signature.stagedAccess
+        ? { stagedAccess: signature.stagedAccess }
+        : {}),
+      ...(signature.builderAccess
+        ? { builderAccess: signature.builderAccess }
+        : {}),
       effects: typeEncoder.encodeEffects(signature.effectRow),
     };
   };
@@ -178,6 +187,9 @@ export const buildPackageSemanticInterface = ({
             : ("effect-operation" as const),
         ...(item.kind === "effect"
           ? { resumable: item.operations[index]!.resumable }
+          : {}),
+        ...("resultIdentity" in member && member.resultIdentity
+          ? { resultIdentity: member.resultIdentity }
           : {}),
         ...(ordinaryMutationSummaryIdForSymbol.get(member.symbol)
           ? {

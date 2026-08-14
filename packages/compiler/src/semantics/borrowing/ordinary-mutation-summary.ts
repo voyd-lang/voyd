@@ -31,6 +31,8 @@ export type OrdinaryMutationCallArgument = {
   parameter: number;
   callerParameter?: number;
   callerAccess?: "direct" | "reachable";
+  /** Direct access touches a fresh local outer identity, not retained inputs. */
+  freshOuter?: true;
   ambientObject: boolean;
   mayAliasParameters: readonly number[];
   fallbackAccess: OrdinaryParameterAccess;
@@ -530,6 +532,7 @@ const callInput = ({
       const source = parameterPlaceForIndexPlace(index, argument.place);
       return {
         parameter: argument.parameter,
+        ...(argument.fresh === true ? { freshOuter: true as const } : {}),
         ...(source ? { callerParameter: source.parameter } : {}),
         ...(source
           ? {
@@ -628,6 +631,7 @@ const applyAccessToArgument = ({
   if (argument.ambientObject) {
     return withAmbientAccess(summary, access);
   }
+  if (argument.freshOuter === true && kind === "direct") return summary;
   return argument.mayAliasParameters.reduce((current, parameter) => {
     const withAccess = withParameterAccess(
       current,

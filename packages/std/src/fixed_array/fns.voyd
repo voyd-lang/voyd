@@ -7,6 +7,7 @@ use std::optional::types::all
 ///
 /// Parameter:
 /// - `size`: Requested array length. Caller is responsible for passing a valid size.
+@result(fresh)
 pub fn new_fixed_array<T>(size: i32): () -> FixedArray<T>
   __array_new<T>(size)
 

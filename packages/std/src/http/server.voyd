@@ -246,15 +246,9 @@ impl RequestBody
           state.emitted_buffer = true
           if not state.streaming:
             state.done = true
-            RequestBodyReadPlan {
-              kind: 0,
-              buffered: buffered
-            }
+            RequestBodyReadPlan { kind: 0, buffered: buffered }
           else:
-            RequestBodyReadPlan {
-              kind: 2,
-              buffered: buffered
-            }
+            RequestBodyReadPlan { kind: 2, buffered: buffered }
     )
     if plan.kind == 0:
       return Ok<Option<Bytes>> { value: None {} }
@@ -275,26 +269,25 @@ impl RequestBody
           Ok<Option<Bytes>> { value: Some<Bytes> { value: value.chunk } }
 
   /// Buffers all remaining chunks while preserving the host body limit.
+  @result(detached)
   api fn read_all(self): HttpServer -> Result<Bytes, HostError>
     let ~buffer = ByteBuffer::init()
     var reading = true
     while reading:
       match(self.next())
         Err<HostError> { error }:
-          return Err<HostError> { error: error }
+          return Err<HostError> {
+            error: HostError {
+              code: error.code,
+              message: error.message.as_slice().to_string()
+            }
+          }
         Ok<Option<Bytes>> { value }:
           match(value)
             None:
               reading = false
             Some<Bytes> { value: chunk }:
-              var index = 0
-              while index < chunk.len():
-                match(chunk.get(index))
-                  Some<i32> { value: byte }:
-                    buffer.push(byte)
-                  None:
-                    void
-                index = index + 1
+              buffer.extend(chunk)
     Ok<Bytes> { value: buffer.as_bytes() }
 
 /// Responds to one pending request.

@@ -1,0 +1,40 @@
+obj Cell {
+  value: i32
+}
+
+obj Source {
+  cell: Cell
+}
+
+obj Writer {
+  cell: Cell
+}
+
+@result(detached)
+fn detached_copy(source: Source) -> Source
+  Source { cell: Cell { value: source.cell.value } }
+
+@result(fresh)
+fn fresh_writer() -> Writer
+  Writer { cell: Cell { value: 0 } }
+
+fn bump(~self: Writer) -> ~self
+  self.cell.value = self.cell.value + 1
+  self
+
+@access(staged: out)
+fn copy_value(source: Source, ~out: Writer) -> void
+  let value = source.cell.value
+  out.cell.value = value
+
+@access(builder: out)
+fn write_value(source: Source, ~out: Writer) -> void
+  out.cell.value = source.cell.value
+
+fn contracts_compile(source: Source) -> Writer
+  let detached = detached_copy(source)
+  let ~writer = fresh_writer()
+  copy_value(detached, writer)
+  write_value(source, writer)
+  let _ = writer.bump().bump()
+  writer

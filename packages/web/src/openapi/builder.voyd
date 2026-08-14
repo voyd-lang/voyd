@@ -83,9 +83,9 @@ pub fn operation_fragment(value: Operation, { include_doc_comments: bool }) -> J
     prefix: "Operation".to_string(),
     include_doc_comments: include_doc_comments
   )
-  var out = Dict<String, JsonValue>::init()
-  out = out.setting("operation", rendered.value)
-  out = out.setting("components", JsonObject { value: rendered.components })
+  let ~out = Dict<String, JsonValue>::init()
+  out.set("operation", rendered.value)
+  out.set("components", JsonObject { value: rendered.components })
   JsonObject { value: out }
 
 fn append_document_route(

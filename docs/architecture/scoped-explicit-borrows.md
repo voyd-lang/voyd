@@ -285,10 +285,55 @@ While an exclusive capability is active:
 - ambient object access is rejected unless local analysis proves it disjoint;
   and
 - a reference-bearing call result is conservatively treated as possibly
-  aliasing every reference-bearing argument for the rest of the active scope.
+  aliasing every reference-bearing argument for the rest of the active scope,
+  unless the selected callable publishes a bounded result-identity fact.
 
-The last rule is local to the caller. It is not a returned-origin contract
-published by the callee.
+Result identity is a small declaration fact separate from the ordinary mutation
+summary:
+
+| Fact | Meaning |
+| --- | --- |
+| Conservative | Default; the result may retain every reference-bearing input identity. |
+| Detached | No mutable identity visible from the result is retained from an input. |
+| Fresh outer | The returned outer identity is new; reachable children may still retain input identities. |
+| Same place | The result transfers the exact exclusive place received in one named `~` parameter. |
+
+`@result(detached)` and `@result(fresh)` declare independent results. A return
+such as `-> ~self` declares same-place identity while keeping the ordinary ABI
+return type of `self`. Bodies and trait implementations are checked against the
+published fact. Missing package metadata is conservative.
+
+Same-place results are initially expression-only capabilities: they may be
+ignored, chained immediately through a matching same-place receiver or
+parameter, or forwarded by another matching same-place return. They cannot be
+stored, duplicated, captured, suspended, converted to a plain value, or used
+alongside the original place. Named capability moves are deferred until the CFG
+has explicit move-state semantics.
+
+This fact is constant size per callable and does not carry field, projection,
+generic-wrapper, call-path, or aggregate provenance. Overload resolution does
+not inspect it. The compiler handles a call from its selected signature in O(1)
+and a same-place chain in O(chain length).
+
+Each use of the repeatable `@access` attribute selects a separately checked
+access contract by labeling its destination as `staged:` or `builder:`. True
+source/destination overlap uses `@access(staged: destination)`. It stores one
+mutable parameter index and is checked with one forward
+CFG bit: after the first destination write, no other reference-bearing input may
+be accessed. One exact compatible staged call may forward the relationship.
+Open or ambiguous calls, ambient access, callbacks, effects, and suspension are
+ineligible. The caller relaxes only the declared destination/input pairs for an
+exact selected target; missing metadata keeps the conservative path.
+
+Recursive streaming into a private output uses the distinct
+`@access(builder: destination)` contract. The caller must supply a locally fresh,
+unique destination to an exact closed target, and no source may derive from
+that destination. The body checker rejects retaining, returning, capturing, or
+otherwise publishing a reference-bearing source through the builder, along
+with ambient access, re-entry, effects, and suspension. Compatible recursive
+and forwarding calls are allowed. This contract also stores one parameter
+index and does not weaken the read-before-write rule of
+`@access(staged: destination)`.
 
 Direct and reachable modes are separate safety facts. A runtime identity guard
 can prove that two exact object handles name different allocations. Comparing
@@ -303,12 +348,9 @@ An active `~T` capability cannot be stored, captured, suspended, passed to an
 unknown callable as plain `T`, or otherwise hidden from mutation analysis. An
 exclusive reborrow suspends its parent until the nested call returns.
 
-An exclusive capability itself cannot be returned. A callable may return an
-ordinary object handle derived from an argument because its exclusive access
-has ended when the call returns. The caller applies the conservative local
-result-alias rule above, so it cannot use that handle while an overlapping
-parent capability remains active. No callee-specific returned-origin summary is
-needed.
+An exclusive capability itself cannot be returned as a plain value. A callable
+may either return an ordinary object handle under the conservative result rule,
+or explicitly transfer the exact capability with a checked same-place result.
 
 ### Spell scoped borrows as `Borrow<T>`
 

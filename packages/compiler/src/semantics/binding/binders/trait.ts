@@ -264,6 +264,20 @@ const bindTraitMethod = ({
     bindExpr(decl.body, ctx, tracker);
   });
 
+  const resultIdentity = decl.signature.resultIdentity;
+  const returnTypeExpr =
+    resultIdentity?.kind === "same-place"
+      ? params[resultIdentity.parameterIndex]?.typeExpr
+      : decl.signature.returnType;
+  if (resultIdentity?.kind === "same-place" && !returnTypeExpr) {
+    const parameterName =
+      params[resultIdentity.parameterIndex]?.name ??
+      `#${resultIdentity.parameterIndex + 1}`;
+    throw new Error(
+      `same-place return parameter '${parameterName}' must have a known type`,
+    );
+  }
+
   return {
     name: decl.signature.name.value,
     form: decl.form,
@@ -272,7 +286,10 @@ const bindTraitMethod = ({
     nameAst: decl.signature.name,
     params,
     typeParameters,
-    returnTypeExpr: decl.signature.returnType,
+    returnTypeExpr,
+    resultIdentity,
+    stagedAccess: decl.signature.stagedAccess,
+    builderAccess: decl.signature.builderAccess,
     effectTypeExpr: decl.signature.effectType,
     defaultBody: decl.body,
     intrinsic: decl.intrinsic,
@@ -517,6 +534,9 @@ export const makeParsedFunctionFromTraitMethod = (
         }) ?? [],
       params: signatureParams,
       returnType,
+      resultIdentity: method.resultIdentity,
+      stagedAccess: method.stagedAccess,
+      builderAccess: method.builderAccess,
     },
     body: clonedDefaultBody ?? form,
     intrinsic: normalizeIntrinsicAttribute(

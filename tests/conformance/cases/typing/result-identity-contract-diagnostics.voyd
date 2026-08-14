@@ -1,0 +1,25 @@
+obj Cell {
+  value: i32
+}
+
+obj Source {
+  cell: Cell
+}
+
+obj Writer {
+  cell: Cell
+}
+
+@result(detached)
+fn invalid_detached(source: Source) -> Source
+  source
+
+@access(staged: out)
+fn invalid_staged(source: Source, ~out: Writer) -> void
+  out.cell.value = 1
+  out.cell.value = source.cell.value
+
+@access(builder: out)
+fn invalid_builder(source: Source, ~out: Writer) -> void
+  out.cell = source.cell
+

@@ -31,14 +31,16 @@ pub fn error_code_numeric_overflow() -> i32
 pub fn error_code_missing_field() -> i32
   6
 
+@result(detached)
 pub fn make_error(code: i32, message: String): () -> MsgPackError
   MsgPackError {
     code: code,
-    custom_code: "".to_string(),
-    path: "$".to_string(),
-    message: message
+    custom_code: "".as_slice().to_string(),
+    path: "$".as_slice().to_string(),
+    message: message.as_slice().to_string()
   }
 
+@result(detached)
 pub fn make_custom_error(
   code: String,
   path: String,
@@ -46,7 +48,7 @@ pub fn make_custom_error(
 ): () -> MsgPackError
   MsgPackError {
     code: error_code_decode_failed(),
-    custom_code: code,
-    path: path,
-    message: message
+    custom_code: code.as_slice().to_string(),
+    path: path.as_slice().to_string(),
+    message: message.as_slice().to_string()
   }

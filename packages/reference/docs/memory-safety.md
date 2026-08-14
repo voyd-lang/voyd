@@ -390,6 +390,58 @@ fn checksum(bytes: Borrow<Bytes>) -> i32
 checksum(packet.body)
 ```
 
+Library APIs can publish a checked result-identity contract when the ordinary
+conservative rule is unnecessarily restrictive:
+
+```voyd
+@result(detached)
+fn parse(~cursor: Cursor) -> Result<Value, ParseError>
+
+@result(fresh)
+fn copied(source: Buffer) -> Buffer
+
+fn set(~self, key: Key, value: Value) -> ~self
+```
+
+`detached` means the result exposes no mutable identity from an input. `fresh`
+means only the returned outer object is new; its elements may still alias input
+objects. `-> ~self` transfers the exact exclusive receiver so calls can be
+chained without allocation or copying. A same-place result is temporary: use it
+immediately in another matching mutable call, return it from another matching
+same-place function, or ignore it. It cannot be saved in a plain binding or
+converted to an ordinary value.
+
+Unannotated and imported legacy callables remain conservative. These contracts
+do not change overload selection or runtime representation.
+
+Library code uses the repeatable `@access` attribute for independently checked
+mutable-access contracts. Code that deliberately snapshots a possibly
+overlapping source before mutation selects the `staged:` variant:
+
+```voyd
+@access(staged: self)
+fn extend(~self, other: Array<T>) -> void
+```
+
+The compiler verifies that all source access finishes before the first write to
+`self`. This is intended for collection and byte-buffer primitives; ordinary
+application code normally just calls those APIs. Dynamic dispatch, callbacks,
+effects, and suspension remain conservative.
+
+Recursive encoders select the `builder:` variant to stream into a locally fresh
+private builder:
+
+```voyd
+@access(builder: output)
+fn encode(~output: ByteBuffer, value: Value) -> void
+```
+
+The destination must be a unique fresh local, the call target must be exact,
+and the compiler checks that the function cannot retain, return, or capture a
+reference-bearing source through the builder. This permits normal recursive
+streaming while keeping open dispatch, effects, callbacks, suspension, and
+non-fresh destinations conservative.
+
 `Borrow<T>` is a compiler-known type constructor with exactly one argument. It
 may be the complete type of a callable input, including an input of a nested
 function type:

@@ -54,7 +54,7 @@ fn overlay_object(schema: JsonValue, docs: OpenApiSchemaDocs) -> JsonValue
 
 fn overlay_object_fields(source: Dict<String, JsonValue>, docs: OpenApiSchemaDocs) -> JsonValue
   let entries = source.entries()
-  var fields = Dict<String, JsonValue>::with_capacity(entries.len() + 1)
+  let ~fields = Dict<String, JsonValue>::with_capacity(entries.len() + 1)
   let has_description = match(docs.description)
     Some<String>:
       true
@@ -64,14 +64,14 @@ fn overlay_object_fields(source: Dict<String, JsonValue>, docs: OpenApiSchemaDoc
   while index < entries.len():
     let entry = entries.at(index)
     if entry.0.equals("properties") and not docs.fields.is_empty():
-      fields = fields.setting(entry.0.as_slice().to_string(), overlay_properties(entry.1, docs.fields))
+      let _ = fields.set(entry.0.as_slice().to_string(), overlay_properties(entry.1, docs.fields))
     else:
       if not entry.0.equals("description") or not has_description:
-        fields = fields.setting(entry.0.as_slice().to_string(), copy_json_value(entry.1))
+        let _ = fields.set(entry.0.as_slice().to_string(), copy_json_value(entry.1))
     index = index + 1
   match(docs.description)
     Some<String> { value }:
-      fields = fields.setting("description", JsonString { value: value })
+      let _ = fields.set("description", JsonString { value: value })
     None:
       void
   JsonObject { value: fields }
@@ -80,16 +80,16 @@ fn overlay_properties(value: JsonValue, docs: Array<OpenApiFieldDocs>) -> JsonVa
   value.match(active)
     JsonObject:
       let entries = active.value.entries()
-      var properties = Dict<String, JsonValue>::with_capacity(entries.len())
+      let ~properties = Dict<String, JsonValue>::with_capacity(entries.len())
       var index = 0
       while index < entries.len():
         let entry = entries.at(index)
         let property = copy_json_value(entry.1)
         match(field_description(docs, entry.0))
           Some<String> { value: description }:
-            properties = properties.setting(entry.0.as_slice().to_string(), with_description(property, description))
+            let _ = properties.set(entry.0.as_slice().to_string(), with_description(property, description))
           None:
-            properties = properties.setting(entry.0.as_slice().to_string(), property)
+            let _ = properties.set(entry.0.as_slice().to_string(), property)
         index = index + 1
       JsonObject { value: properties }
     else:
@@ -107,8 +107,10 @@ fn field_description(docs: Array<OpenApiFieldDocs>, name: String) -> Option<Stri
 fn with_description(value: JsonValue, description: String) -> JsonValue
   value.match(active)
     JsonObject:
+      let ~fields = active.value.copied()
+      fields.set("description", JsonString { value: description })
       JsonObject {
-        value: active.value.setting("description", JsonString { value: description })
+        value: fields
       }
     else:
       value

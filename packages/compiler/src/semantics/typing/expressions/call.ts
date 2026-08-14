@@ -3154,10 +3154,8 @@ const ensureMutableArgument = ({
     }
   }
   const span = argExpr?.span ?? param.span ?? ctx.hir.module.span;
-  const symbol =
-    typeof arg.exprId === "number"
-      ? findBindingSymbol(arg.exprId, ctx)
-      : undefined;
+  const samePlaceSource = samePlaceSourceExpression(arg.exprId, ctx);
+  const symbol = findBindingSymbol(samePlaceSource ?? arg.exprId, ctx);
   const paramName = param.name ?? param.label ?? `parameter ${index + 1}`;
 
   if (typeof symbol !== "number") {
@@ -3195,6 +3193,84 @@ const ensureMutableArgument = ({
     ctx,
     reason: `${paramName} requires a mutable object reference`,
   });
+};
+
+const samePlaceSourceExpression = (
+  expressionId: HirExprId,
+  ctx: TypingContext,
+): HirExprId | undefined => {
+  let current = expressionId;
+  let unwrapped = false;
+  const seen = new Set<HirExprId>();
+  while (!seen.has(current)) {
+    seen.add(current);
+    const source = directSamePlaceSourceExpression(current, ctx);
+    if (source === undefined) return unwrapped ? current : undefined;
+    current = source;
+    unwrapped = true;
+  }
+  return undefined;
+};
+
+const directSamePlaceSourceExpression = (
+  expressionId: HirExprId,
+  ctx: TypingContext,
+): HirExprId | undefined => {
+  const expression = ctx.hir.expressions.get(expressionId);
+  if (
+    expression?.exprKind !== "call" &&
+    expression?.exprKind !== "method-call"
+  ) {
+    return undefined;
+  }
+  const targets = Array.from(
+    ctx.callResolution.targets.get(expressionId)?.values() ?? [],
+  );
+  if (targets.length === 0) return undefined;
+  const identities = targets.map((target) => {
+    const signature =
+      target.moduleId === ctx.moduleId
+        ? ctx.functions.getSignature(target.symbol)
+        : ctx.dependencies
+            .get(target.moduleId)
+            ?.typing.functions.getSignature(target.symbol);
+    return signature?.resultIdentity;
+  });
+  const first = identities[0];
+  if (
+    first?.kind !== "same-place" ||
+    identities.some(
+      (identity) =>
+        identity?.kind !== "same-place" ||
+        identity.parameterIndex !== first.parameterIndex,
+    )
+  ) {
+    return undefined;
+  }
+  if (expression.exprKind === "method-call" && first.parameterIndex === 0) {
+    return expression.target;
+  }
+  const plans = Array.from(
+    ctx.callResolution.argumentPlans.get(expressionId)?.values() ?? [],
+  );
+  const entries = plans.flatMap((plan) => {
+    const entry = plan[first.parameterIndex];
+    return entry ? [entry] : [];
+  });
+  if (
+    entries.length === 0 ||
+    entries.some((entry) => entry.kind !== "direct")
+  ) {
+    return undefined;
+  }
+  const argIndexes = new Set(
+    entries.flatMap((entry) =>
+      entry.kind === "direct" ? [entry.argIndex] : [],
+    ),
+  );
+  if (argIndexes.size !== 1) return undefined;
+  const argument = expression.args[Array.from(argIndexes)[0]!];
+  return typeof argument?.expr === "number" ? argument.expr : undefined;
 };
 
 const traitMethodImplMetadataFor = ({

@@ -182,6 +182,35 @@
       ]
     },
     {
+      "id": "typing.result-identity-contracts",
+      "title": "Result identity and bounded mutation contracts",
+      "entry": "cases/typing/result-identity-contracts.voyd",
+      "tags": ["typing", "borrowing", "compile"],
+      "cases": [
+        {
+          "id": "typing.borrowing.result-identity-contracts",
+          "title": "accepts checked result, same-place, staged, and builder contracts",
+          "expect": { "kind": "compile-success" }
+        }
+      ]
+    },
+    {
+      "id": "typing.result-identity-contract-diagnostics",
+      "title": "Result identity and bounded mutation contract diagnostics",
+      "entry": "cases/typing/result-identity-contract-diagnostics.voyd",
+      "tags": ["typing", "borrowing", "diagnostics"],
+      "cases": [
+        {
+          "id": "typing.borrowing.result-identity-contract-diagnostics",
+          "title": "rejects invalid result, staged, and builder declarations",
+          "expect": {
+            "kind": "diagnostics",
+            "codes": ["TY0056", "TY0057", "TY0058"]
+          }
+        }
+      ]
+    },
+    {
       "id": "runtime.borrowing",
       "title": "Exclusive mutable borrow runtime semantics",
       "entry": "cases/runtime/borrowing.voyd",

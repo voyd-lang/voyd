@@ -47,6 +47,7 @@ type ExpandFunctionalMacroOptions = {
 
 const DEFAULT_MAX_ATTRIBUTE_EXPANSION_DEPTH = 64;
 const RESERVED_ATTRIBUTE_NAMES = new Set([
+  "access",
   "compiler_contract",
   "compiler_impl",
   "effect",
@@ -55,6 +56,7 @@ const RESERVED_ATTRIBUTE_NAMES = new Set([
   "intrinsic_type",
   "isolated",
   "operation",
+  "result",
   "type",
 ]);
 

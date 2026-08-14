@@ -50,7 +50,8 @@ Mutable access does not move or free the value. A callable MAY return an ordinar
 object handle derived from an argument because the callee's exclusive access has
 ended on return. The caller MUST conservatively treat a reference-bearing result
 as a possible alias of every reference-bearing argument while an overlapping
-parent capability remains active.
+parent capability remains active, except when the selected callable publishes one
+of the bounded result-identity contracts in section 3.1.
 
 ### 2.1 Local duration
 
@@ -111,6 +112,101 @@ fn update(~state: State) -> void
 ```
 
 `update` publishes a direct read and reachable write for parameter zero.
+
+### 3.1 Result identity
+
+Result identity is a separate constant-size callable fact. It is not part of the
+ordinary mutation-summary lattice. A callable publishes exactly one of:
+
+- `conservative`, the default when no fact is present: the result may retain any
+  reference-bearing argument identity;
+- `detached`: no mutable identity visible from the result is retained from a
+  reference-bearing argument;
+- `fresh outer`: the returned outer mutable identity is new, while values
+  reachable through it may retain argument identities; or
+- `same place(parameter)`: the result is the exact exclusive place received in
+  the named `~` parameter.
+
+`@result(detached)` and `@result(fresh)` declare the two independent-result
+contracts. `-> ~parameter` declares the same-place contract and has the ordinary
+return type of that parameter:
+
+```voyd
+@result(detached)
+fn parse(~cursor: Cursor) -> Result<Value, Error>
+
+@result(fresh)
+fn copied(source: Buffer) -> Buffer
+
+fn set(~self, key: Key, value: Value) -> ~self
+```
+
+The compiler MUST check each declaration against its body. Missing or invalid
+metadata is conservative at import and cache boundaries. Trait implementations
+MUST satisfy the declared trait-method contract. Result identity MUST NOT affect
+overload selection or code-generation ABI types.
+
+A same-place result is an ephemeral exclusive capability. It may be ignored,
+used immediately as the matching `~` receiver or argument of another same-place
+call, or returned from a callable with the same contract. Phase-one source rules
+MUST reject plain binding, aggregate storage, duplication, closure capture,
+suspension or effects while the capability is live, conversion to plain `T`, and
+reuse of the original place after transfer. Supporting a named moved capability
+requires separate control-flow move-state semantics.
+
+The fact has constant state per callable: an enum and, for `same place`, one
+parameter index. Analysis MUST NOT infer result provenance through call graphs,
+generic wrappers, aggregate shapes, or projection families.
+
+### 3.2 Staged overlap
+
+Each use of the repeatable `@access` attribute selects one of two separately
+checked mutable-access contracts by labeling its destination parameter as
+`staged:` or `builder:`. A callable MAY declare both variants when it satisfies
+both proof obligations.
+Staged overlap is the contract for an operation that captures
+all reference-bearing source input before mutating one named destination:
+
+```voyd
+@access(staged: destination)
+fn append(~destination: Buffer, source: Bytes) -> void
+```
+
+The destination MUST be a `~` parameter. Every control-flow path MUST perform
+all accesses through other reference-bearing parameters before its first write
+through the destination. A direct nested call MAY forward the relationship only
+when the selected exact callable publishes a compatible staged contract.
+Ambient reference-bearing access, reentrant control, suspension, effects, open
+or ambiguous dispatch, and a source access after the first destination write
+invalidate the declaration.
+
+At a call site, the compiler MAY permit actual source/destination overlap only
+for an exact, closed, unambiguous staged target. Missing package metadata is
+conservative. The package fact contains one destination parameter index and is
+not part of the ordinary mutation-summary lattice or result identity.
+
+### 3.3 Private builder ownership
+
+A recursive streaming operation MAY declare one private mutable destination:
+
+```voyd
+@access(builder: destination)
+fn encode(~destination: Buffer, source: Value) -> void
+```
+
+The destination MUST be a `~` parameter. At each accepted call it MUST be a
+locally created, unique fresh value, the selected target MUST be exact and
+closed, and source inputs MUST NOT derive from that destination. The body MUST
+NOT retain, return, capture, or publish a reference-bearing source through the
+destination. Ambient reference-bearing access, reentrant control, suspension,
+and effects invalidate the declaration. A recursive or forwarding call MAY
+carry the relationship only through an exact compatible
+`@access(builder: destination)` contract.
+
+This contract permits interleaved source reads and destination writes, so it
+MUST remain separate from staged overlap. Its package fact contains one
+destination parameter index and is independent of result identity and the
+ordinary mutation-summary lattice. Missing metadata is conservative.
 
 An ordinary signature is an upper bound. Plain `T` permits at most `read`; `~T`
 permits at most `write`. A trait declaration provides the bound for dynamic

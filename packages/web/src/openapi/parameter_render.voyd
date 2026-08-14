@@ -68,26 +68,28 @@ fn render_shape_parameters(
       var index = 0
       while index < root.fields.len():
         let field = root.fields.at(index)
-        var parameter = Dict<String, JsonValue>::init()
-        parameter = parameter.setting("name", JsonString { value: field.name })
-        parameter = parameter.setting("in", JsonString { value: location })
+        let ~parameter = Dict<String, JsonValue>::init()
+        parameter.set("name", JsonString { value: field.name })
+        parameter.set("in", JsonString { value: location })
         let parameter_required = required or not field.optional
-        parameter = parameter.setting("required", JsonBool { value: parameter_required })
+        parameter.set("required", JsonBool { value: parameter_required })
         if include_doc_comments:
-          parameter = setting_optional_string(parameter, "description", field.documentation)
-        parameter = parameter.setting("schema", schema_node(field.shape, prefix: stable_prefix))
+          set_optional_string(parameter, "description", field.documentation)
+        parameter.set("schema", schema_node(field.shape, prefix: stable_prefix))
         out.push(JsonObject { value: parameter })
         index = index + 1
     else:
       void
   RenderedParameters { value: out, components: rendered_components }
 
-fn setting_optional_string(target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> Dict<String, JsonValue>
+@access(staged: target)
+fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> void
   match(value)
     Some<String> { value }:
-      target.setting(key.to_string(), JsonString { value: value })
+      let _ = target.set(key.to_string(), JsonString { value: value })
     None:
-      target
+      void
 
-fn setting_optional_string(target: Dict<String, JsonValue>, key: String, value: Option<String>) -> Dict<String, JsonValue>
-  setting_optional_string(target, key.as_slice(), value)
+@access(staged: target)
+fn set_optional_string(~target: Dict<String, JsonValue>, key: String, value: Option<String>) -> void
+  set_optional_string(target, key.as_slice(), value)

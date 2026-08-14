@@ -28,6 +28,7 @@ pub obj ArrayPop<T> {
 
 impl Array<i32>
   /// Returns an independently owned copy of a scoped array.
+  @result(detached)
   api fn copied({ from source: Borrow<Array<i32>> }): () -> Array<i32>
     let count = source.count
     let next_raw = new_fixed_array<i32>(count)
@@ -41,10 +42,12 @@ impl Array<i32>
 
 impl<T> Array<T>
   /// Creates an empty array.
+  @result(fresh)
   api fn init() -> Array<T>
     Array<T> { storage: make_storage<T>(4), count: 0 }
 
   /// Creates an empty array with capacity for at least `size` elements.
+  @result(fresh)
   api fn with_capacity(size: i32) -> Array<T>
     let capacity = if size > 0 then: size else: 0
     Array<T> { storage: make_storage<T>(capacity), count: 0 }
@@ -60,6 +63,7 @@ impl<T> Array<T>
   ///
   /// Example:
   /// `let copy = values.copied(add_capacity: 8)`
+  @result(fresh)
   api fn copied(self, add_capacity?: i32) -> Array<T>
     let additional = add_capacity?.max(0) ?? 0
     let required = self.count + additional
@@ -376,6 +380,7 @@ impl<T> Array<T>
     Array<T> { storage: next_raw, count: self.count }
 
   /// Copies values into a fixed-size array.
+  @result(fresh)
   api fn to_fixed_array(self) -> FixedArray<T>
     let next_raw = new_fixed_array<T>(self.count)
     __array_copy(next_raw, {
@@ -387,6 +392,7 @@ impl<T> Array<T>
     next_raw
 
   /// Copies values into a fixed-size array.
+  @result(fresh)
   api fn raw_storage(self) -> FixedArray<T>
     self.to_fixed_array()
 
@@ -645,19 +651,21 @@ impl<T> Array<T>
     __array_get(removed.storage, 0)
 
   /// Appends values from another collection or sequence.
+  @access(staged: self)
   api fn extend(~self, other: Array<T>) -> void
     if other.count == 0:
       return void
 
-    self.ensure_capacity(self.count + other.count)
+    let source_count = other.count
     let source = other.to_fixed_array()
+    self.ensure_capacity(self.count + source_count)
     __array_copy(self.storage, {
       from: source,
       to_index: self.count,
       from_index: 0,
-      count: other.count
+      count: source_count
     })
-    self.count = self.count + other.count
+    self.count = self.count + source_count
 
   /// Replaces a range with inserted values and returns removed values.
   ///
@@ -973,6 +981,7 @@ fn trap_out_of_bounds<T>(source: FixedArray<T>) -> T
   __array_get(source, __array_len(source))
 
 /// Allocates backing storage with non-negative capacity.
+@result(fresh)
 fn make_storage<T>(capacity: i32) -> FixedArray<T>
   let safe_capacity = if capacity > 0 then: capacity else: 0
   new_fixed_array<T>(safe_capacity)
@@ -1059,6 +1068,7 @@ pub fn new_array<T>({ from source: FixedArray<T> }) -> Optional<Array<T>>
     }
 
 /// Creates an array from fixed storage without null-entry checks.
+@result(fresh)
 pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
   Array<T> { storage: source, count: __array_len(source) }
 

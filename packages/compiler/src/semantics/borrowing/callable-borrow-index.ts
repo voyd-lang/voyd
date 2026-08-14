@@ -38,7 +38,11 @@ import {
   typeHasIntrinsicRole,
   typeHasNominalIdentity,
 } from "./intrinsic-type-role.js";
-import type { OrdinaryMutationSummary } from "./ordinary-mutation-summary.js";
+import {
+  OrdinaryParameterAccess,
+  type OrdinaryMutationSummary,
+} from "./ordinary-mutation-summary.js";
+import type { ResultIdentity } from "../../result-identity.js";
 
 export type CallableBorrowIndexAccess = {
   exprId: HirExprId;
@@ -63,6 +67,8 @@ export type CallableBorrowIndexArgument = {
   moduleStorage?: true;
   fresh?: true;
   provenanceFreeFresh?: true;
+  /** Local roots that a builder source expression may still reference. */
+  builderSourceRoots?: readonly SymbolId[];
   /** Caller parameters that may be reachable from this local argument. */
   callerParameterOrigins?: readonly number[];
   /** Caller-local places retained by this argument; never crosses a summary boundary. */
@@ -82,8 +88,14 @@ export type CallableBorrowIndexCall = {
   arguments: readonly CallableBorrowIndexArgument[];
   signature?: Pick<
     FunctionSignature,
-    "parameters" | "returnType" | "effectRow"
+    | "parameters"
+    | "returnType"
+    | "resultIdentity"
+    | "stagedAccess"
+    | "builderAccess"
+    | "effectRow"
   >;
+  resultIdentity?: ResultIdentity;
   intrinsic: boolean;
   intrinsicBoundary: boolean;
   /** A type-parameter object construction, which performs no callable work. */
@@ -94,6 +106,8 @@ export type CallableBorrowIndexCall = {
   formsExplicitBorrow: boolean;
   returnsBorrowed: boolean;
   resultUse: "ignored" | "immediate" | "escapes-or-ambiguous";
+  /** The call is evaluated only on a path that immediately exits this callable. */
+  terminatesCallablePath?: true;
   maySuspend: boolean;
   argumentPlanAmbiguous?: true;
   traitDispatch?: true;
@@ -154,7 +168,12 @@ export type CallableBorrowIndex = {
   symbol: SymbolId;
   signature?: Pick<
     FunctionSignature,
-    "parameters" | "returnType" | "effectRow"
+    | "parameters"
+    | "returnType"
+    | "resultIdentity"
+    | "stagedAccess"
+    | "builderAccess"
+    | "effectRow"
   >;
   parameters: readonly CallableBorrowIndexParameter[];
   parameterPlaces: ReadonlyMap<
@@ -475,6 +494,7 @@ export const extractSingleCallableBorrowIndex = ({
   const callsByExpression = new Map<HirExprId, CallableBorrowIndexCall>();
   const directCallEdges = new Map<string, SymbolRef>();
   const parameterPlaces = parameterPlacesFor(callable.parameters);
+  const terminalExpressions = new Set<HirExprId>();
   const freshBindingRoots = new Set<SymbolId>();
   const provenanceFreeFreshBindingRoots = new Set<SymbolId>();
   const compilerArrayIteratorRoots = new Set<SymbolId>();
@@ -602,7 +622,15 @@ export const extractSingleCallableBorrowIndex = ({
   const targetSignatureFor = (
     target: SymbolRef,
   ):
-    | Pick<FunctionSignature, "parameters" | "returnType" | "effectRow">
+    | Pick<
+        FunctionSignature,
+        | "parameters"
+        | "returnType"
+        | "resultIdentity"
+        | "stagedAccess"
+        | "builderAccess"
+        | "effectRow"
+      >
     | undefined => {
     if (target.moduleId !== context.moduleId) {
       return context.dependencies
@@ -613,6 +641,28 @@ export const extractSingleCallableBorrowIndex = ({
     if (signature) return signature;
     return undefined;
   };
+  const targetResultIdentityFor = (
+    target: SymbolRef,
+  ): ResultIdentity | undefined => {
+    if (target.moduleId !== context.moduleId) {
+      const callable = context.dependencies
+        .get(target.moduleId)
+        ?.callables.get(target.symbol);
+      return callable?.resultIdentity ?? callable?.signature?.resultIdentity;
+    }
+    return (
+      typing.functions.getSignature(target.symbol)?.resultIdentity ??
+      localTraitMethods.get(target.symbol)?.resultIdentity
+    );
+  };
+  const targetOrdinarySummaryFor = (
+    target: SymbolRef,
+  ): OrdinaryMutationSummary | undefined =>
+    target.moduleId === context.moduleId
+      ? undefined
+      : context.dependencies
+          .get(target.moduleId)
+          ?.ordinaryMutationSummaries.get(target.symbol);
   const targetNameFor = (target: SymbolRef): string | undefined =>
     target.moduleId === context.moduleId
       ? symbolTable.hasSymbol(target.symbol)
@@ -891,6 +941,18 @@ export const extractSingleCallableBorrowIndex = ({
     ) {
       return true;
     }
+    if (
+      expression?.exprKind === "call" ||
+      expression?.exprKind === "method-call"
+    ) {
+      const call = callsByExpression.get(expressionId);
+      if (
+        (call?.resultIdentity ?? call?.signature?.resultIdentity)?.kind ===
+        "fresh"
+      ) {
+        return true;
+      }
+    }
     if (expression?.exprKind === "call") {
       const intrinsicName = callIntrinsicName(expression, context);
       if (
@@ -899,6 +961,28 @@ export const extractSingleCallableBorrowIndex = ({
       ) {
         return true;
       }
+    }
+    if (expression?.exprKind === "block") {
+      return (
+        typeof expression.value === "number" &&
+        expressionIsDirectFresh(expression.value)
+      );
+    }
+    if (expression?.exprKind === "if" || expression?.exprKind === "cond") {
+      return (
+        expression.branches.length > 0 &&
+        typeof expression.defaultBranch === "number" &&
+        expression.branches.every((branch) =>
+          expressionIsDirectFresh(branch.value),
+        ) &&
+        expressionIsDirectFresh(expression.defaultBranch)
+      );
+    }
+    if (expression?.exprKind === "match") {
+      return (
+        expression.arms.length > 0 &&
+        expression.arms.every((arm) => expressionIsDirectFresh(arm.value))
+      );
     }
     return false;
   };
@@ -930,7 +1014,25 @@ export const extractSingleCallableBorrowIndex = ({
         expressionIsProvenanceFreeFresh(entry.value),
       );
     }
-    if (expression?.exprKind !== "call") return false;
+    if (
+      expression?.exprKind !== "call" &&
+      expression?.exprKind !== "method-call"
+    ) {
+      return false;
+    }
+    const call = callsByExpression.get(expressionId);
+    if (
+      call &&
+      (call.resultIdentity ?? call.signature?.resultIdentity)?.kind === "fresh"
+    ) {
+      return call.arguments.every(
+        (argument) =>
+          argument.referenceCapable !== true ||
+          (typeof argument.expression === "number" &&
+            expressionIsProvenanceFreeFresh(argument.expression)),
+      );
+    }
+    if (expression.exprKind !== "call") return false;
     const intrinsicName = callIntrinsicName(expression, context);
     return (
       (intrinsicName === "__array_new" ||
@@ -1134,16 +1236,26 @@ export const extractSingleCallableBorrowIndex = ({
         case "call":
         case "method-call": {
           const call = callsByExpression.get(candidateId);
-          const argumentExpressions = call
-            ? call.arguments.flatMap((argument) =>
-                typeof argument.expression === "number"
-                  ? [argument.expression]
-                  : [],
-              )
-            : candidate.args.map((argument) => argument.expr);
-          argumentExpressions.forEach(visit);
-          if (candidate.exprKind === "method-call") visit(candidate.target);
-          if (candidate.exprKind === "call") {
+          if (call) {
+            call.arguments.forEach((argument) => {
+              if (typeof argument.expression !== "number") return;
+              if (!callResultCannotExposeArgumentOuter(call, argument)) {
+                visit(argument.expression);
+                return;
+              }
+              const place = argument.place!;
+              const outerComponent = localAliasComponentFor(place.root);
+              localAliasComponentsFor([place.root]).forEach((component) => {
+                if (component !== outerComponent) result.add(component);
+              });
+            });
+          } else {
+            candidate.args.forEach((argument) => visit(argument.expr));
+          }
+          if (!call && candidate.exprKind === "method-call") {
+            visit(candidate.target);
+          }
+          if (!call && candidate.exprKind === "call") {
             const callee = hir.expressions.get(candidate.callee);
             if (callee?.exprKind !== "identifier") visit(candidate.callee);
           }
@@ -1221,6 +1333,19 @@ export const extractSingleCallableBorrowIndex = ({
     if (placeOfExpression(expressionId, hir, context)) return true;
     const expression = hir.expressions.get(expressionId);
     if (!expression) return true;
+    if (expressionIsDirectFresh(expressionId)) return false;
+    if (
+      expression.exprKind === "call" ||
+      expression.exprKind === "method-call"
+    ) {
+      const call = callsByExpression.get(expressionId);
+      if (
+        (call?.resultIdentity ?? call?.signature?.resultIdentity)?.kind ===
+        "fresh"
+      ) {
+        return false;
+      }
+    }
     const nextActive = new Set(active).add(expressionId);
     switch (expression.exprKind) {
       case "literal":
@@ -1272,6 +1397,104 @@ export const extractSingleCallableBorrowIndex = ({
         isBorrowedType(parameter.type, typing))
     );
   };
+  const directAllocationIdentities = (
+    type: TypeId,
+    active = new Set<TypeId>(),
+    budget = { remaining: 64 },
+  ): ReadonlySet<string> | undefined => {
+    const normalized = typing.arena.unfoldRecursive(type);
+    if (active.has(normalized)) return new Set();
+    budget.remaining -= 1;
+    if (budget.remaining < 0) return undefined;
+    const descriptor = typing.arena.get(normalized);
+    const nextActive = new Set(active).add(normalized);
+    switch (descriptor.kind) {
+      case "primitive":
+        return new Set();
+      case "borrowed":
+        return directAllocationIdentities(descriptor.inner, nextActive, budget);
+      case "recursive":
+        return directAllocationIdentities(descriptor.body, nextActive, budget);
+      case "union": {
+        const members = descriptor.members.map((member) =>
+          directAllocationIdentities(member, nextActive, budget),
+        );
+        if (members.some((member) => member === undefined)) return undefined;
+        return new Set(members.flatMap((member) => Array.from(member!)));
+      }
+      case "intersection":
+        return typeof descriptor.nominal === "number"
+          ? directAllocationIdentities(descriptor.nominal, nextActive, budget)
+          : undefined;
+      case "nominal-object":
+      case "value-object":
+        return new Set([
+          `nominal:${descriptor.owner.moduleId}:${descriptor.owner.symbol}`,
+        ]);
+      case "fixed-array":
+        return new Set(["fixed-array"]);
+      case "function":
+        return new Set(["function"]);
+      case "structural-object":
+      case "trait":
+      case "type-param-ref":
+        return undefined;
+    }
+  };
+  const typesHaveDisjointDirectAllocations = (
+    left: TypeId | undefined,
+    right: TypeId | undefined,
+  ): boolean => {
+    if (typeof left !== "number" || typeof right !== "number") return false;
+    const leftIdentities = directAllocationIdentities(left);
+    const rightIdentities = directAllocationIdentities(right);
+    if (!leftIdentities || !rightIdentities) return false;
+    return Array.from(leftIdentities).every(
+      (identity) => !rightIdentities.has(identity),
+    );
+  };
+  const callResultCannotExposeArgumentOuter = (
+    call: CallableBorrowIndexCall,
+    argument: CallableBorrowIndexArgument,
+  ): boolean => {
+    if (
+      !argument.place ||
+      argument.place.projections.some(
+        (projection) => projection.kind !== "identity",
+      ) ||
+      call.argumentPlanAmbiguous === true ||
+      call.openTraitDispatch === true ||
+      call.traitDispatch === true ||
+      call.targets.length !== 1
+    ) {
+      return false;
+    }
+    const summary = targetOrdinarySummaryFor(call.targets[0]!);
+    if (
+      !summary ||
+      summary.ambientAccess !== OrdinaryParameterAccess.Unused ||
+      summary.reentrant ||
+      summary.maySuspend ||
+      (summary.directAccesses[argument.parameter] ??
+        OrdinaryParameterAccess.Write) > OrdinaryParameterAccess.Read ||
+      (summary.reachableAccesses[argument.parameter] ??
+        OrdinaryParameterAccess.Write) > OrdinaryParameterAccess.Read
+    ) {
+      return false;
+    }
+    return typesHaveDisjointDirectAllocations(
+      call.signature?.returnType,
+      argument.type,
+    );
+  };
+  const callPreservesFreshOuterForArgument = (
+    call: CallableBorrowIndexCall,
+    argument: CallableBorrowIndexArgument,
+  ): boolean =>
+    argument.place !== undefined &&
+    freshBindingRoots.has(argument.place.root) &&
+    localFreshRootIsUnique(argument.place.root) &&
+    callResultCannotExposeArgumentOuter(call, argument);
   const callIsExactPureIntrinsicRead = (
     call: CallableBorrowIndexCall,
   ): boolean =>
@@ -1283,7 +1506,9 @@ export const extractSingleCallableBorrowIndex = ({
   const invalidateRetainableCallArguments = (
     call: CallableBorrowIndexCall,
   ): void => {
-    if (callIsExactPureIntrinsicRead(call)) return;
+    if (callIsExactPureIntrinsicRead(call) || call.terminatesCallablePath) {
+      return;
+    }
     call.arguments.forEach((argument) => {
       if (
         typeof argument.expression !== "number" ||
@@ -1291,8 +1516,12 @@ export const extractSingleCallableBorrowIndex = ({
       ) {
         return;
       }
+      const roots = referenceSourceRootsForExpression(argument.expression);
+      const preservedOuter = callPreservesFreshOuterForArgument(call, argument)
+        ? argument.place?.root
+        : undefined;
       markLocalAliasComponentsNonUnique(
-        referenceSourceRootsForExpression(argument.expression),
+        Array.from(roots).filter((root) => root !== preservedOuter),
       );
     });
   };
@@ -1313,7 +1542,12 @@ export const extractSingleCallableBorrowIndex = ({
     target: SymbolId,
     origins: readonly number[],
   ): boolean => {
-    if (origins.length === 0) return false;
+    if (origins.length === 0) {
+      if (!callerParameterOriginsByRoot.has(target)) {
+        callerParameterOriginsByRoot.set(target, []);
+      }
+      return false;
+    }
     const current = callerParameterOriginsByRoot.get(target) ?? [];
     const merged = Array.from(new Set([...current, ...origins]));
     if (merged.length === current.length) return false;
@@ -1366,6 +1600,12 @@ export const extractSingleCallableBorrowIndex = ({
     ) {
       const call = callsByExpression.get(expressionId);
       if (!call) return allReferenceParameterOrigins;
+      if (
+        (call.resultIdentity ?? call.signature?.resultIdentity)?.kind ===
+        "detached"
+      ) {
+        return [];
+      }
       return Array.from(
         new Set(
           call.arguments.flatMap((argument) => {
@@ -1446,6 +1686,12 @@ export const extractSingleCallableBorrowIndex = ({
           parameter,
           path: [],
         }));
+      }
+      if (
+        (call.resultIdentity ?? call.signature?.resultIdentity)?.kind ===
+        "detached"
+      ) {
+        return [];
       }
       return call.arguments.flatMap((argument) =>
         argument.referenceCapable === true &&
@@ -1544,8 +1790,10 @@ export const extractSingleCallableBorrowIndex = ({
     options: { skipLambdas: true },
     onEnterStatement: (_statementId, statement) => {
       if (statement.kind === "let") {
+        const bindings = bindingSymbols(statement.pattern);
+        bindings.forEach((symbol) => mergeCallerParameterOrigins(symbol, []));
         callerParameterOriginTransfers.push({
-          targets: bindingSymbols(statement.pattern),
+          targets: bindings,
           expression: statement.initializer,
         });
         const initializerType = typeFor(statement.initializer, context);
@@ -1556,13 +1804,11 @@ export const extractSingleCallableBorrowIndex = ({
         );
         if (
           initializerPlace &&
+          bindings.length > 0 &&
           typeof initializerType === "number" &&
           typeCanCarryReference(initializerType, typing)
         ) {
-          markLocalAliasRootsNonUnique([
-            initializerPlace.root,
-            ...bindingSymbols(statement.pattern),
-          ]);
+          markLocalAliasRootsNonUnique([initializerPlace.root, ...bindings]);
         }
         if (patternHasMutableReference(statement.pattern)) {
           const source = placeOfExpression(statement.initializer, hir, context);
@@ -1587,6 +1833,12 @@ export const extractSingleCallableBorrowIndex = ({
       }
     },
     onEnterExpression: (exprId, expression, walkContext) => {
+      if (
+        walkContext.tailPosition ||
+        walkContext.statement?.kind === "return"
+      ) {
+        terminalExpressions.add(exprId);
+      }
       const currentParentExpression = walkContext.parent;
       if (expression.exprKind === "identifier") {
         const place = placeOfExpression(exprId, hir, context);
@@ -1688,6 +1940,15 @@ export const extractSingleCallableBorrowIndex = ({
         constrainedTraitMethodCandidates.length > 0 ||
         openTraitReceiver;
       const signature = signatures[0];
+      const targetResultIdentities = targets.map(targetResultIdentityFor);
+      const resultIdentity =
+        targetResultIdentities.length > 0 &&
+        targetResultIdentities[0] !== undefined &&
+        targetResultIdentities.every((candidate) =>
+          sameResultIdentity(candidate, targetResultIdentities[0]),
+        )
+          ? targetResultIdentities[0]
+          : undefined;
       const intrinsicName =
         expression.exprKind === "call"
           ? callIntrinsicName(expression, context)
@@ -1851,6 +2112,15 @@ export const extractSingleCallableBorrowIndex = ({
               ? { defaulted: true as const }
               : {}),
             ...(typeof argument === "number" ? { expression: argument } : {}),
+            ...(typeof argument === "number" &&
+            signature?.builderAccess &&
+            parameter !== signature.builderAccess.destinationParameterIndex
+              ? {
+                  builderSourceRoots: Array.from(
+                    referenceSourceRootsForExpression(argument),
+                  ),
+                }
+              : {}),
             ...(typeof argument === "number"
               ? (() => {
                   const rawPlace = placeOfExpression(argument, hir, context);
@@ -1934,6 +2204,7 @@ export const extractSingleCallableBorrowIndex = ({
         targets,
         arguments: arguments_,
         ...(signature ? { signature } : {}),
+        ...(resultIdentity ? { resultIdentity } : {}),
         intrinsic,
         intrinsicBoundary,
         ...(ordinaryMutationFreeConstruction
@@ -1956,6 +2227,9 @@ export const extractSingleCallableBorrowIndex = ({
           parentId: currentParentExpression,
           tailPosition: walkContext.tailPosition,
         }),
+        ...(walkContext.statement?.kind === "return" || walkContext.tailPosition
+          ? { terminatesCallablePath: true as const }
+          : {}),
         maySuspend,
         ...(argumentPlanAmbiguous
           ? { argumentPlanAmbiguous: true as const }
@@ -2008,6 +2282,16 @@ export const extractSingleCallableBorrowIndex = ({
     },
     onExitStatement: (_statementId, statement) => {
       if (statement.kind !== "let") return;
+      if (
+        statement.mutable !== true &&
+        statement.pattern.kind === "identifier" &&
+        expressionIsDirectFresh(statement.initializer)
+      ) {
+        freshBindingRoots.add(statement.pattern.symbol);
+        if (expressionIsProvenanceFreeFresh(statement.initializer)) {
+          provenanceFreeFreshBindingRoots.add(statement.pattern.symbol);
+        }
+      }
       const initializerType = typeFor(statement.initializer, context);
       if (
         typeof initializerType === "number" &&
@@ -2015,13 +2299,7 @@ export const extractSingleCallableBorrowIndex = ({
       ) {
         return;
       }
-      const origins = callerParameterOriginsForExpression(
-        statement.initializer,
-      );
       const bindings = bindingSymbols(statement.pattern);
-      bindings.forEach((symbol) =>
-        callerParameterOriginsByRoot.set(symbol, origins),
-      );
       const localSources = referenceSourceRootsForExpression(
         statement.initializer,
       );
@@ -2037,27 +2315,23 @@ export const extractSingleCallableBorrowIndex = ({
     },
     onExitExpression: (exprId, expression) => {
       if (expression.exprKind === "match") {
-        const origins = callerParameterOriginsForExpression(
-          expression.discriminant,
-        );
         expression.arms.forEach((arm) => {
           const bindings = bindingSymbols(arm.pattern);
+          bindings.forEach((symbol) => mergeCallerParameterOrigins(symbol, []));
           callerParameterOriginTransfers.push({
             targets: bindings,
             expression: expression.discriminant,
           });
-          bindings.forEach((symbol) =>
-            mergeCallerParameterOrigins(symbol, origins),
-          );
         });
       }
       if (
-        expression.exprKind === "object-literal" ||
-        expression.exprKind === "tuple" ||
-        expression.exprKind === "lambda" ||
-        expression.exprKind === "if" ||
-        expression.exprKind === "cond" ||
-        expression.exprKind === "match"
+        !terminalExpressions.has(exprId) &&
+        (expression.exprKind === "object-literal" ||
+          expression.exprKind === "tuple" ||
+          expression.exprKind === "lambda" ||
+          expression.exprKind === "if" ||
+          expression.exprKind === "cond" ||
+          expression.exprKind === "match")
       ) {
         markLocalAliasComponentsNonUnique(
           referenceSourceRootsForExpression(exprId),
@@ -2110,14 +2384,11 @@ export const extractSingleCallableBorrowIndex = ({
             aliasesShareIdentity: targetPlace.projections.length === 0,
           });
         }
-        if (targetPlace) {
-          mergeCallerParameterOrigins(
-            targetPlace.root,
-            callerParameterOriginsForExpression(expression.value),
-          );
-        }
       }
       if (expression.pattern) {
+        bindingSymbols(expression.pattern).forEach((symbol) =>
+          mergeCallerParameterOrigins(symbol, []),
+        );
         callerParameterOriginTransfers.push({
           targets: bindingSymbols(expression.pattern),
           expression: expression.value,
@@ -2130,10 +2401,6 @@ export const extractSingleCallableBorrowIndex = ({
             aliasesShareIdentity: true,
           });
         }
-        const origins = callerParameterOriginsForExpression(expression.value);
-        bindingSymbols(expression.pattern).forEach((symbol) =>
-          mergeCallerParameterOrigins(symbol, origins),
-        );
       }
     },
   });
@@ -2316,6 +2583,15 @@ export const extractSingleCallableBorrowIndex = ({
   });
   return normalized;
 };
+
+const sameResultIdentity = (
+  left: ResultIdentity | undefined,
+  right: ResultIdentity | undefined,
+): boolean =>
+  left?.kind === right?.kind &&
+  (left?.kind !== "same-place" ||
+    (right?.kind === "same-place" &&
+      left.parameterIndex === right.parameterIndex));
 
 const ordinaryDynamicBoundForParameters = (
   parameters: readonly {

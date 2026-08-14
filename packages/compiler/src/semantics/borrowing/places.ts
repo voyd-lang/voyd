@@ -3,6 +3,8 @@ import type { HirExprId } from "../ids.js";
 import {
   callHasIntrinsicBorrowBoundary,
   expressionTypeFor,
+  resolveBorrowCallTargets,
+  signatureForTarget,
   type ResolveContext,
 } from "./call-resolution.js";
 import type { BorrowPlace } from "./model.js";
@@ -53,6 +55,52 @@ export const placeOfExpression = (
       return typeof index === "number"
         ? indexedPlace({ target, index, hir, resolveContext })
         : undefined;
+    }
+  }
+  if (
+    (expression?.exprKind === "call" ||
+      expression?.exprKind === "method-call") &&
+    resolveContext
+  ) {
+    const targets = resolveBorrowCallTargets(expression, resolveContext);
+    const identities = targets.map(
+      (target) => signatureForTarget(target, resolveContext)?.resultIdentity,
+    );
+    const identity = identities[0];
+    if (
+      identity?.kind === "same-place" &&
+      identities.every(
+        (candidate) =>
+          candidate?.kind === "same-place" &&
+          candidate.parameterIndex === identity.parameterIndex,
+      )
+    ) {
+      if (expression.exprKind === "method-call" && identity.parameterIndex === 0) {
+        return placeOfExpression(expression.target, hir, resolveContext);
+      }
+      const plans = [
+        ...(
+          resolveContext.typing.callArgumentPlans.get(expression.id)?.values() ??
+          []
+        ),
+        ...(
+          resolveContext.typing.borrowCallArgumentPlans
+            .get(expression.id)
+            ?.values() ?? []
+        ),
+      ];
+      const argIndexes = new Set(
+        plans.flatMap((plan) => {
+          const entry = plan[identity.parameterIndex];
+          return entry?.kind === "direct" ? [entry.argIndex] : [];
+        }),
+      );
+      if (argIndexes.size === 1) {
+        const argument = expression.args[Array.from(argIndexes)[0]!];
+        if (typeof argument?.expr === "number") {
+          return placeOfExpression(argument.expr, hir, resolveContext);
+        }
+      }
     }
   }
   if (

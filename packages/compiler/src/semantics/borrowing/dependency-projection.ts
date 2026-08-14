@@ -11,6 +11,7 @@ import {
 import type { SemanticsPipelineResult } from "../pipeline.js";
 import { canonicalSymbolRef } from "../typing/symbol-ref-utils.js";
 import type { BorrowingDependency } from "./dependency.js";
+import type { ResultIdentity } from "../../result-identity.js";
 
 /**
  * Durable, symbol-arena-independent dependency view. Package interfaces carry
@@ -22,6 +23,7 @@ export type PackageBorrowingDependency = {
     {
       name: string;
       signature?: PackageCallableSignature;
+      resultIdentity?: ResultIdentity;
       ordinaryMutationSummary?: PackageOrdinaryMutationSummary;
       defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
     }
@@ -54,6 +56,7 @@ export const projectPackageSemanticInterface = (
     {
       name: string;
       signature?: PackageCallableSignature;
+      resultIdentity?: ResultIdentity;
       ordinaryMutationSummary?: PackageOrdinaryMutationSummary;
       defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
     }
@@ -93,6 +96,9 @@ export const projectPackageSemanticInterface = (
       const projected = {
         name: member.name,
         ...(member.signature ? { signature: member.signature } : {}),
+        ...(member.resultIdentity
+          ? { resultIdentity: member.resultIdentity }
+          : {}),
         ...(member.ordinaryMutationSummaryId
           ? {
               ordinaryMutationSummary: ordinaryMutationSummaries.get(
@@ -316,6 +322,9 @@ const buildBorrowingDependencyProjection = ({
           {
             name: projected.name,
             ...(signature ? { signature } : {}),
+            ...(projected.resultIdentity
+              ? { resultIdentity: projected.resultIdentity }
+              : {}),
             ordinaryMutationSummary:
               semantics.borrowing.ordinaryMutationSummaries.get(symbol) ??
               projected.ordinaryMutationSummary,
@@ -347,6 +356,9 @@ const buildBorrowingDependencyProjection = ({
       {
         name: callable.name,
         ...(callable.signature ? { signature: callable.signature } : {}),
+        ...(callable.resultIdentity
+          ? { resultIdentity: callable.resultIdentity }
+          : {}),
       },
     ]),
   );
@@ -372,25 +384,23 @@ const buildBorrowingDependencyProjection = ({
         : [];
     }),
   );
-  const traitMethodDeclarations = new Map(
-    [
-      ...Array.from(keysBySymbol).flatMap(([symbol, key]) =>
-        traitMethodKeys.has(key) ? [[symbol, { moduleId, symbol }] as const] : [],
-      ),
-      ...Array.from(
-        semantics.typing.traitMethodImpls,
-        ([implementation, mapping]) =>
-          [
-            implementation,
-            canonicalSymbolRef({
-              symbol: mapping.traitMethodSymbol,
-              symbolTable: semantics.binding.symbolTable,
-              moduleId,
-            }),
-          ] as const,
-      ),
-    ],
-  );
+  const traitMethodDeclarations = new Map([
+    ...Array.from(keysBySymbol).flatMap(([symbol, key]) =>
+      traitMethodKeys.has(key) ? [[symbol, { moduleId, symbol }] as const] : [],
+    ),
+    ...Array.from(
+      semantics.typing.traitMethodImpls,
+      ([implementation, mapping]) =>
+        [
+          implementation,
+          canonicalSymbolRef({
+            symbol: mapping.traitMethodSymbol,
+            symbolTable: semantics.binding.symbolTable,
+            moduleId,
+          }),
+        ] as const,
+    ),
+  ]);
   return {
     callables,
     ordinaryMutationSummaries,

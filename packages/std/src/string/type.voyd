@@ -35,6 +35,7 @@ impl StringStorage
   fn capacity(self) -> i32
     __array_len(self.bytes)
 
+@result(fresh)
 fn new_string_storage(bytes: FixedArray<i32>) -> StringStorage
   StringStorage { bytes }
 
@@ -73,36 +74,42 @@ pub obj ParseFloatError {
   api message: String
 }
 
+@result(detached)
 pub fn utf8_error_invalid_utf8(): () -> Utf8Error
   Utf8Error {
     code: 1,
     message: "utf8 decode failed: invalid utf-8 byte sequence"
   }
 
+@result(detached)
 pub fn parse_int_error_invalid_radix(): () -> ParseIntError
   ParseIntError {
     code: 1,
     message: "parse_int failed: radix must be between 2 and 36"
   }
 
+@result(detached)
 pub fn parse_int_error_empty_input(): () -> ParseIntError
   ParseIntError {
     code: 2,
     message: "parse_int failed: expected at least one digit"
   }
 
+@result(detached)
 pub fn parse_int_error_invalid_digit(): () -> ParseIntError
   ParseIntError {
     code: 3,
     message: "parse_int failed: digit is not valid for the requested radix"
   }
 
+@result(detached)
 pub fn parse_int_error_overflow(): () -> ParseIntError
   ParseIntError {
     code: 4,
     message: "parse_int failed: value overflowed the target integer type"
   }
 
+@result(detached)
 pub fn parse_float_error_invalid_format(): () -> ParseFloatError
   ParseFloatError {
     code: 1,
@@ -124,6 +131,7 @@ pub fn as_slice(value: Borrow<String>): () -> StringSlice
   }
 
 /// Returns an owned string formed by appending `other` to a scoped string.
+@result(detached)
 pub fn concat(value: Borrow<String>, other: StringSlice): () -> String
   let total = value.byte_count + other.byte_count
   let ~bytes = Array<i32>::with_capacity(total)
@@ -141,6 +149,7 @@ pub fn concat(value: Borrow<String>, other: StringSlice): () -> String
   new_string(bytes.to_fixed_array())
 
 /// Returns an owned string formed by appending `other` to a scoped string.
+@result(detached)
 pub fn concat(value: Borrow<String>, other: String): () -> String
   concat(value, other.as_slice())
 
@@ -149,6 +158,7 @@ pub fn concat(value: Borrow<String>, other: String): () -> String
 /// This is a package helper for line-oriented std APIs. It keeps raw storage
 /// access inside the string module and normalizes any partial UTF-8 sequence
 /// in `value` through the usual owned-string constructor.
+@result(detached)
 pub fn appending_line_feed(value: StringSlice): () -> String
   let byte_count = value.byte_count
   let bytes = new_fixed_array<i32>(byte_count + 1)
@@ -162,6 +172,7 @@ pub fn appending_line_feed(value: StringSlice): () -> String
   new_string(bytes)
 
 /// Returns an owned string with one line-feed byte appended.
+@result(detached)
 pub fn appending_line_feed(value: String): () -> String
   appending_line_feed(value.as_slice())
 
@@ -199,6 +210,7 @@ impl StringSlice
     }
 
   /// Returns an owned string copy.
+  @result(detached)
   api fn to_string(self) -> String
     string_from_slice(self)
 
@@ -493,18 +505,22 @@ impl StringSlice
     new_string_slice(self.source, start, end - start)
 
   /// Returns a lowercase ASCII copy of this slice.
+  @result(detached)
   api fn lowered(self): () -> String
     self.to_string().lowered()
 
   /// Parses this string as an `i32`.
+  @result(detached)
   api fn parse_int(self, { radix?: i32 }): () -> Result<i32, ParseIntError>
     parse_i32_from_slice(self, radix: radix)
 
   /// Parses this string as an `i32`.
+  @result(detached)
   api fn parse_i32(self, { radix?: i32 }): () -> Result<i32, ParseIntError>
     self.parse_int(radix: radix)
 
   /// Parses this string as an `i64`.
+  @result(detached)
   api fn parse_i64(self, { radix?: i32 }): () -> Result<i64, ParseIntError>
     parse_i64_from_slice(self, radix: radix)
 
@@ -547,6 +563,7 @@ impl String
   /// Validates UTF-8 bytes and builds a string on success.
   ///
   /// - `source`: byte array to validate as UTF-8.
+  @result(detached)
   api fn from_utf8(source: Array<i32>) -> Result<String, Utf8Error>
     from_utf8(source)
 
@@ -588,6 +605,7 @@ impl String
   /// Example:
   /// `String::from_utf8(text.to_utf8())`
   /// round-trips `text` through bytes validation.
+  @result(fresh)
   api fn to_utf8(self): () -> Array<i32>
     new_array_unchecked<i32>({ from: self.copy_raw_bytes() })
 
@@ -683,6 +701,7 @@ impl String
     Some<i32> { value: __array_get(self.bytes.raw_bytes(), index) }
 
   /// Copies the underlying UTF-8 bytes.
+  @result(detached)
   fn copy_raw_bytes(self): () -> FixedArray<i32>
     let out = new_fixed_array<i32>(self.byte_count)
     __array_copy(out, {
@@ -1039,6 +1058,7 @@ impl String
     self.byte_count = byte_count
 
   /// Returns a lowercase ASCII copy of this string.
+  @result(detached)
   api fn lowered(self): () -> String
     let source = self.bytes.raw_bytes()
     let out = new_fixed_array<i32>(self.byte_count)
@@ -1058,6 +1078,7 @@ impl String
     self.bytes = new_string_storage(out)
 
   /// Returns an uppercase ASCII copy of this string.
+  @result(detached)
   api fn uppered(self): () -> String
     let source = self.bytes.raw_bytes()
     let out = new_fixed_array<i32>(self.byte_count)
@@ -1180,6 +1201,7 @@ impl String
   ///
   /// Example:
   /// `hex.parse_int(radix: 16)` parses `"ff"` into `255`.
+  @result(detached)
   api fn parse_int(self, { radix?: i32 }): () -> Result<i32, ParseIntError>
     let base = match(radix)
       Some<i32> { value }:
@@ -1247,6 +1269,7 @@ impl String
   ///
   /// Example:
   /// `number.parse_float()` parses `"3.5e2"` into `350.0`.
+  @result(detached)
   api fn parse_float(self): () -> Result<f64, ParseFloatError>
     if self.byte_count == 0:
       return Err<ParseFloatError> { error: parse_float_error_invalid_format() }
@@ -1567,6 +1590,7 @@ fn new_string_slice_with_len(
 fn whole_string_slice(value: String) -> StringSlice
   new_string_slice(value, 0, value.byte_count)
 
+@result(detached)
 fn string_from_slice(value: StringSlice) -> String
   if value.byte_count <= 0:
     return empty_string()
@@ -1871,6 +1895,7 @@ fn split_on_rune(
     parts.push(new_string_slice(value.source, value.start + start, tail_len))
   parts
 
+@result(detached)
 fn parse_i32_from_slice(value: StringSlice, { radix?: i32 }): () -> Result<i32, ParseIntError>
   let base = match(radix)
     Some<i32> { value }:
@@ -1929,6 +1954,7 @@ fn parse_i32_from_slice(value: StringSlice, { radix?: i32 }): () -> Result<i32, 
 
   Ok<i32> { value: parsed }
 
+@result(detached)
 fn parse_i64_from_slice(value: StringSlice, { radix?: i32 }): () -> Result<i64, ParseIntError>
   let base = match(radix)
     Some<i32> { value }:
@@ -2049,6 +2075,7 @@ fn pow10_i32(value: i32) -> f64
     return 1.0 / out
   out
 
+@result(detached)
 fn build_escaped(value: String, include_quotes: bool) -> String
   let ~bytes = Array<i32>::with_capacity(value.byte_len() + 2)
   if include_quotes:
@@ -2174,6 +2201,7 @@ fn append_bytes(~out: Array<i32>, source: FixedArray<i32>, count: i32) -> void
 ///
 /// Example:
 /// `from_utf8([240, 159, 154, 128])` yields the rune `U+1F680`.
+@result(detached)
 pub fn from_utf8(bytes: Array<i32>) -> Result<String, Utf8Error>
   let source_bytes = bytes
   let source = source_bytes.raw_storage()
@@ -2217,6 +2245,7 @@ fn append_codepoint_mut(~bytes: Array<i32>, codepoint: i32) -> void
 ///
 /// This constructor decodes bytes and replaces invalid UTF-8 with the Unicode
 /// replacement rune.
+@result(detached)
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   let input_length = __array_len(from_bytes)
   let ~bytes = Array<i32>::with_capacity(input_length)
@@ -2274,5 +2303,6 @@ fn valid_utf8_width_at(source: FixedArray<i32>, limit: i32, index: i32) -> i32
 
   0
 
+@result(detached)
 fn empty_string() -> String
   new_string(new_fixed_array<i32>(0))

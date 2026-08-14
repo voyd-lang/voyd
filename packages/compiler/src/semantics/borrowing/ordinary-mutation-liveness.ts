@@ -19,11 +19,18 @@ export type OrdinaryMutationLiveness = {
   liveCapabilitiesAfter(expression: HirExprId): readonly number[];
 };
 
-type CfgBlock = {
+export type CallableCfgBlock = {
   expression?: HirExprId;
   successors: number[];
   predecessors: number[];
   uses: number[];
+};
+
+export type CallableCfg = {
+  blocks: CallableCfgBlock[];
+  blockByExpression: ReadonlyMap<HirExprId, number>;
+  edgeCount: number;
+  entry: number;
 };
 
 type CapabilityOrigins = ReadonlyMap<SymbolId, ReadonlySet<number>>;
@@ -388,19 +395,14 @@ const collectCapabilityUses = ({
   return result;
 };
 
-const buildCallableCfg = ({
+export const buildCallableCfg = ({
   body,
   hir,
 }: {
   body: HirExprId;
   hir: HirGraph;
-}): {
-  blocks: CfgBlock[];
-  blockByExpression: ReadonlyMap<HirExprId, number>;
-  edgeCount: number;
-  entry: number;
-} => {
-  const blocks: CfgBlock[] = [];
+}): CallableCfg => {
+  const blocks: CallableCfgBlock[] = [];
   const blockByExpression = new Map<HirExprId, number>();
   const createBlock = (expression?: HirExprId): number => {
     const block = blocks.length;

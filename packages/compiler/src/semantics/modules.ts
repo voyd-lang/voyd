@@ -1,4 +1,7 @@
 import type { HirBindingKind, HirVisibility } from "./hir/index.js";
+import type { ResultIdentity } from "../result-identity.js";
+import type { StagedAccess } from "../staged-access.js";
+import type { BuilderAccess } from "../builder-access.js";
 import type { OverloadSetId, SymbolId } from "./ids.js";
 import type { SymbolKind } from "./binder/index.js";
 import type { ModulePath } from "../modules/types.js";
@@ -90,7 +93,7 @@ export interface ModuleExportTable extends Map<string, ModuleExportEntry> {
 
 export const PACKAGE_SEMANTIC_INTERFACE_SCHEMA =
   "voyd.package-semantic-interface" as const;
-export const PACKAGE_SEMANTIC_INTERFACE_VERSION = 4 as const;
+export const PACKAGE_SEMANTIC_INTERFACE_VERSION = 5 as const;
 
 export type PackageOrdinaryMutationSummary = OrdinaryMutationSummary;
 
@@ -126,6 +129,7 @@ export type PackageSemanticInterface = {
       ordinaryMutationSummaryId?: string;
       defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
       signature?: PackageCallableSignature;
+      resultIdentity?: ResultIdentity;
     }[];
   }[];
   types: readonly { id: string; descriptor: unknown }[];
@@ -143,6 +147,9 @@ export type PackageCallableSignature = {
     synthetic?: "stable-callsite-id";
   }[];
   returnType: string;
+  resultIdentity?: ResultIdentity;
+  stagedAccess?: StagedAccess;
+  builderAccess?: BuilderAccess;
   effects: {
     operations: readonly { name: string; region?: number }[];
     tail?: { rigid: boolean };
