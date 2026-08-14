@@ -1,0 +1,29 @@
+use std::array::Array
+use std::result::types::{ Result, Ok, Err }
+use std::string::type::String
+
+pub obj Path {
+  raw: String
+}
+
+pub obj Failure {}
+
+pub obj Payload {
+  api ok: bool,
+  api value: Array<String>
+}
+
+pub eff Source
+  values(tail) -> Payload
+
+pub fn collect(): Source -> Result<Array<Path>, Failure>
+  let result = Source::values()
+  if not result.ok:
+    return Err<Failure> { error: Failure {} }
+  let value = result.value
+  let ~paths = Array<Path>::with_capacity(value.len())
+  var index = 0
+  while index < value.len():
+    paths.push(Path { raw: value.at(index) })
+    index = index + 1
+  Ok<Array<Path>> { value: paths }

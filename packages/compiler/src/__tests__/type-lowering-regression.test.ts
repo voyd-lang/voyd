@@ -5,8 +5,12 @@ import { wasmTypeFor } from "../codegen/types.js";
 import { createTestCodegenContext } from "../codegen/__tests__/support/test-codegen-context.js";
 import { createMemoryModuleHost } from "../modules/memory-host.js";
 import { createNodePathAdapter } from "../modules/node-path-adapter.js";
+import { createFsModuleHost } from "../modules/fs-host.js";
 import type { ModuleHost } from "../modules/types.js";
 import { compileProgram, type CompileProgramResult } from "../pipeline.js";
+
+const fixtureRoot = resolve(import.meta.dirname, "__fixtures__");
+const stdRoot = resolve(import.meta.dirname, "../../../std/src");
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
@@ -146,5 +150,18 @@ pub fn main() -> i32
     );
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(1);
+  });
+
+  it("preserves an initialized mutable array when its mutation loop is empty", async () => {
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: resolve(fixtureRoot, "mutable-empty-loop-array.voyd"),
+        roots: { src: fixtureRoot, std: stdRoot },
+        host: createFsModuleHost(),
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+
+    expect((instance.exports.main as () => number)()).toBe(0);
   });
 });

@@ -138,9 +138,6 @@ pub fn list_dir(path: Path): Fs -> Result<Array<Path>, IoError>
     }
 
   let value = result.value
-  if value.is_empty():
-    return Ok<Array<Path>> { value: Array<Path>::init() }
-
   let ~paths = Array<Path>::with_capacity(value.len())
   var index = 0
   while index < value.len():
