@@ -2089,7 +2089,7 @@ fn parse_number(~parser: JsonParser): () -> Result<JsonValue, JsonError>
 /// - `pretty`: Enables indentation/newlines when `true`.
 /// - `depth`: Current indentation depth.
 @result(detached)
-@builder(into: out)
+@access(builder: out)
 fn write_json_value(~out: Array<i32>, value: JsonValue, pretty: bool, depth: i32) -> Result<Unit, JsonError>
   value.match(active)
     JsonNull:
@@ -2115,7 +2115,7 @@ fn write_json_value(~out: Array<i32>, value: JsonValue, pretty: bool, depth: i32
       append_json_object(out, active.value, pretty, depth)
 
 @result(detached)
-@builder(into: out)
+@access(builder: out)
 fn append_json_array(
   ~out: Array<i32>,
   items: Array<JsonValue>,
@@ -2156,7 +2156,7 @@ fn append_json_array(
   Ok<Unit> { value: Unit {} }
 
 @result(detached)
-@builder(into: out)
+@access(builder: out)
 fn append_json_object(
   ~out: Array<i32>,
   value: Dict<String, JsonValue>,
@@ -2199,7 +2199,7 @@ fn append_json_object(
   out.push(125)
   Ok<Unit> { value: Unit {} }
 
-@builder(into: out)
+@access(builder: out)
 fn append_json_string(~out: Array<i32>, value: StringSlice) -> void
   out.push(34)
   var index = 0
@@ -2256,11 +2256,11 @@ fn append_indent(~out: Array<i32>, depth: i32) -> void
     out.push(32)
     index = index + 1
 
-@builder(into: out)
+@access(builder: out)
 fn append_ascii(~out: Array<i32>, value: StringSlice) -> void
   append_string(out, value)
 
-@builder(into: out)
+@access(builder: out)
 fn append_string(~out: Array<i32>, value: StringSlice) -> void
   var index = 0
   while index < value.byte_len():
@@ -2343,7 +2343,7 @@ fn consume_byte(~parser: JsonParser, expected: i32) -> bool
     None:
       false
 
-@builder(into: out)
+@access(builder: out)
 fn append_escaped(
   ~out: Array<i32>,
   ~parser: JsonParser,

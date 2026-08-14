@@ -32,7 +32,7 @@ type ValidationStats = {
 };
 
 /**
- * Validate the non-retention promise behind `@builder`.
+ * Validate the non-retention promise behind `@access(builder: destination)`.
  *
  * The retained state is one finite parameter-origin bitset per local symbol.
  * Each bit is inserted at most once, so recursive forwarding does not grow the
@@ -168,7 +168,7 @@ const inheritTraitContracts = ({
           params: {
             kind: "invalid-builder-contract",
             callable: symbolName(implementation, symbolTable),
-            reason: `trait implementation declares a different @builder destination than parameter ${expected.destinationParameterIndex + 1}`,
+            reason: `trait implementation declares a different @access(builder: ...) destination than parameter ${expected.destinationParameterIndex + 1}`,
           },
           span: fn?.span ?? declaration.span,
         }),
@@ -392,7 +392,7 @@ const findRetentionFailure = ({
       failure = {
         expression: expressionId,
         reason:
-          "a call may retain a reference-bearing source in the builder; use an exact compatible @builder callee",
+          "a call may retain a reference-bearing source in the builder; use an exact compatible @access(builder: ...) callee",
       };
       return { stop: true };
     },

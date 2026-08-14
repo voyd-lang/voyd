@@ -1449,14 +1449,14 @@ export const diagnosticsRegistry: {
   TY0057: {
     code: "TY0057",
     message: (params) =>
-      `invalid @staged contract on ${params.callable}: ${params.reason}`,
+      `invalid @access(staged: ...) contract on ${params.callable}: ${params.reason}`,
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0057"]>,
   TY0058: {
     code: "TY0058",
     message: (params) =>
-      `invalid @builder contract on ${params.callable}: ${params.reason}`,
+      `invalid @access(builder: ...) contract on ${params.callable}: ${params.reason}`,
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0058"]>,

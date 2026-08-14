@@ -22,12 +22,12 @@ fn bump(~self: Writer) -> ~self
   self.cell.value = self.cell.value + 1
   self
 
-@staged(into: out)
+@access(staged: out)
 fn copy_value(source: Source, ~out: Writer) -> void
   let value = source.cell.value
   out.cell.value = value
 
-@builder(into: out)
+@access(builder: out)
 fn write_value(source: Source, ~out: Writer) -> void
   out.cell.value = source.cell.value
 

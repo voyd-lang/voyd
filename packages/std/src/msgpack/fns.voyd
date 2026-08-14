@@ -275,7 +275,7 @@ impl MsgPackWriter
     msgpack_writer_success()
 
   @result(detached)
-  @builder(into: self)
+  @access(builder: self)
   fn write_dynamic_field(~self, name: String) -> Result<Unit, MsgPackError>
     if self.container_kinds.is_empty():
       return self.fail("msgpack writer field is outside a record or variant")
@@ -346,7 +346,7 @@ impl DataWriter<MsgPackError> for MsgPackWriter
         msgpack_writer_success()
 
   @result(detached)
-  @builder(into: self)
+  @access(builder: self)
   fn write_string(~self, value: String) -> Result<Unit, MsgPackError>
     match(self.consume_value())
       Err<MsgPackError> { error }:
@@ -356,7 +356,7 @@ impl DataWriter<MsgPackError> for MsgPackWriter
         msgpack_writer_success()
 
   @result(detached)
-  @builder(into: self)
+  @access(builder: self)
   fn write_bytes(~self, value: Bytes) -> Result<Unit, MsgPackError>
     match(self.consume_value())
       Err<MsgPackError> { error }:
@@ -381,7 +381,7 @@ impl DataWriter<MsgPackError> for MsgPackWriter
     self.begin_container(kind: 1, length: field_count)
 
   @result(detached)
-  @builder(into: self)
+  @access(builder: self)
   fn write_field(~self, name: String) -> Result<Unit, MsgPackError>
     if self.container_kinds.is_empty():
       return self.fail("msgpack writer field is outside a record or variant")
@@ -399,7 +399,7 @@ impl DataWriter<MsgPackError> for MsgPackWriter
     self.end_container(kind: 1)
 
   @result(detached)
-  @builder(into: self)
+  @access(builder: self)
   fn begin_variant(
     ~self,
     { union: String, variant: String, field_count: i32 }
@@ -747,7 +747,7 @@ pub fn decode_data_value_bytes(bytes: Bytes) -> Result<DataValue, MsgPackError>
       msgpack_reader_failure<DataValue>("msgpack decode has trailing bytes")
 
 @result(detached)
-@builder(into: writer)
+@access(builder: writer)
 fn write_data_value(
   ~writer: MsgPackWriter,
   value: DataValue
@@ -793,7 +793,7 @@ fn write_data_value(
       )
 
 @result(detached)
-@builder(into: writer)
+@access(builder: writer)
 fn write_data_fields(
   ~writer: MsgPackWriter,
   fields: Array<DataField>,
@@ -1401,7 +1401,7 @@ impl Encoder
     self.write_u8(bit_and(cast::to_i32_wrapping(shift_ru(value, 8)), 255))
     self.write_u8(bit_and(cast::to_i32_wrapping(value), 255))
 
-  @builder(into: self)
+  @access(builder: self)
   fn encode_numeric(~self, value: Numeric) -> void
     value.match(number)
       I32:
@@ -1435,7 +1435,7 @@ impl Encoder
     self.write_u8(203)
     self.write_u64(cast::reinterpret_i64(value))
 
-  @builder(into: self)
+  @access(builder: self)
   fn encode_string(~self, value: String) -> void
     let len = value.byte_count
     if
@@ -1460,7 +1460,7 @@ impl Encoder
           return void
       index = index + 1
 
-  @builder(into: self)
+  @access(builder: self)
   fn encode_bytes(~self, bytes: Bytes) -> void
     let len = bytes.len()
     self.encode_binary_header(len)
@@ -1481,7 +1481,7 @@ impl Encoder
         self.write_u8(198)
         self.write_u32(len)
 
-  @builder(into: self)
+  @access(builder: self)
   fn encode_binary(~self, bytes: Array<i32>) -> void
     let len = bytes.len()
     self.encode_binary_header(len)
@@ -1492,7 +1492,7 @@ impl Encoder
       self.write_u8(__array_get(source, index))
       index = index + 1
 
-  @builder(into: self)
+  @access(builder: self)
   fn encode_array(~self, value: Array<MsgPack>) -> void
     let len = value.len()
     self.encode_array_header(len)
@@ -1513,11 +1513,11 @@ impl Encoder
         self.write_u8(221)
         self.write_u32(len)
 
-  @builder(into: self)
+  @access(builder: self)
   fn encode_map(~self, value: Dict<String, MsgPack>) -> void
     self.encode_map_entries(value.entries())
 
-  @builder(into: self)
+  @access(builder: self)
   fn encode_map_entries(~self, entries: Array<(String, MsgPack)>) -> void
     let len = entries.len()
     self.encode_map_header(len)
@@ -1541,7 +1541,7 @@ impl Encoder
         self.write_u8(223)
         self.write_u32(len)
 
-  @builder(into: self)
+  @access(builder: self)
   fn encode_any(~self, value: MsgPack) -> void
     value.match(decoded)
       Null:

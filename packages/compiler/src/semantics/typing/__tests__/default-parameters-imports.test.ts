@@ -180,7 +180,7 @@ fn consume(value: i32) -> i32
     const depAst = parse(
       `pub obj Box { api value: i32 }
 
-@staged(into: out)
+@access(staged: out)
 pub fn copy_value(source: Box, ~out: Box) -> i32
   let snapshot = source.value
   out.value = snapshot

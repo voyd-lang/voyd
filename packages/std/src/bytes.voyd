@@ -111,7 +111,7 @@ impl ByteBuffer
   /// Appends all bytes from `bytes`.
   ///
   /// This is useful for concatenating previously captured `Bytes` values.
-  @staged(into: self)
+  @access(staged: self)
   api fn extend(~self, bytes: Bytes) -> void
     self.storage.extend(bytes.to_array())
 

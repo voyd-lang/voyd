@@ -728,14 +728,14 @@ const attachStagedAccessAttribute = (
   );
   if (destinationParameterIndex < 0) {
     throw new ParserSyntaxError(
-      `@staged references unknown parameter '${attribute.destinationParameterName}'`,
+      `@access(staged: ...) references unknown parameter '${attribute.destinationParameterName}'`,
       form.location,
     );
   }
   const destination = signature.params[destinationParameterIndex]!;
   if (destination.bindingKind !== "mutable-ref") {
     throw new ParserSyntaxError(
-      `@staged destination '${attribute.destinationParameterName}' must be declared with '~'`,
+      `@access(staged: ...) destination '${attribute.destinationParameterName}' must be declared with '~'`,
       form.location,
     );
   }
@@ -755,14 +755,14 @@ const attachBuilderAccessAttribute = (
   );
   if (destinationParameterIndex < 0) {
     throw new ParserSyntaxError(
-      `@builder references unknown parameter '${attribute.destinationParameterName}'`,
+      `@access(builder: ...) references unknown parameter '${attribute.destinationParameterName}'`,
       form.location,
     );
   }
   const destination = signature.params[destinationParameterIndex]!;
   if (destination.bindingKind !== "mutable-ref") {
     throw new ParserSyntaxError(
-      `@builder destination '${attribute.destinationParameterName}' must be declared with '~'`,
+      `@access(builder: ...) destination '${attribute.destinationParameterName}' must be declared with '~'`,
       form.location,
     );
   }

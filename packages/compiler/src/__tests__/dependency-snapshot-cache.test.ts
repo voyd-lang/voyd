@@ -210,7 +210,7 @@ describe("compiler dependency snapshots", () => {
         "pub fn replace(~value: i32) -> ~value",
         "  value",
         "",
-        "@staged(into: out)",
+        "@access(staged: out)",
         "pub fn copy_value(source: PackageBox, ~out: PackageBox) -> i32",
         "  let snapshot = source.value",
         "  out.value = snapshot",
@@ -348,13 +348,13 @@ pub fn identity(value: i32) -> i32
 pub fn defaulted(value: i32 = 0) -> i32
   value
 
-@staged(into: out)
+@access(staged: out)
 pub fn copy_value(source: PublicBox, ~out: PublicBox) -> i32
   let snapshot = source.visible
   out.visible = snapshot
   snapshot
 
-@builder(into: out)
+@access(builder: out)
 pub fn build_value(source: PublicBox, ~out: PublicBox) -> void
   out.visible = source.visible
 `;

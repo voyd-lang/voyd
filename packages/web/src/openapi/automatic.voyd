@@ -100,7 +100,7 @@ fn reject_advanced_literal_docs(docs: Dict<String, JsonValue>) -> void
         void
     index = index + 1
 
-@staged(into: target)
+@access(staged: target)
 fn copy_if_present(
   source: Dict<String, JsonValue>,
   ~target: Dict<String, JsonValue>,
@@ -133,7 +133,7 @@ fn path_method_available(paths: Dict<String, JsonValue>, path: String, method: S
     None:
       true
 
-@staged(into: paths)
+@access(staged: paths)
 fn append_route(
   ~paths: Dict<String, JsonValue>,
   path: String,
@@ -192,7 +192,7 @@ fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
 
 /// Operation IDs are optional. The first occurrence keeps a duplicate ID;
 /// later operations remain documented without that ID.
-@staged(into: seen)
+@access(staged: seen)
 fn unique_operation_id(~seen: Dict<String, bool>, operation: JsonValue) -> JsonValue
   let ~fields = object_entries(operation).copied()
   match(fields.get("operationId"))

@@ -2246,7 +2246,7 @@ fn invalid() -> i32
 obj Builder<T> { value: T, count: i32 }
 
 impl<T> Builder<T>
-  @staged(into: self)
+  @access(staged: self)
   fn bump(~self) -> ~self
     self.count = self.count + 1
     self

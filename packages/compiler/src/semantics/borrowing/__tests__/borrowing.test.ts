@@ -2106,7 +2106,7 @@ obj Output { value: i32 }
 fn make_output() -> Output
   Output { value: 0 }
 
-@builder(into: output)
+@access(builder: output)
 fn append(~output: Output, source: Source) -> void
   output.value = source.value
 
@@ -2127,7 +2127,7 @@ obj Output { source: Source }
 fn make_output() -> Output
   Output { source: Source { value: 0 } }
 
-@builder(into: output)
+@access(builder: output)
 fn invalid_builder(~output: Output, source: Source) -> void
   output.source = source
 
@@ -2219,7 +2219,7 @@ fn get(store: Store) -> Option<Item>
 fn make_store(item: Item) -> Store
   Store { item }
 
-@staged(into: container)
+@access(staged: container)
 fn store(~container: Container, value: Store) -> void
   container.store = value
 
@@ -2528,7 +2528,7 @@ describe("staged overlap contracts", () => {
   const prelude = `
 obj Box { value: i32 }
 
-@staged(into: out)
+@access(staged: out)
 fn copy_value(source: Box, ~out: Box) -> void
   let snapshot = source.value
   out.value = snapshot
@@ -2548,7 +2548,7 @@ fn update(~box: Box) -> void
       diagnosticCodes(`
 obj Box { value: i32 }
 
-@staged(into: out)
+@access(staged: out)
 fn invalid(source: Box, ~out: Box) -> void
   out.value = 1
   out.value = source.value
@@ -2566,7 +2566,7 @@ obj Wrapper { child: Child }
 fn snapshot(source: Wrapper) -> Wrapper
   Wrapper { child: source.child }
 
-@staged(into: out)
+@access(staged: out)
 fn invalid(source: Wrapper, ~out: Wrapper) -> void
   let copy = snapshot(source)
   out.child.value = 1
@@ -2588,7 +2588,7 @@ fn snapshot(source: Wrapper) -> Wrapper
 fn read(child: Child) -> i32
   child.value
 
-@staged(into: out)
+@access(staged: out)
 fn invalid(source: Wrapper, ~out: Wrapper) -> void
   let copy = snapshot(source)
   out.child.value = 1
@@ -2610,7 +2610,7 @@ fn snapshot(source: Wrapper) -> Wrapper
 fn read_wrapper(wrapper: Wrapper) -> i32
   wrapper.child.value
 
-@staged(into: out)
+@access(staged: out)
 fn invalid(source: Wrapper, ~out: Wrapper) -> void
   let copy = snapshot(source)
   out.child.value = 1
@@ -2622,7 +2622,7 @@ fn invalid(source: Wrapper, ~out: Wrapper) -> void
   it("allows compatible forwarding and rejects uncertified forwarding", () => {
     expect(() =>
       analyze(`${prelude}
-@staged(into: out)
+@access(staged: out)
 fn forward(source: Box, ~out: Box) -> void
   copy_value(source, ~out)
 `),
@@ -2636,7 +2636,7 @@ fn unbounded(source: Box, ~out: Box) -> void
   let snapshot = source.value
   out.value = snapshot
 
-@staged(into: out)
+@access(staged: out)
 fn invalid(source: Box, ~out: Box) -> void
   unbounded(source, ~out)
 `),
@@ -2654,7 +2654,7 @@ fn copied(source: State) -> State
   State { child: source.child, count: source.count }
 
 impl State
-  @staged(into: self)
+  @access(staged: self)
   fn publish(~self, next: State) -> void
     let child = next.child
     let count = next.count
@@ -2673,7 +2673,7 @@ fn valid(~state: State) -> void
       analyze(`
 obj Box { value: i32 }
 
-@staged(into: out)
+@access(staged: out)
 fn branch(source: Box, ~out: Box, flag: bool) -> void
   if flag:
     out.value = 1
@@ -2686,7 +2686,7 @@ fn branch(source: Box, ~out: Box, flag: bool) -> void
       diagnosticCodes(`
 obj Box { value: i32 }
 
-@staged(into: out)
+@access(staged: out)
 fn looped(source: Box, ~out: Box, count: i32) -> void
   var index = 0
   while index < count:
@@ -2704,7 +2704,7 @@ obj Box { value: i32 }
 obj Copier {}
 
 trait CopyValue
-  @staged(into: out)
+  @access(staged: out)
   fn copy(self, source: Box, ~out: Box): () -> void
 
 impl CopyValue for Copier
@@ -2721,7 +2721,7 @@ impl CopyValue for Copier
 obj Box { value: i32 }
 
 trait Copier
-  @staged(into: out)
+  @access(staged: out)
   fn copy(self, source: Box, ~out: Box): () -> void
 
 fn invalid<T: Copier>(copier: T, ~box: Box): () -> void
@@ -2734,7 +2734,7 @@ fn invalid<T: Copier>(copier: T, ~box: Box): () -> void
     const callback = diagnosticCodes(`
 obj Box { value: i32 }
 
-@staged(into: out)
+@access(staged: out)
 fn invalid(source: Box, ~out: Box, callback: fn() -> void) -> void
   callback()
   out.value = source.value
@@ -2743,7 +2743,7 @@ fn invalid(source: Box, ~out: Box, callback: fn() -> void) -> void
 obj Box { value: i32 }
 let shared = Box { value: 0 }
 
-@staged(into: out)
+@access(staged: out)
 fn invalid(source: Box, ~out: Box) -> void
   let snapshot = source.value + shared.value
   out.value = snapshot
@@ -2776,7 +2776,7 @@ obj Writer { cell: Cell }
 fn make_writer() -> Writer
   Writer { cell: Cell { value: 0 } }
 
-@builder(into: out)
+@access(builder: out)
 fn write(source: Source, ~out: Writer, remaining: i32) -> void
   out.cell.value = source.cell.value
   if remaining > 0:
@@ -2805,7 +2805,7 @@ obj Parser { value: i32 }
 fn make_buffer() -> Buffer<i32>
   Buffer<i32> { value: 0 }
 
-@builder(into: out)
+@access(builder: out)
 fn append(~out: Buffer<i32>, ~parser: Parser) -> void
   out.value = parser.value
   parser.value = parser.value + 1
@@ -2829,7 +2829,7 @@ obj Cell { value: i32 }
 obj Source { cell: Cell }
 obj Writer { cell: Cell }
 
-@builder(into: out)
+@access(builder: out)
 fn invalid(source: Source, ~out: Writer) -> void
   out.cell = source.cell
 `);
@@ -2838,7 +2838,7 @@ obj Cell { value: i32 }
 obj Source { cell: Cell }
 obj Writer { cell: Cell }
 
-@builder(into: out)
+@access(builder: out)
 fn invalid(source: Source, ~out: Writer) -> void
   let callback: fn() : () -> i32 = () => source.cell.value
   out.cell.value = callback()
@@ -2860,7 +2860,7 @@ obj Source { cell: Cell }
 obj Writer { cell: Cell }
 
 trait Write
-  @builder(into: out)
+  @access(builder: out)
   fn write(self, source: Source, ~out: Writer): () -> void
 
 @result(fresh)
@@ -2888,7 +2888,7 @@ obj Writer { cell: Cell }
 fn make_writer() -> Writer
   Writer { cell: Cell { value: 0 } }
 
-@builder(into: out)
+@access(builder: out)
 fn write(source: Cell, ~out: Writer) -> void
   out.cell.value = source.value
 
@@ -2910,7 +2910,7 @@ obj Builder { child: Child }
 fn make_builder(source: Child) -> Builder
   Builder { child: source }
 
-@builder(into: out)
+@access(builder: out)
 fn write(source: Child, ~out: Builder) -> void
   out.child.value = source.value
 
@@ -2930,7 +2930,7 @@ obj Source { cell: Cell }
 obj Writer { cell: Cell }
 
 trait Encode
-  @builder(into: out)
+  @access(builder: out)
   fn encode(self, source: Source, ~out: Writer): () -> void
 
 impl Encode for Writer

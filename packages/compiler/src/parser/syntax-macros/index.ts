@@ -14,7 +14,7 @@ import { functionalMacroExpander } from "./functional-macro-expander/index.js";
 import { testBlockMacro } from "./test-block.js";
 import { validateSurfaceSyntax } from "./validate-surface-syntax.js";
 import { isolatedAttributeMacro } from "./isolated-attribute.js";
-import { resultAttributeMacro } from "./result-attribute.js";
+import { functionContractAttributeMacro } from "./result-attribute.js";
 
 /** Caution: Order matters */
 export const BASE_SYNTAX_MACROS: SyntaxMacro[] = [
@@ -24,7 +24,7 @@ export const BASE_SYNTAX_MACROS: SyntaxMacro[] = [
   constructorObjectLiteral,
   validateSurfaceSyntax,
   isolatedAttributeMacro,
-  resultAttributeMacro,
+  functionContractAttributeMacro,
 ];
 
 export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
@@ -35,7 +35,7 @@ export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
   externalAttributeMacro,
   effectAttributeMacro,
   isolatedAttributeMacro,
-  resultAttributeMacro,
+  functionContractAttributeMacro,
   testBlockMacro,
 ];
 

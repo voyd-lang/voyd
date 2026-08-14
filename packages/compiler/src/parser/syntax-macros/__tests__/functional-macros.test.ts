@@ -185,10 +185,7 @@ declare_containers()
       [
         "eff",
         "PublicFx",
-        [
-          "block",
-          ["fn", ["->", ["hidden_operation", "tail"], "i32"]],
-        ],
+        ["block", ["fn", ["->", ["hidden_operation", "tail"], "i32"]]],
       ],
       [
         "trait",
@@ -373,13 +370,10 @@ macro referenced_parameter()
       $resume(42))
 referenced_parameter()
 `);
-    expandFunctionalMacros(
-      parameterAst,
-      {
-        strictMacroSignatures: true,
-        onError: (error) => parameterErrors.push(error.message),
-      },
-    );
+    expandFunctionalMacros(parameterAst, {
+      strictMacroSignatures: true,
+      onError: (error) => parameterErrors.push(error.message),
+    });
     expect(parameterErrors).toHaveLength(1);
     expect(parameterErrors[0]).toContain(
       "symbol_reference(existing_resume) is reference-only",
@@ -887,6 +881,15 @@ eff Time
     );
 
     expect(effect?.attributes?.effect).toEqual({ id: "voyd.example.time" });
+  });
+
+  test("reserves the access contract attribute", () => {
+    expect(() =>
+      parse(`\
+attribute macro access(args, declaration)
+  declaration
+`),
+    ).toThrow(/attribute macro name 'access' is reserved/);
   });
 
   test("rejects duplicate user-defined attributes", () => {

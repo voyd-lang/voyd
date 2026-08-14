@@ -315,8 +315,10 @@ generic-wrapper, call-path, or aggregate provenance. Overload resolution does
 not inspect it. The compiler handles a call from its selected signature in O(1)
 and a same-place chain in O(chain length).
 
-True source/destination overlap uses a separate `@staged(into: destination)`
-contract. It stores one mutable parameter index and is checked with one forward
+Each use of the repeatable `@access` attribute selects a separately checked
+access contract by labeling its destination as `staged:` or `builder:`. True
+source/destination overlap uses `@access(staged: destination)`. It stores one
+mutable parameter index and is checked with one forward
 CFG bit: after the first destination write, no other reference-bearing input may
 be accessed. One exact compatible staged call may forward the relationship.
 Open or ambiguous calls, ambient access, callbacks, effects, and suspension are
@@ -324,13 +326,14 @@ ineligible. The caller relaxes only the declared destination/input pairs for an
 exact selected target; missing metadata keeps the conservative path.
 
 Recursive streaming into a private output uses the distinct
-`@builder(into: destination)` contract. The caller must supply a locally fresh,
+`@access(builder: destination)` contract. The caller must supply a locally fresh,
 unique destination to an exact closed target, and no source may derive from
 that destination. The body checker rejects retaining, returning, capturing, or
 otherwise publishing a reference-bearing source through the builder, along
 with ambient access, re-entry, effects, and suspension. Compatible recursive
 and forwarding calls are allowed. This contract also stores one parameter
-index and does not weaken the read-before-write rule of `@staged`.
+index and does not weaken the read-before-write rule of
+`@access(staged: destination)`.
 
 Direct and reachable modes are separate safety facts. A runtime identity guard
 can prove that two exact object handles name different allocations. Comparing

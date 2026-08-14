@@ -414,11 +414,12 @@ converted to an ordinary value.
 Unannotated and imported legacy callables remain conservative. These contracts
 do not change overload selection or runtime representation.
 
-Library code that deliberately snapshots a possibly overlapping source before
-mutation can publish a checked staged contract:
+Library code uses the repeatable `@access` attribute for independently checked
+mutable-access contracts. Code that deliberately snapshots a possibly
+overlapping source before mutation selects the `staged:` variant:
 
 ```voyd
-@staged(into: self)
+@access(staged: self)
 fn extend(~self, other: Array<T>) -> void
 ```
 
@@ -427,11 +428,11 @@ The compiler verifies that all source access finishes before the first write to
 application code normally just calls those APIs. Dynamic dispatch, callbacks,
 effects, and suspension remain conservative.
 
-Recursive encoders can stream into a locally fresh private builder with a
-checked builder contract:
+Recursive encoders select the `builder:` variant to stream into a locally fresh
+private builder:
 
 ```voyd
-@builder(into: output)
+@access(builder: output)
 fn encode(~output: ByteBuffer, value: Value) -> void
 ```
 

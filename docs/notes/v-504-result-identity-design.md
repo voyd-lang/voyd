@@ -29,9 +29,36 @@ Ordinary application code does not need annotations for direct local
 construction, stable `StringSlice` results, or fresh values whose type already
 proves disjointness.
 
-The package semantic interface stores at most one enum and one parameter index
-per callable. There are no result paths, regions, implementation sets, or
-result fixed points. Callers never inspect callee bodies for acceptance.
+The package semantic interface stores one finite result disposition with an
+optional same-place parameter index, plus independent optional staged and
+builder destination indices. There are no result paths, regions,
+implementation sets, or result fixed points. Callers never inspect callee
+bodies for acceptance.
+
+### Contract surface
+
+The initial source surface groups contracts by what they describe:
+
+```voyd
+@result(detached)
+fn parse(source: Bytes) -> Result<Value, Error>
+
+@access(staged: destination)
+fn append(~destination: Buffer, source: Bytes) -> void
+
+@access(builder: destination)
+fn encode(~destination: Buffer, source: Value) -> void
+```
+
+`@result` describes identity leaving a call. Each use of the repeatable common
+`@access` attribute selects one of two separately validated relationships
+around a named mutable destination; a callable may publish both when it
+satisfies both proof obligations. Same-place results remain first-class
+`-> ~parameter` syntax
+because they directly affect expression typing and fluent chaining. Decorators
+lower immediately to the same finite signature facts used by packages, so a
+future first-class declaration clause can reuse the representation without an
+ABI or analysis change.
 
 ## V-505 investigation matrix
 
@@ -112,7 +139,7 @@ mutable destination after it has captured everything it will read. Library
 authors declare that finite relationship with one destination index:
 
 ```voyd
-@staged(into: self)
+@access(staged: self)
 fn extend(~self, other: Array<T>) -> void
 ```
 
@@ -125,12 +152,12 @@ index; it is separate from both ResultIdentity and OrdinaryMutationSummary.
 
 The contiguous MessagePack encoder exposed a second irreducible relationship.
 Recursive streaming writes must interleave reads from an input graph with
-writes to a private output builder, so the read-before-write rule of `@staged`
-does not apply. Library authors can declare this relationship with one
-destination index:
+writes to a private output builder, so the read-before-write rule of
+`@access(staged: ...)` does not apply. Library authors select the distinct
+builder variant of the common access-contract attribute:
 
 ```voyd
-@builder(into: writer)
+@access(builder: writer)
 fn write_value(~writer: Writer, value: Value) -> Result<Unit, Error>
 ```
 
@@ -144,9 +171,9 @@ contract. Missing, open, ambiguous, and non-fresh cases remain conservative.
 This contract is deliberately separate from staging: staging proves an order,
 while builder ownership proves non-retention into one private destination.
 Like staging, package metadata stores one destination parameter index. JSON and
-MessagePack both require `@builder` for recursive streaming because reads from
-the input graph interleave with writes to the output. OpenAPI uses ordinary
-fresh accumulators and staged collection operations instead.
+MessagePack both require `@access(builder: ...)` for recursive streaming because
+reads from the input graph interleave with writes to the output. OpenAPI uses
+ordinary fresh accumulators and staged collection operations instead.
 
 ## Alternatives
 
@@ -180,6 +207,25 @@ Rejected because a recursive encoder reads source data after earlier output
 writes by design. Weakening the staging rule would accept true overlap without
 a snapshot. The distinct builder contract keeps both checks small and gives
 each one a precise proof obligation.
+
+### One universal contract decorator
+
+A spelling such as `@borrow(result: detached)` or `@contract(builder: writer)`
+would provide one namespace, but it groups result identity, access ordering,
+and private-builder non-retention under a name that is either inaccurate or too
+generic. `@result` and `@access` keep those two semantic families visible while
+still avoiding separate top-level staged and builder attributes.
+
+### First-class `where` clauses or return modifiers
+
+A future clause such as `where result: detached` or
+`where access: staged(into: self)` could read well on public declarations, but
+adopting it now would prematurely decide how callable contracts compose with
+generic constraints, effects, traits, and formatting. A return modifier such
+as `-> fresh Dict<K, V>` was also rejected because it resembles a distinct type
+even though FreshOuter does not affect overloads or the ABI. The checked
+decorators preserve a small initial grammar and leave a direct lowering target
+for later first-class syntax.
 
 ## Complexity and runtime cost
 

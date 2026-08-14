@@ -160,11 +160,15 @@ generic wrappers, aggregate shapes, or projection families.
 
 ### 3.2 Staged overlap
 
-Staged overlap is a separate callable contract for an operation that captures
+Each use of the repeatable `@access` attribute selects one of two separately
+checked mutable-access contracts by labeling its destination parameter as
+`staged:` or `builder:`. A callable MAY declare both variants when it satisfies
+both proof obligations.
+Staged overlap is the contract for an operation that captures
 all reference-bearing source input before mutating one named destination:
 
 ```voyd
-@staged(into: destination)
+@access(staged: destination)
 fn append(~destination: Buffer, source: Bytes) -> void
 ```
 
@@ -186,7 +190,7 @@ not part of the ordinary mutation-summary lattice or result identity.
 A recursive streaming operation MAY declare one private mutable destination:
 
 ```voyd
-@builder(into: destination)
+@access(builder: destination)
 fn encode(~destination: Buffer, source: Value) -> void
 ```
 
@@ -196,7 +200,8 @@ closed, and source inputs MUST NOT derive from that destination. The body MUST
 NOT retain, return, capture, or publish a reference-bearing source through the
 destination. Ambient reference-bearing access, reentrant control, suspension,
 and effects invalidate the declaration. A recursive or forwarding call MAY
-carry the relationship only through an exact compatible `@builder` contract.
+carry the relationship only through an exact compatible
+`@access(builder: destination)` contract.
 
 This contract permits interleaved source reads and destination writes, so it
 MUST remain separate from staged overlap. Its package fact contains one

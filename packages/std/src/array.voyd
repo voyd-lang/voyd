@@ -651,7 +651,7 @@ impl<T> Array<T>
     __array_get(removed.storage, 0)
 
   /// Appends values from another collection or sequence.
-  @staged(into: self)
+  @access(staged: self)
   api fn extend(~self, other: Array<T>) -> void
     if other.count == 0:
       return void

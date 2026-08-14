@@ -11,10 +11,10 @@ import type { BuilderAccessAttribute } from "../../builder-access.js";
 import { transformFormSequence } from "./sequence-transform.js";
 import type { SyntaxMacro } from "./types.js";
 
-export const resultAttributeMacro: SyntaxMacro = (form) =>
-  attachResultAttributes(form);
+export const functionContractAttributeMacro: SyntaxMacro = (form) =>
+  attachFunctionContractAttributes(form);
 
-const attachResultAttributes = (form: Form): Form =>
+const attachFunctionContractAttributes = (form: Form): Form =>
   transformFormSequence({ form, transform: processSequence });
 
 const processSequence = (
@@ -29,7 +29,7 @@ const processSequence = (
 
   for (const element of elements) {
     const processed = isForm(element)
-      ? attachResultAttributes(element)
+      ? attachFunctionContractAttributes(element)
       : element;
     if (processed !== element) changed = true;
 
@@ -39,15 +39,19 @@ const processSequence = (
       changed = true;
       continue;
     }
-    if (allowAttributes && isStagedAttributeForm(processed)) {
-      if (pendingStaged) throw new Error("duplicate @staged attribute");
-      pendingStaged = parseStagedAttribute(processed);
-      changed = true;
-      continue;
-    }
-    if (allowAttributes && isBuilderAttributeForm(processed)) {
-      if (pendingBuilder) throw new Error("duplicate @builder attribute");
-      pendingBuilder = parseDestinationAttribute(processed, "builder");
+    if (allowAttributes && isAccessAttributeForm(processed)) {
+      const access = parseAccessAttribute(processed);
+      if (access.kind === "staged") {
+        if (pendingStaged) {
+          throw new Error("duplicate @access(staged: ...) attribute");
+        }
+        pendingStaged = access.attribute;
+      } else {
+        if (pendingBuilder) {
+          throw new Error("duplicate @access(builder: ...) attribute");
+        }
+        pendingBuilder = access.attribute;
+      }
       changed = true;
       continue;
     }
@@ -60,15 +64,19 @@ const processSequence = (
       if (pendingResult && attributes.resultIdentity) {
         throw new Error("duplicate @result attribute");
       }
-      if (pendingStaged && attributes.stagedAccess) {
-        throw new Error("duplicate @staged attribute");
-      }
-      if (pendingBuilder && attributes.builderAccess) {
-        throw new Error("duplicate @builder attribute");
-      }
       if (pendingResult) attributes.resultIdentity = pendingResult;
-      if (pendingStaged) attributes.stagedAccess = pendingStaged;
-      if (pendingBuilder) attributes.builderAccess = pendingBuilder;
+      if (pendingStaged) {
+        if (attributes.stagedAccess) {
+          throw new Error("duplicate @access(staged: ...) attribute");
+        }
+        attributes.stagedAccess = pendingStaged;
+      }
+      if (pendingBuilder) {
+        if (attributes.builderAccess) {
+          throw new Error("duplicate @access(builder: ...) attribute");
+        }
+        attributes.builderAccess = pendingBuilder;
+      }
       processed.attributes = attributes;
       pendingResult = undefined;
       pendingStaged = undefined;
@@ -88,11 +96,8 @@ const processSequence = (
 const isResultAttributeForm = (expr: Expr): expr is Form =>
   isForm(expr) && expr.calls("@") && isResultHead(expr.at(1));
 
-const isStagedAttributeForm = (expr: Expr): expr is Form =>
-  isForm(expr) && expr.calls("@") && isStagedHead(expr.at(1));
-
-const isBuilderAttributeForm = (expr: Expr): expr is Form =>
-  isForm(expr) && expr.calls("@") && isBuilderHead(expr.at(1));
+const isAccessAttributeForm = (expr: Expr): expr is Form =>
+  isForm(expr) && expr.calls("@") && isAccessHead(expr.at(1));
 
 const isResultHead = (expr?: Expr): boolean => {
   if (isIdentifierAtom(expr)) return expr.value === "result";
@@ -100,16 +105,10 @@ const isResultHead = (expr?: Expr): boolean => {
   return isIdentifierAtom(expr.first) && expr.first.value === "result";
 };
 
-const isStagedHead = (expr?: Expr): boolean => {
-  if (isIdentifierAtom(expr)) return expr.value === "staged";
+const isAccessHead = (expr?: Expr): boolean => {
+  if (isIdentifierAtom(expr)) return expr.value === "access";
   if (!isForm(expr)) return false;
-  return isIdentifierAtom(expr.first) && expr.first.value === "staged";
-};
-
-const isBuilderHead = (expr?: Expr): boolean => {
-  if (isIdentifierAtom(expr)) return expr.value === "builder";
-  if (!isForm(expr)) return false;
-  return isIdentifierAtom(expr.first) && expr.first.value === "builder";
+  return isIdentifierAtom(expr.first) && expr.first.value === "access";
 };
 
 const parseResultAttribute = (form: Form): ResultIdentityAttribute => {
@@ -129,31 +128,36 @@ const parseResultAttribute = (form: Form): ResultIdentityAttribute => {
   return { kind: identity.value };
 };
 
-const parseStagedAttribute = (form: Form): StagedAccessAttribute => {
-  return parseDestinationAttribute(form, "staged");
-};
+type ParsedAccessAttribute =
+  | { kind: "staged"; attribute: StagedAccessAttribute }
+  | { kind: "builder"; attribute: BuilderAccessAttribute };
 
-const parseDestinationAttribute = (
-  form: Form,
-  name: "staged" | "builder",
-): { destinationParameterName: string } => {
+const parseAccessAttribute = (form: Form): ParsedAccessAttribute => {
   const target = form.at(1);
-  if (!isForm(target) || !target.calls(name) || target.length !== 2) {
-    throw new Error(`@${name} requires exactly one 'into:' argument`);
+  if (!isForm(target) || !target.calls("access") || target.length !== 2) {
+    throw new Error(
+      "@access requires exactly one 'staged:' or 'builder:' argument",
+    );
   }
   const argument = target.at(1);
   if (!isForm(argument) || !argument.calls(":") || argument.length !== 3) {
-    throw new Error(`@${name} argument must be labeled 'into:'`);
+    throw new Error("@access argument must be labeled 'staged:' or 'builder:'");
   }
   const label = argument.at(1);
-  if (!isIdentifierAtom(label) || label.value !== "into") {
-    throw new Error(`@${name} argument must be labeled 'into:'`);
+  if (
+    !isIdentifierAtom(label) ||
+    (label.value !== "staged" && label.value !== "builder")
+  ) {
+    throw new Error("@access argument must be labeled 'staged:' or 'builder:'");
   }
   const destination = argument.at(2);
   if (!isIdentifierAtom(destination)) {
-    throw new Error(`@${name} 'into:' value must name a parameter`);
+    throw new Error(`@access '${label.value}:' value must name a parameter`);
   }
-  return { destinationParameterName: destination.value };
+  return {
+    kind: label.value,
+    attribute: { destinationParameterName: destination.value },
+  };
 };
 
 const isFunctionDeclForm = (form: Form): boolean => {

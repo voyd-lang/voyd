@@ -284,15 +284,15 @@ fn update<T>(other: i32, ~target: T) -> ~target
   t.expect(declaration?.signature.returnType?.toJSON()).toBe("T");
 });
 
-test("parses staged overlap contracts on functions and trait methods", (t) => {
+test("parses staged access contracts on functions and trait methods", (t) => {
   const ast = parse(`
 @result(fresh)
-@staged(into: out)
+@access(staged: out)
 fn append(source: Box, ~out: Box) -> Box
   out
 
 trait Append
-  @staged(into: self)
+  @access(staged: self)
   fn append(~self, source: Box): () -> void
 `);
   const fnForm = ast.rest.find((entry) => isForm(entry) && entry.calls("fn"));
@@ -311,32 +311,32 @@ trait Append
   });
 });
 
-test("rejects invalid staged overlap contracts", (t) => {
+test("rejects invalid staged access contracts", (t) => {
   const parseDeclaration = (source: string) => {
     const ast = parse(source);
     const form = ast.rest.find((entry) => isForm(entry) && entry.calls("fn"));
     return isForm(form) ? parseFunctionDecl(form) : null;
   };
   t.expect(() =>
-    parse(`@staged(source: out)
+    parse(`@access(source: out)
 fn bad(~out: i32) -> i32
   out`),
-  ).toThrow(/labeled 'into:'/);
+  ).toThrow(/labeled 'staged:' or 'builder:'/);
   t.expect(() =>
-    parseDeclaration(`@staged(into: missing)
+    parseDeclaration(`@access(staged: missing)
 fn bad(~out: i32) -> i32
   out`),
   ).toThrow(/unknown parameter 'missing'/);
   t.expect(() =>
-    parseDeclaration(`@staged(into: out)
+    parseDeclaration(`@access(staged: out)
 fn bad(out: i32) -> i32
   out`),
   ).toThrow(/must be declared with '~'/);
 });
 
-test("parses builder ownership contracts and validates their destination", (t) => {
+test("parses builder access contracts and validates their destination", (t) => {
   const ast = parse(`
-@builder(into: out)
+@access(builder: out)
 fn write(source: Box, ~out: Box) -> void
   out.value = source.value
 `);
@@ -346,12 +346,12 @@ fn write(source: Box, ~out: Box) -> void
     destinationParameterIndex: 1,
   });
   t.expect(() =>
-    parse(`@builder(source: out)
+    parse(`@access(source: out)
 fn bad(~out: i32) -> void
   void`),
-  ).toThrow(/labeled 'into:'/);
+  ).toThrow(/labeled 'staged:' or 'builder:'/);
   t.expect(() => {
-    const invalid = parse(`@builder(into: out)
+    const invalid = parse(`@access(builder: out)
 fn bad(out: i32) -> void
   void`);
     const invalidForm = invalid.rest.find(
@@ -359,6 +359,28 @@ fn bad(out: i32) -> void
     );
     if (isForm(invalidForm)) parseFunctionDecl(invalidForm);
   }).toThrow(/must be declared with '~'/);
+  const combined = parse(`@access(staged: out)
+@access(builder: out)
+fn combined(~out: i32) -> void
+  void`);
+  const combinedForm = combined.rest.find(
+    (entry) => isForm(entry) && entry.calls("fn"),
+  );
+  const combinedDeclaration = isForm(combinedForm)
+    ? parseFunctionDecl(combinedForm)
+    : null;
+  t.expect(combinedDeclaration?.signature.stagedAccess).toEqual({
+    destinationParameterIndex: 0,
+  });
+  t.expect(combinedDeclaration?.signature.builderAccess).toEqual({
+    destinationParameterIndex: 0,
+  });
+  t.expect(() =>
+    parse(`@access(builder: out)
+@access(builder: out)
+fn duplicate(~out: i32) -> void
+  void`),
+  ).toThrow(/duplicate @access\(builder: \.\.\.\) attribute/);
 });
 
 test("rejects invalid or conflicting result identity contracts", (t) => {

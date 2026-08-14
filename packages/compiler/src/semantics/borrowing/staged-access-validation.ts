@@ -21,9 +21,7 @@ import {
   OrdinaryParameterAccess,
   type OrdinaryMutationSummary,
 } from "./ordinary-mutation-summary.js";
-import {
-  typeCanCarryReference,
-} from "./reference-bearing.js";
+import { typeCanCarryReference } from "./reference-bearing.js";
 
 type StagedEvent = {
   readsSource: boolean;
@@ -43,7 +41,7 @@ type ValidationStats = {
 };
 
 /**
- * Check the local ordering promise behind `@staged`.
+ * Check the local ordering promise behind `@access(staged: destination)`.
  *
  * The dataflow state is one monotone bit: whether the destination may already
  * have been written on a path. Each CFG block is therefore processed at most
@@ -103,7 +101,7 @@ export const validateStagedAccessContracts = ({
       diagnostics.push(
         stagedDiagnostic({
           callable: symbolName(implementation, symbolTable),
-          reason: `trait implementation declares a different @staged destination than parameter ${expected.destinationParameterIndex + 1}`,
+          reason: `trait implementation declares a different @access(staged: ...) destination than parameter ${expected.destinationParameterIndex + 1}`,
           span: fn?.span ?? declaration.span,
         }),
       );
@@ -278,11 +276,7 @@ const collectStagedEvents = ({
     let readsSource = false;
     let writesDestination = false;
     call.arguments.forEach((argument) => {
-      const accesses = callParameterAccesses(
-        call,
-        summary,
-        argument.parameter,
-      );
+      const accesses = callParameterAccesses(call, summary, argument.parameter);
       if (
         accesses.direct === OrdinaryParameterAccess.Unused &&
         accesses.reachable === OrdinaryParameterAccess.Unused
@@ -410,9 +404,7 @@ const collectParameterOriginsBySymbol = ({
   const independentOuterSymbols = new Set(
     Array.from(assignmentsBySymbol).flatMap(([symbol, values]) =>
       values.length > 0 &&
-      values.every((value) =>
-        expressionHasFreshOuterIdentity(value, calls),
-      )
+      values.every((value) => expressionHasFreshOuterIdentity(value, calls))
         ? [symbol]
         : [],
     ),
@@ -617,7 +609,8 @@ const expressionParameterOrigins = ({
 const expressionHasFreshOuterIdentity = (
   expression: HirExprId,
   calls: ReadonlyMap<HirExprId, CallableBorrowIndexCall>,
-): boolean => calls.get(expression)?.signature?.resultIdentity?.kind === "fresh";
+): boolean =>
+  calls.get(expression)?.signature?.resultIdentity?.kind === "fresh";
 
 const patternSymbols = (pattern: HirPattern): readonly SymbolId[] => {
   switch (pattern.kind) {
@@ -712,8 +705,7 @@ const callParameterAccesses = (
     };
   }
   return {
-    direct:
-      summary.directAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
+    direct: summary.directAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
     reachable:
       summary.reachableAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
   };
@@ -786,7 +778,7 @@ const stagedOrderFailure = ({
       return {
         expression,
         reason:
-          "a nested call that reads an input and writes the destination must declare a compatible @staged contract",
+          "a nested call that reads an input and writes the destination must declare a compatible @access(staged: ...) contract",
         workItems,
       };
     }
@@ -827,12 +819,18 @@ const symbolName = (symbol: SymbolId, symbolTable: SymbolTable): string =>
     : `callable#${symbol}`;
 
 const recordStats = (stats: ValidationStats): void => {
-  incrementCompilerPerfCounter("borrowing.staged.declarations", stats.declarations);
+  incrementCompilerPerfCounter(
+    "borrowing.staged.declarations",
+    stats.declarations,
+  );
   incrementCompilerPerfCounter("borrowing.staged.cfgBlocks", stats.cfgBlocks);
   incrementCompilerPerfCounter("borrowing.staged.cfgEdges", stats.cfgEdges);
   incrementCompilerPerfCounter("borrowing.staged.facts", stats.facts);
   incrementCompilerPerfCounter("borrowing.staged.workItems", stats.workItems);
   incrementCompilerPerfCounter("borrowing.staged.forwarding", stats.forwarding);
-  incrementCompilerPerfCounter("borrowing.staged.traitChecks", stats.traitChecks);
+  incrementCompilerPerfCounter(
+    "borrowing.staged.traitChecks",
+    stats.traitChecks,
+  );
   incrementCompilerPerfCounter("borrowing.staged.violations", stats.violations);
 };

@@ -56,7 +56,7 @@ fn info_json(value: Info) -> JsonValue
   set_optional_string(out, "description", value.description)
   JsonObject { value: out }
 
-@staged(into: target)
+@access(staged: target)
 fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> void
   match(value)
     Some<String> { value }:
@@ -64,6 +64,6 @@ fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value
     None:
       void
 
-@staged(into: target)
+@access(staged: target)
 fn set_optional_string(~target: Dict<String, JsonValue>, key: String, value: Option<String>) -> void
   set_optional_string(target, key.as_slice(), value)

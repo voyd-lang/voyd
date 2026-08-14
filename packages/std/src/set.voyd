@@ -30,12 +30,12 @@ impl<T: DictKey<T>> Set<T>
     self.storage.contains(value)
 
   /// Inserts `value`, returning true only when it was newly inserted.
-  @staged(into: self)
+  @access(staged: self)
   api fn insert(~self, value: T) -> bool
     self.storage.insert(value, true)
 
   /// Removes `value`, returning true only when it existed.
-  @staged(into: self)
+  @access(staged: self)
   api fn remove(~self, value: T) -> bool
     match(self.storage.remove(value))
       Some<bool>:

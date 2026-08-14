@@ -118,12 +118,12 @@ impl<K: DictKey<K>, V> Dict<K, V>
     Some<V> { value: entry.value }
 
   /// Inserts a value and returns true when the key was not already present.
-  @staged(into: self)
+  @access(staged: self)
   api fn insert(~self, key: K, value: V) -> bool
     self.set_owned(key, value)
 
   /// Inserts or replaces the value for a key.
-  @staged(into: self)
+  @access(staged: self)
   api fn set(
     ~self,
     /// Key to insert or update.
@@ -135,7 +135,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     self
 
   /// Updates storage owned exclusively by this dictionary.
-  @staged(into: self)
+  @access(staged: self)
   fn set_owned(~self, key: K, value: V) -> bool
     self.set_entry_owned(DictPair<K, V> { key, value })
 
@@ -150,7 +150,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
       index = index + 1
     -1
 
-  @staged(into: self)
+  @access(staged: self)
   fn set_entry_owned(~self, entry: DictPair<K, V>) -> bool
     let bucket_count = __array_len(self.buckets)
     let bucket_index = bucket_index_for_key(bucket_count, entry.key)
@@ -195,7 +195,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
       count: self.count
     }
 
-  @staged(into: self)
+  @access(staged: self)
   fn publish_owned(~self, next: Dict<K, V>) -> void
     let buckets = next.buckets
     let count = next.count
@@ -203,7 +203,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     self.count = count
 
   /// Removes and returns a value when present.
-  @staged(into: self)
+  @access(staged: self)
   api fn remove(~self, key: K) -> Optional<V>
     if self.count == 0:
       return None {}
@@ -328,7 +328,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
       bucket_index = bucket_index + 1
 
   /// Appends values from another dictionary.
-  @staged(into: self)
+  @access(staged: self)
   api fn extend(~self, other: Dict<K, V>) -> void
     let snapshot = other.entries()
     let ~next = self.copied()
@@ -562,7 +562,7 @@ impl<K: DictKey<K>, V> SubscriptRead<K, Optional<V>> for Dict<K, V>
 
 impl<K: DictKey<K>, V> SubscriptWrite<K, V> for Dict<K, V>
   /// Updates the value addressed by subscript syntax.
-  @staged(into: self)
+  @access(staged: self)
   api fn subscript_set(~self, key: K, value: V) -> void
     let _ = self.set(key, value)
 
