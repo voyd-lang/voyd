@@ -260,74 +260,74 @@ fn simulation_from_document(
       }
 
 fn simulation_json_value(value: PersistedSimulation) -> JsonValue
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("version", JsonNumber { value: to_f64(value.version) })
-  fields.set("id", JsonString { value: value.id })
-  fields.set("name", JsonString { value: value.name })
-  fields.set("createdAt", JsonNumber { value: to_f64(value.created_at) })
-  fields.set("updatedAt", JsonNumber { value: to_f64(value.updated_at) })
-  fields.set("bodies", JsonArray {
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("version", JsonNumber { value: to_f64(value.version) })
+  fields = fields.setting("id", JsonString { value: value.id })
+  fields = fields.setting("name", JsonString { value: value.name })
+  fields = fields.setting("createdAt", JsonNumber { value: to_f64(value.created_at) })
+  fields = fields.setting("updatedAt", JsonNumber { value: to_f64(value.updated_at) })
+  fields = fields.setting("bodies", JsonArray {
     value: value.state.bodies.map((body: Body) -> JsonValue => body_json_value(body))
   })
-  fields.set("simulationSettings", settings_json_value(value.state.settings))
-  fields.set("elapsedDays", JsonNumber { value: value.state.elapsed_days })
-  fields.set("camera", camera_json_value(value.camera))
+  fields = fields.setting("simulationSettings", settings_json_value(value.state.settings))
+  fields = fields.setting("elapsedDays", JsonNumber { value: value.state.elapsed_days })
+  fields = fields.setting("camera", camera_json_value(value.camera))
   JsonObject { value: fields }
 
 fn body_json_value(body: Body) -> JsonValue
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("id", JsonString { value: body.id })
-  fields.set("name", JsonString { value: body.name })
-  fields.set("kind", JsonString { value: kind_name(body.kind) })
-  fields.set("massSolar", JsonNumber { value: body.mass_solar })
-  fields.set("radiusAu", JsonNumber { value: body.radius_au })
-  fields.set("positionAu", vector_json_value(body.position_au))
-  fields.set("velocityAuPerDay", vector_json_value(body.velocity_au_per_day))
-  fields.set("appearance", appearance_json_value(body.appearance))
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("id", JsonString { value: body.id })
+  fields = fields.setting("name", JsonString { value: body.name })
+  fields = fields.setting("kind", JsonString { value: kind_name(body.kind) })
+  fields = fields.setting("massSolar", JsonNumber { value: body.mass_solar })
+  fields = fields.setting("radiusAu", JsonNumber { value: body.radius_au })
+  fields = fields.setting("positionAu", vector_json_value(body.position_au))
+  fields = fields.setting("velocityAuPerDay", vector_json_value(body.velocity_au_per_day))
+  fields = fields.setting("appearance", appearance_json_value(body.appearance))
   JsonObject { value: fields }
 
 fn appearance_json_value(value: BodyAppearance) -> JsonValue
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("primaryColor", JsonString { value: value.primary_color })
-  fields.set("secondaryColor", JsonString { value: value.secondary_color })
-  fields.set("trailColor", JsonString { value: value.trail_color })
-  fields.set("glowStrength", JsonNumber { value: value.glow_strength })
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("primaryColor", JsonString { value: value.primary_color })
+  fields = fields.setting("secondaryColor", JsonString { value: value.secondary_color })
+  fields = fields.setting("trailColor", JsonString { value: value.trail_color })
+  fields = fields.setting("glowStrength", JsonNumber { value: value.glow_strength })
   JsonObject { value: fields }
 
 fn vector_json_value(value: Vec2) -> JsonValue
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("x", JsonNumber { value: value.x })
-  fields.set("y", JsonNumber { value: value.y })
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("x", JsonNumber { value: value.x })
+  fields = fields.setting("y", JsonNumber { value: value.y })
   JsonObject { value: fields }
 
 fn settings_json_value(value: SimulationSettings) -> JsonValue
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("fixedTimestepDays", JsonNumber { value: value.fixed_timestep_days })
-  fields.set("softeningAu", JsonNumber { value: value.softening_au })
-  fields.set("trailsEnabled", JsonBool { value: value.trails_enabled })
-  fields.set("velocityVectorsEnabled", JsonBool { value: value.velocity_vectors_enabled })
-  fields.set("labelsEnabled", JsonBool { value: value.labels_enabled })
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("fixedTimestepDays", JsonNumber { value: value.fixed_timestep_days })
+  fields = fields.setting("softeningAu", JsonNumber { value: value.softening_au })
+  fields = fields.setting("trailsEnabled", JsonBool { value: value.trails_enabled })
+  fields = fields.setting("velocityVectorsEnabled", JsonBool { value: value.velocity_vectors_enabled })
+  fields = fields.setting("labelsEnabled", JsonBool { value: value.labels_enabled })
   JsonObject { value: fields }
 
 fn camera_json_value(value: CameraView) -> JsonValue
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("centerAu", vector_json_value(value.center_au))
-  fields.set("pixelsPerAu", JsonNumber { value: value.pixels_per_au })
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("centerAu", vector_json_value(value.center_au))
+  fields = fields.setting("pixelsPerAu", JsonNumber { value: value.pixels_per_au })
   JsonObject { value: fields }
 
 fn summary_json_value(value: SimulationSummary) -> JsonValue
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("id", JsonString { value: value.id })
-  fields.set("name", JsonString { value: value.name })
-  fields.set("createdAt", JsonNumber { value: to_f64(value.created_at) })
-  fields.set("updatedAt", JsonNumber { value: to_f64(value.updated_at) })
-  fields.set("bodyCount", JsonNumber { value: to_f64(value.body_count) })
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("id", JsonString { value: value.id })
+  fields = fields.setting("name", JsonString { value: value.name })
+  fields = fields.setting("createdAt", JsonNumber { value: to_f64(value.created_at) })
+  fields = fields.setting("updatedAt", JsonNumber { value: to_f64(value.updated_at) })
+  fields = fields.setting("bodyCount", JsonNumber { value: to_f64(value.body_count) })
   JsonObject { value: fields }
 
 fn api_error_json_value(value: ApiError) -> JsonValue
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("code", JsonString { value: value.code })
-  fields.set("message", JsonString { value: value.message })
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("code", JsonString { value: value.code })
+  fields = fields.setting("message", JsonString { value: value.message })
   JsonObject { value: fields }
 
 fn bodies_from_document(

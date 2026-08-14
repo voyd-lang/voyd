@@ -261,12 +261,12 @@ fn articles_json_value(articles: Array<Article>) -> JsonValue
   JsonArray { value: articles.map((article: Article) -> JsonValue => article_json_value(article)) }
 
 fn article_json_value(article: Article) -> JsonValue
-  let ~fields = Dict<String, JsonValue>::init()
-  fields.set("slug", JsonString { value: article.slug })
-  fields.set("title", JsonString { value: article.title })
-  fields.set("overview", JsonString { value: article.overview })
-  fields.set("body", JsonString { value: article.body })
-  fields.set(
+  var fields = Dict<String, JsonValue>::init()
+  fields = fields.setting("slug", JsonString { value: article.slug })
+  fields = fields.setting("title", JsonString { value: article.title })
+  fields = fields.setting("overview", JsonString { value: article.overview })
+  fields = fields.setting("body", JsonString { value: article.body })
+  fields = fields.setting(
     "related",
     JsonArray { value: article.related.map((slug: String) -> JsonValue => JsonString { value: slug }) }
   )
