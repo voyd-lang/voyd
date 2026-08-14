@@ -137,7 +137,15 @@ type RequiredMetrics = {
   callableCount: number | null;
   callEdgeCount: number | null;
   ordinarySummaryEvaluations: number | null;
-  ordinarySccReevaluations: number | null;
+  ordinarySccBodyVisits: number | null;
+  ordinaryStrictAscents: number | null;
+  ordinaryDependencyEnqueues: number | null;
+  ordinarySolverBound: number | null;
+  ordinaryLivenessCfgBlocks: number | null;
+  ordinaryLivenessCfgEdges: number | null;
+  ordinaryLivenessTrackedCapabilities: number | null;
+  ordinaryLivenessStateInsertions: number | null;
+  ordinaryLivenessWorkItems: number | null;
   explicitBorrowFactCount: number | null;
   projectionFamilyCount: number | null;
   wideningCount: number | null;
@@ -277,8 +285,8 @@ const ACCEPTANCE_WORKLOADS: readonly AcceptanceWorkload[] = [
       "npm run bench:v500 -- --families mutation-mixed --sizes 4,8,16,32 --modes none,release --samples 7 --warmups 1 --output /tmp/v500-mutation.json",
     coverage: "ready",
     requiredEvidence: [
-      "direct, dynamic, callback, ambient, identity-guard, and SCC dimensions",
-      "summary evaluation and SCC reevaluation scaling",
+      "direct, reachable, shared-subobject, dynamic, callback, ambient, effect, identity-guard, nested-reborrow, and SCC dimensions",
+      "summary solver and local-liveness bound evidence",
     ],
   },
   {
@@ -1097,8 +1105,33 @@ const requiredMetrics = ({
   ordinarySummaryEvaluations: metricValue(counters, [
     "borrowing.ordinary.summaryEvaluations",
   ]),
-  ordinarySccReevaluations: metricValue(counters, [
+  ordinarySccBodyVisits: metricValue(counters, [
+    "borrowing.ordinary.sccBodyVisits",
     "borrowing.ordinary.sccReevaluations",
+  ]),
+  ordinaryStrictAscents: metricValue(counters, [
+    "borrowing.ordinary.strictAscents",
+  ]),
+  ordinaryDependencyEnqueues: metricValue(counters, [
+    "borrowing.ordinary.dependencyEnqueues",
+  ]),
+  ordinarySolverBound: metricValue(counters, [
+    "borrowing.ordinary.solverBound",
+  ]),
+  ordinaryLivenessCfgBlocks: metricValue(counters, [
+    "borrowing.ordinary.liveness.cfgBlocks",
+  ]),
+  ordinaryLivenessCfgEdges: metricValue(counters, [
+    "borrowing.ordinary.liveness.cfgEdges",
+  ]),
+  ordinaryLivenessTrackedCapabilities: metricValue(counters, [
+    "borrowing.ordinary.liveness.trackedCapabilities",
+  ]),
+  ordinaryLivenessStateInsertions: metricValue(counters, [
+    "borrowing.ordinary.liveness.stateInsertions",
+  ]),
+  ordinaryLivenessWorkItems: metricValue(counters, [
+    "borrowing.ordinary.liveness.workItems",
   ]),
   explicitBorrowFactCount: metricValue(counters, [
     "borrowing.explicit.provenanceFacts",
@@ -1375,6 +1408,10 @@ const scalingSeriesFor = (rows: readonly ResultRow[]) => {
             row.requiredMetrics.retainedSummaryBytes,
             previous.requiredMetrics.retainedSummaryBytes,
           ),
+          livenessStateInsertionRatio: ratio(
+            row.requiredMetrics.ordinaryLivenessStateInsertions,
+            previous.requiredMetrics.ordinaryLivenessStateInsertions,
+          ),
           explicitBorrowFactRatio: ratio(
             row.requiredMetrics.explicitBorrowFactCount,
             previous.requiredMetrics.explicitBorrowFactCount,
@@ -1414,6 +1451,45 @@ const scalingSeriesFor = (rows: readonly ResultRow[]) => {
                 (row) => row.requiredMetrics.explicitBorrowFactCount === 0,
               )
             : null,
+        summaryEvaluationBoundSatisfied: ordered.every(
+          (row) =>
+            row.requiredMetrics.ordinarySummaryEvaluations !== null &&
+            row.requiredMetrics.ordinarySolverBound !== null,
+        )
+          ? ordered.every(
+              (row) =>
+                row.requiredMetrics.ordinarySummaryEvaluations! <=
+                row.requiredMetrics.ordinarySolverBound!,
+            )
+          : null,
+        livenessStateBoundSatisfied: ordered.every(
+          (row) =>
+            row.requiredMetrics.ordinaryLivenessCfgBlocks !== null &&
+            row.requiredMetrics.ordinaryLivenessTrackedCapabilities !== null &&
+            row.requiredMetrics.ordinaryLivenessStateInsertions !== null,
+        )
+          ? ordered.every(
+              (row) =>
+                row.requiredMetrics.ordinaryLivenessStateInsertions! <=
+                row.requiredMetrics.ordinaryLivenessCfgBlocks! *
+                  row.requiredMetrics.ordinaryLivenessTrackedCapabilities!,
+            )
+          : null,
+        livenessWorkBoundSatisfied: ordered.every(
+          (row) =>
+            row.requiredMetrics.ordinaryLivenessCfgBlocks !== null &&
+            row.requiredMetrics.ordinaryLivenessCfgEdges !== null &&
+            row.requiredMetrics.ordinaryLivenessTrackedCapabilities !== null &&
+            row.requiredMetrics.ordinaryLivenessWorkItems !== null,
+        )
+          ? ordered.every(
+              (row) =>
+                row.requiredMetrics.ordinaryLivenessWorkItems! <=
+                row.requiredMetrics.ordinaryLivenessCfgBlocks! +
+                  row.requiredMetrics.ordinaryLivenessCfgEdges! *
+                    row.requiredMetrics.ordinaryLivenessTrackedCapabilities!,
+            )
+          : null,
       },
     };
   });

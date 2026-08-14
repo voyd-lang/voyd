@@ -6,8 +6,7 @@ use std::dict::{ Dict, DictKey }
 /// A hash-based set of unique values.
 ///
 /// Example:
-/// `let ~tags = Set<String>::init()`
-/// `tags.insert("alpha")`
+/// `let tags = Set<String>::init().inserting("alpha")`
 /// `tags.contains("alpha")`
 pub obj Set<T> {
   storage: Dict<T, bool>
@@ -30,17 +29,13 @@ impl<T: DictKey<T>> Set<T>
   api fn contains(self, value: T) -> bool
     self.storage.contains(value)
 
-  /// Inserts `value`, returning true only when it was newly inserted.
-  api fn insert(~self, value: T) -> bool
-    self.storage.insert(value, true)
+  /// Returns a set containing `value`.
+  api fn inserting(self, value: T) -> Set<T>
+    Set<T> { storage: self.storage.setting(value, true) }
 
-  /// Removes `value`, returning true only when it existed.
-  api fn remove(~self, value: T) -> bool
-    match(self.storage.remove(value))
-      Some<bool>:
-        true
-      None:
-        false
+  /// Returns a set without `value`.
+  api fn removing(self, value: T) -> Set<T>
+    Set<T> { storage: self.storage.removing(value) }
 
   /// Removes all values.
   api fn clear(~self) -> void

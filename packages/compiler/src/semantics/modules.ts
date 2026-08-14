@@ -90,7 +90,7 @@ export interface ModuleExportTable extends Map<string, ModuleExportEntry> {
 
 export const PACKAGE_SEMANTIC_INTERFACE_SCHEMA =
   "voyd.package-semantic-interface" as const;
-export const PACKAGE_SEMANTIC_INTERFACE_VERSION = 3 as const;
+export const PACKAGE_SEMANTIC_INTERFACE_VERSION = 4 as const;
 
 export type PackageOrdinaryMutationSummary = OrdinaryMutationSummary;
 
@@ -158,7 +158,14 @@ export const cloneModuleExportTable = (
       ...table.packageSemanticInterface,
       ordinaryMutationSummaries:
         table.packageSemanticInterface.ordinaryMutationSummaries.map(
-          (entry) => ({ ...entry, summary: { ...entry.summary } }),
+          (entry) => ({
+            ...entry,
+            summary: {
+              ...entry.summary,
+              directAccesses: [...entry.summary.directAccesses],
+              reachableAccesses: [...entry.summary.reachableAccesses],
+            },
+          }),
         ),
       exports: table.packageSemanticInterface.exports.map((entry) => ({
         ...entry,

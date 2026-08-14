@@ -1,8 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DiagnosticError } from "../../../diagnostics/index.js";
 import type { ModuleGraph, ModuleNode } from "../../../modules/types.js";
 import { parse } from "../../../parser/index.js";
 import { semanticsPipeline } from "../../pipeline.js";
+
+const perf = vi.hoisted(() => ({ increment: vi.fn() }));
+vi.mock("../../../perf.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../perf.js")>()),
+  incrementCompilerPerfCounter: perf.increment,
+}));
 
 const analyze = (source: string) =>
   semanticsPipeline(parse(source, "scoped-borrowing.test.voyd"));
@@ -37,6 +43,18 @@ const diagnosticCodes = (source: string): readonly string[] => {
   }
 };
 
+const diagnosticCodesStd = (source: string): readonly string[] => {
+  try {
+    analyzeStd(source);
+    return [];
+  } catch (error) {
+    if (error instanceof DiagnosticError) {
+      return error.diagnostics.map((diagnostic) => diagnostic.code);
+    }
+    throw error;
+  }
+};
+
 const isRejected = (run: () => unknown): boolean => {
   try {
     run();
@@ -55,6 +73,276 @@ fn read(value: Borrow<Box>) -> i32
 fn increment(~value: Borrow<Box>) -> void
   value.value = value.value + 1
 `;
+
+type LivenessCounterGroup = {
+  cfgBlocks: number;
+  cfgEdges: number;
+  trackedCapabilities: number;
+  stateInsertions: number;
+  workItems: number;
+};
+
+const livenessCounterGroups = (
+  calls: readonly (readonly unknown[])[],
+): readonly LivenessCounterGroup[] => {
+  const prefix = "borrowing.ordinary.liveness.";
+  const values = calls
+    .filter(([name]) => String(name).startsWith(prefix))
+    .map(([name, value]) => [String(name).slice(prefix.length), Number(value)]);
+  const groups = [];
+  for (let index = 0; index < values.length; index += 5) {
+    groups.push(Object.fromEntries(values.slice(index, index + 5)));
+  }
+  return groups as LivenessCounterGroup[];
+};
+
+describe("ordinary exclusive capability liveness", () => {
+  const prelude = `
+obj Box { value: i32 }
+
+fn use(~value: Box) -> void
+  value.value = 1
+
+fn invoke(callback: fn() : () -> void) -> void
+  callback()
+`;
+
+  it("ends exclusive access after the final local use", () => {
+    expect(() =>
+      analyze(`
+${prelude}
+
+fn valid(~value: Box, callback: fn() : () -> void) -> void
+  use(~value)
+  invoke(callback)
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+${prelude}
+
+fn invalid(~value: Box, callback: fn() : () -> void) -> void
+  invoke(callback)
+  use(~value)
+`),
+    ).toContain("TY0055");
+
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+eff Tick
+  wait(resume) -> void
+
+fn valid(~value: Box): Tick -> void
+  value.value = value.value + 1
+  Tick::wait()
+`),
+    ).not.toThrow();
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+eff Tick
+  wait(resume) -> void
+
+fn invalid(~value: Box): Tick -> void
+  Tick::wait()
+  value.value = value.value + 1
+`),
+    ).toContain("TY0055");
+  });
+
+  it("treats mutually exclusive branch uses independently in either order", () => {
+    const callable = (reversed: boolean) => `
+${prelude}
+
+fn valid(
+  ~value: Box,
+  callback: fn() : () -> void,
+  flag: bool
+) -> void
+  if
+    flag:
+      ${reversed ? "invoke(callback)" : "use(~value)"}
+    else:
+      ${reversed ? "use(~value)" : "invoke(callback)"}
+`;
+    expect(() => analyze(callable(false))).not.toThrow();
+    expect(() => analyze(callable(true))).not.toThrow();
+  });
+
+  it("keeps aliases live across loop backedges and post-loop uses", () => {
+    const loopAlias = diagnosticCodes(`
+${prelude}
+
+fn invalid(
+  ~value: Box,
+  callback: fn() : () -> void,
+  running: bool
+) -> void
+  while running:
+    let alias = value
+    invoke(callback)
+    let observed = alias.value
+`);
+    const postLoop = diagnosticCodes(`
+${prelude}
+
+fn invalid(
+  ~value: Box,
+  callback: fn() : () -> void,
+  running: bool
+) -> void
+  while running:
+    invoke(callback)
+  use(~value)
+`);
+    expect(loopAlias).toContain("TY0055");
+    expect(postLoop).toContain("TY0055");
+  });
+
+  it("propagates handled performs to capability uses in handler bodies", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+eff Tick
+  wait(resume) -> void
+
+fn invalid(~value: Box) -> void
+  try
+    Tick::wait()
+  Tick::wait(resume):
+    value.value = value.value + 1
+    resume()
+`),
+    ).toContain("TY0055");
+  });
+
+  it("kills a local capability origin when its alias is overwritten", () => {
+    expect(() =>
+      analyze(`
+${prelude}
+
+fn read_value(value: Box) -> i32
+  value.value
+
+fn valid(~value: Box, callback: fn() : () -> void) -> i32
+  let ~alias = value
+  alias.value = alias.value + 1
+  alias = Box { value: 2 }
+  invoke(callback)
+  read_value(alias)
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+${prelude}
+
+fn read_value(value: Box) -> i32
+  value.value
+
+fn invalid(~value: Box, callback: fn() : () -> void) -> i32
+  let alias = value
+  invoke(callback)
+  read_value(alias)
+`),
+    ).toContain("TY0055");
+  });
+
+  it("compares direct ambient access with only the live capabilities", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj Other { value: i32 }
+
+let ambient = Box { value: 4 }
+
+fn valid(~box: Box, ~other: Other) -> i32
+  box.value = box.value + 1
+  let observed = ambient.value
+  other.value = other.value + 1
+  observed + other.value
+`),
+    ).not.toThrow();
+  });
+
+  it("allows a final nested transfer and rejects a suspended parent", () => {
+    const nested = `
+${prelude}
+
+fn nested(~value: Box, callback: fn() : () -> void) -> void
+  use(~value)
+  invoke(callback)
+`;
+    expect(() =>
+      analyze(`
+${nested}
+
+fn valid(~value: Box, callback: fn() : () -> void) -> void
+  nested(~value, callback)
+`),
+    ).not.toThrow();
+    expect(
+      diagnosticCodes(`
+${nested}
+
+fn invalid(~value: Box, callback: fn() : () -> void) -> void
+  nested(~value, callback)
+  use(~value)
+`),
+    ).toContain("TY0055");
+  });
+
+  it("keeps CFG solver counters within their monotone bounds", () => {
+    const callStart = perf.increment.mock.calls.length;
+    analyze(`
+${prelude}
+
+fn bounded(
+  ~value: Box,
+  callback: fn() : () -> void,
+  running: bool
+) -> void
+  while running:
+    use(~value)
+  invoke(callback)
+`);
+    const groups = livenessCounterGroups(
+      perf.increment.mock.calls.slice(callStart),
+    );
+    const bounded = groups
+      .filter(({ trackedCapabilities }) => Boolean(trackedCapabilities))
+      .sort((left, right) => right.cfgBlocks - left.cfgBlocks)[0];
+    expect(bounded).toBeDefined();
+    expect(bounded!.stateInsertions).toBeLessThanOrEqual(
+      bounded!.cfgBlocks * bounded!.trackedCapabilities,
+    );
+    expect(bounded!.workItems).toBeLessThanOrEqual(
+      bounded!.cfgBlocks + bounded!.cfgEdges * bounded!.trackedCapabilities,
+    );
+
+    const zeroStart = perf.increment.mock.calls.length;
+    analyze(`
+obj Box { value: i32 }
+
+fn no_capability(value: Box) -> i32
+  value.value
+`);
+    expect(
+      livenessCounterGroups(perf.increment.mock.calls.slice(zeroStart)),
+    ).toContainEqual({
+      cfgBlocks: 0,
+      cfgEdges: 0,
+      trackedCapabilities: 0,
+      stateInsertions: 0,
+      workItems: 0,
+    });
+  });
+});
 
 describe("scoped explicit borrowing", () => {
   it("forms a shared borrow from a place and keeps nested reborrows bounded", () => {
@@ -468,9 +756,9 @@ fn invalid_dynamic(reader: Reader, ~value: Box) -> i32
     ).toContain("TY0048");
   });
 
-  it("checks trait implementations against finite declaration bounds", () => {
-    expect(
-      diagnosticCodes(`
+  it("uses conservative ambient and reentrant bounds for open trait declarations", () => {
+    expect(() =>
+      analyze(`
 obj Box { value: i32 }
 
 trait Mutator
@@ -490,6 +778,25 @@ impl Mutator for CallbackMutator
   ) -> void
     value.value = value.value + 1
     body()
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects an open-trait wrapper under a live exclusive parameter", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+trait Reader
+  fn read(self): () -> i32
+
+fn read_wrapper<T: Reader>(reader: T): () -> i32
+  reader.read()
+
+fn invalid<T: Reader>(~value: Box, reader: T): () -> i32
+  value.value = value.value + 1
+  let observed = read_wrapper(reader)
+  value.value + observed
 `),
     ).toContain("TY0055");
   });
@@ -1349,7 +1656,7 @@ fn invalid<T: Reader>(value: Borrow<Box>, reader: T) -> i32
     });
   });
 
-  it("rejects direct and helper-mediated ambient access while Borrow is active", () => {
+  it("allows compatible ambient reads while a shared Borrow is active", () => {
     const direct = diagnosticCodes(`
 obj Box { value: i32 }
 let ambient = Box { value: 4 }
@@ -1368,10 +1675,7 @@ fn invalid(value: Borrow<Box>) -> i32
   ambient_value() + value.value
 `);
 
-    expect({ direct, helper }).toEqual({
-      direct: expect.arrayContaining(["TY0051"]),
-      helper: expect.arrayContaining(["TY0051"]),
-    });
+    expect({ direct, helper }).toEqual({ direct: [], helper: [] });
   });
 
   it("rejects host and task boundaries even when no Borrow value is passed", () => {
@@ -1494,6 +1798,56 @@ fn nested_during_write(cell: SharedCell<Box>) -> i32
     ).not.toThrow();
   });
 
+  it("checks ordinary aliases for the full SharedCell callback invocation", () => {
+    const source = (body: string) => `
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl<T> SharedCell<T>
+  fn with<R>(self, body: fn(value: Borrow<T>) : () -> R) -> R
+    body(self.value)
+
+  fn with_mut<R>(self, body: fn(~value: Borrow<T>) : () -> R) -> R
+    let ~copy = self.value
+    body(~copy)
+
+obj Box { value: i32 }
+
+fn read(value: Box) -> i32
+  value.value
+
+fn write(~value: Box) -> void
+  value.value = value.value + 1
+
+fn check() -> i32
+  let state = Box { value: 1 }
+  let cell = SharedCell<Box> { value: state }
+  ${body}
+`;
+
+    expect(() =>
+      analyzeStd(
+        source(`cell.with((borrowed) => read(state) + borrowed.value)`),
+      ),
+    ).not.toThrow();
+    expect(
+      diagnosticCodesStd(
+        source(`cell.with((borrowed) =>
+    let ~alias = state
+    write(~alias)
+    borrowed.value
+  )`),
+      ),
+    ).toContain("TY0051");
+    expect(
+      diagnosticCodesStd(
+        source(`cell.with_mut((~borrowed) =>
+    read(state) + borrowed.value
+  )`),
+      ),
+    ).toContain("TY0051");
+  });
+
   it("keeps reference-bearing values and stable-handle lookalikes scoped", () => {
     const referenceBearingValue = diagnosticCodes(`
 obj Box { value: i32 }
@@ -1556,9 +1910,9 @@ fn reader(slice: StableSlice) -> (fn() -> i32)
     expect(
       stableLambda
         ? stable.borrowing.ordinaryMutationSummaries.get(-1 - stableLambda.id)
-            ?.ambientObjectAccess
+            ?.ambientAccess
         : undefined,
-    ).toBe(false);
+    ).toBe(0);
 
     const lookalike = analyze(`
 obj Backing { value: i32 }
@@ -1574,8 +1928,8 @@ fn reader(slice: SliceLookalike) -> (fn() -> i32)
       lookalikeLambda
         ? lookalike.borrowing.ordinaryMutationSummaries.get(
             -1 - lookalikeLambda.id,
-          )?.ambientObjectAccess
+          )?.ambientAccess
         : undefined,
-    ).toBe(true);
+    ).toBe(1);
   });
 });

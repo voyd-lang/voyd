@@ -1,7 +1,7 @@
 //! Buffered `multipart/form-data` parsing with binary-safe part bodies.
 
 use std::array::Array
-use std::bytes::{ ByteBuffer, Bytes }
+use std::bytes::Bytes
 use std::http::{ Body, Headers, IncomingRequest }
 use std::optional::types::all
 use std::result::types::all
@@ -80,11 +80,7 @@ pub fn parse(request: IncomingRequest) -> Result<Form, Rejection>
 
 fn parse_bytes(source: Bytes, boundary: StringSlice) -> Result<Form, Rejection>
   let delimiter = Body::text("--".concat(boundary)).as_bytes()
-  let ~separator_buffer = ByteBuffer::with_capacity(delimiter.len() + 2)
-  separator_buffer.push(13)
-  separator_buffer.push(10)
-  separator_buffer.extend(delimiter)
-  let separator = separator_buffer.as_bytes()
+  let separator = Body::text("\r\n--".concat(boundary)).as_bytes()
   if not starts_with_bytes(source, delimiter, at: 0):
     return malformed("multipart body does not start with its boundary")
 

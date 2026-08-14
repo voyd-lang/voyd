@@ -43,8 +43,7 @@ pub fn slice_unbounded() -> i32
   left.len() * 10 + right.len()
 
 pub fn map_roundtrip() -> i32
-  let ~map = Dict<String, i32>::init()
-  map["x"] = 7
+  let map = Dict<String, i32>::init().setting("x", 7)
   optional_i32_or(map["x"], -1)
 
 pub fn write_oob() -> i32

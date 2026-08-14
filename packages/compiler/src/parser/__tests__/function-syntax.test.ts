@@ -1,7 +1,11 @@
 import { parse } from "../parser.js";
 import { test } from "vitest";
 import { isForm } from "../ast/index.js";
-import { parseImplDecl, parseTraitDecl } from "../surface/declarations.js";
+import {
+  parseFunctionDecl,
+  parseImplDecl,
+  parseTraitDecl,
+} from "../surface/declarations.js";
 
 const toPlain = (code: string) =>
   JSON.parse(JSON.stringify(parse(code).toJSON()));
@@ -201,6 +205,62 @@ trait T
       ["block", ["fn", ["=", [":", ["run"], ["->", "open", "i32"]], "1"]]],
     ],
   ]);
+});
+
+test("parses isolated trait methods with an explicit empty effect row", (t) => {
+  const ast = parse(`
+/// Key behavior.
+trait Key<K>
+  /// Computes a hash.
+  @isolated
+  fn hash(self): () -> i32
+`);
+  const form = ast.rest.find(
+    (entry) => isForm(entry) && entry.calls("trait"),
+  );
+  const declaration = isForm(form) ? parseTraitDecl(form) : null;
+
+  t.expect(declaration?.methods[0]?.isolated).toBe(true);
+});
+
+test("rejects isolated trait methods without an explicit empty effect row", (t) => {
+  const ast = parse(`
+trait Key<K>
+  @isolated
+  fn hash(self) -> i32
+`);
+  const form = ast.rest.find(
+    (entry) => isForm(entry) && entry.calls("trait"),
+  );
+
+  t.expect(() => (isForm(form) ? parseTraitDecl(form) : null)).toThrow(
+    /explicit empty effect row/,
+  );
+});
+
+test("rejects isolated on ordinary functions", (t) => {
+  const ast = parse(`
+@isolated
+fn hash() : () -> i32
+  1
+`);
+  const form = ast.rest.find(
+    (entry) => isForm(entry) && entry.calls("fn"),
+  );
+
+  t.expect(() => (isForm(form) ? parseFunctionDecl(form) : null)).toThrow(
+    /only annotate trait methods/,
+  );
+});
+
+test("rejects arguments to isolated", (t) => {
+  t.expect(() =>
+    parse(`
+trait Key
+  @isolated(true)
+  fn hash(self): () -> i32
+`),
+  ).toThrow(/does not accept arguments/);
 });
 
 test("rejects removed trait region declarations", (t) => {

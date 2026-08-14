@@ -6,29 +6,25 @@ use std::traits::sequence::Sequence
 fn accepts_sequence({ values: Sequence<String> }) -> bool
   true
 
-test "set insert contains remove clear":
-  let ~values = Set<String>::init()
-  assert(values.is_empty(), eq: true)
+test "set inserting contains removing clear":
+  let empty = Set<String>::init()
+  assert(empty.is_empty(), eq: true)
 
-  assert(values.insert("a"), eq: true)
-  assert(values.insert("a"), eq: false)
-  assert(values.insert("b"), eq: true)
+  let values = empty.inserting("a").inserting("a").inserting("b")
   assert(values.len(), eq: 2)
   assert(values.contains("a"), eq: true)
   assert(values.contains("z"), eq: false)
 
-  assert(values.remove("a"), eq: true)
-  assert(values.remove("a"), eq: false)
-  assert(values.contains("a"), eq: false)
+  let removed = values.removing("a").removing("a")
+  assert(removed.contains("a"), eq: false)
 
-  values.clear()
-  assert(values.len(), eq: 0)
-  assert(values.is_empty(), eq: true)
+  let ~cleared = removed
+  cleared.clear()
+  assert(cleared.len(), eq: 0)
+  assert(cleared.is_empty(), eq: true)
 
 test "set values returns iterable keys":
-  let ~values = Set<String>::init()
-  values.insert("left")
-  values.insert("right")
+  let values = Set<String>::init().inserting("left").inserting("right")
 
   assert(accepts_sequence(values: values.values()), eq: true)
 

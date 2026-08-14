@@ -116,6 +116,7 @@ const captureFieldsForSite = ({
           symbolTypes.get(symbol) ??
           ctx.module.types.getValueType(symbol) ??
           ctx.program.primitives.unknown,
+        storageRef: ctx.module.mutableStorageSymbols.has(symbol),
         bindingKind: ctx.module.bindingKinds.get(symbol),
       }),
     );

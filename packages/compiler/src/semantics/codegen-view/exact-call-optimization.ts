@@ -58,8 +58,11 @@ export const createExactCallOptimizationIndex = (
   const metrics: ExactCallOptimizationMetrics = {
     requests: 0,
     cacheHits: 0,
+    cacheMisses: 0,
+    bodyVisits: 0,
     acceptedFacts: 0,
     fallbacks: 0,
+    budgetExhaustions: 0,
     workUnits: 0,
     retainedBytes: 0,
   };
@@ -73,6 +76,10 @@ export const createExactCallOptimizationIndex = (
       "codegen.exact_call.work_units",
       result.workUnits,
     );
+    incrementCompilerPerfCounter(
+      "codegen.exact_call.analysis_operations",
+      result.workUnits,
+    );
 
     let decision = result.decision;
     let decisionBytes = CACHED_FALLBACK_BYTES;
@@ -83,6 +90,12 @@ export const createExactCallOptimizationIndex = (
         retainedBytes + factBytes > EXACT_CALL_OPTIMIZATION_CACHE_BUDGET_BYTES
       ) {
         decision = { kind: "fallback", reason: "memory-budget" };
+        metrics.budgetExhaustions += 1;
+        incrementCompilerPerfCounter(
+          factBytes > EXACT_CALL_OPTIMIZATION_FACT_BUDGET_BYTES
+            ? "codegen.exact_call.budget_exhaustion.per_body_memory"
+            : "codegen.exact_call.budget_exhaustion.compile_wide_memory",
+        );
       } else {
         decisionBytes = factBytes;
         metrics.acceptedFacts += 1;
@@ -96,6 +109,15 @@ export const createExactCallOptimizationIndex = (
       incrementCompilerPerfCounter(
         `codegen.exact_call.fallback.${decision.reason}`,
       );
+      incrementCompilerPerfCounter(
+        `codegen.exact_call.bailout.${decision.reason}`,
+      );
+      if (decision.reason === "work-budget") {
+        metrics.budgetExhaustions += 1;
+        incrementCompilerPerfCounter(
+          "codegen.exact_call.budget_exhaustion.per_body_work",
+        );
+      }
     }
     if (
       retainedBytes + decisionBytes <=
@@ -122,6 +144,10 @@ export const createExactCallOptimizationIndex = (
         incrementCompilerPerfCounter("codegen.exact_call.cache_hits");
         return cached;
       }
+      metrics.cacheMisses += 1;
+      metrics.bodyVisits += 1;
+      incrementCompilerPerfCounter("codegen.exact_call.cache_misses");
+      incrementCompilerPerfCounter("codegen.exact_call.body_visits");
       return recordDecision(target, scanExactCallBody({ target, getProgram }));
     },
     getMetrics: () => ({ ...metrics }),

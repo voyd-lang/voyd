@@ -91,6 +91,7 @@ export interface ParsedTraitMethod {
   signature: ParsedFunctionSignature;
   body?: Expr;
   intrinsic?: IntrinsicAttribute;
+  isolated?: true;
 }
 
 export interface ParsedTraitDecl {
@@ -179,6 +180,12 @@ export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
   const keyword = form.at(index);
   if (!isIdentifierWithValue(keyword, "fn")) {
     return null;
+  }
+  if (form.attributes?.isolated === true) {
+    throw new ParserSyntaxError(
+      "@isolated can only annotate trait methods",
+      form.location,
+    );
   }
   if (form.attributes?.operation) {
     throw new ParserSyntaxError(
@@ -276,6 +283,16 @@ const parseTraitMethod = (form: Form): ParsedTraitMethod => {
   );
   const signature = parseFunctionSignature(signatureForm);
 
+  if (
+    form.attributes?.isolated === true &&
+    (!isForm(signature.effectType) || signature.effectType.length !== 0)
+  ) {
+    throw new ParserSyntaxError(
+      "@isolated trait methods must declare an explicit empty effect row ': ()'",
+      form.location,
+    );
+  }
+
   return {
     form,
     signature,
@@ -284,6 +301,7 @@ const parseTraitMethod = (form: Form): ParsedTraitMethod => {
       form.attributes?.intrinsic as IntrinsicAttribute | undefined,
       signature.name.value,
     ),
+    ...(form.attributes?.isolated === true ? { isolated: true } : {}),
   };
 };
 

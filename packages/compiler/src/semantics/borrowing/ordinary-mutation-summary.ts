@@ -20,15 +20,17 @@ export enum OrdinaryParameterAccess {
 }
 
 export type OrdinaryMutationSummary = {
-  parameterAccesses: readonly OrdinaryParameterAccess[];
-  ambientObjectAccess: boolean;
-  invokesUnknownCallback: boolean;
+  directAccesses: readonly OrdinaryParameterAccess[];
+  reachableAccesses: readonly OrdinaryParameterAccess[];
+  ambientAccess: OrdinaryParameterAccess;
+  reentrant: boolean;
   maySuspend: boolean;
 };
 
 export type OrdinaryMutationCallArgument = {
   parameter: number;
   callerParameter?: number;
+  callerAccess?: "direct" | "reachable";
   ambientObject: boolean;
   mayAliasParameters: readonly number[];
   fallbackAccess: OrdinaryParameterAccess;
@@ -42,6 +44,30 @@ export type OrdinaryMutationCall = {
   /** Exact std Array cursor step; retained Array origins are read-only. */
   compilerArrayIteratorNext?: true;
   unknownTarget: boolean;
+  /** Local closure whose hazards replace an exact boundary's callback bit. */
+  exactLocalCallbackSymbol?: SymbolId;
+};
+
+export const ordinaryMutationDynamicBoundSummary = (
+  bound: NonNullable<CallableBorrowIndexCall["ordinaryDynamicBound"]>,
+): OrdinaryMutationSummary => {
+  const accesses = bound.parameterBindingKinds.map((kind) =>
+    kind === "mutable-ref"
+      ? OrdinaryParameterAccess.Write
+      : OrdinaryParameterAccess.Read,
+  );
+  return {
+    directAccesses: accesses,
+    reachableAccesses: accesses,
+    ambientAccess:
+      bound.ambientAccess === "write"
+        ? OrdinaryParameterAccess.Write
+        : bound.ambientAccess === "read"
+          ? OrdinaryParameterAccess.Read
+          : OrdinaryParameterAccess.Unused,
+    reentrant: bound.reentrant,
+    maySuspend: bound.maySuspend,
+  };
 };
 
 /** Bounded solver input extracted from the existing cheap callable index. */
@@ -63,18 +89,26 @@ export type OrdinaryMutationBoundViolation =
       kind: "parameter-access";
       symbol?: SymbolId;
       parameter: number;
+      access: "direct" | "reachable";
       actual: OrdinaryParameterAccess;
       allowed: OrdinaryParameterAccess;
     }
   | {
       kind: "ambient-object-access" | "unknown-callback" | "suspension";
       symbol?: SymbolId;
+      actual?: OrdinaryParameterAccess;
+      allowed?: OrdinaryParameterAccess;
     };
 
 export type OrdinaryMutationMetrics = {
   callableCount: number;
   callEdgeCount: number;
+  strictSummaryAscents: number;
+  dependencyEnqueues: number;
   summaryEvaluations: number;
+  sccBodyVisits: number;
+  solverEvaluationBound: number;
+  solverBoundUsage: number;
   /** Callable reevaluations caused by a changed dependency in the same SCC. */
   sccReevaluations: number;
   retainedSummaryBytes: number;
@@ -93,12 +127,16 @@ export type OrdinaryMutationSolveResult = {
 export const emptyOrdinaryMutationSummary = (
   parameterCount: number,
 ): OrdinaryMutationSummary => ({
-  parameterAccesses: Array.from(
+  directAccesses: Array.from(
     { length: parameterCount },
     () => OrdinaryParameterAccess.Unused,
   ),
-  ambientObjectAccess: false,
-  invokesUnknownCallback: false,
+  reachableAccesses: Array.from(
+    { length: parameterCount },
+    () => OrdinaryParameterAccess.Unused,
+  ),
+  ambientAccess: OrdinaryParameterAccess.Unused,
+  reentrant: false,
   maySuspend: false,
 });
 
@@ -114,15 +152,21 @@ export const ordinaryMutationSummariesEqual = (
   if (left === right) return true;
   if (!left || !right) return false;
   if (
-    left.ambientObjectAccess !== right.ambientObjectAccess ||
-    left.invokesUnknownCallback !== right.invokesUnknownCallback ||
+    left.ambientAccess !== right.ambientAccess ||
+    left.reentrant !== right.reentrant ||
     left.maySuspend !== right.maySuspend ||
-    left.parameterAccesses.length !== right.parameterAccesses.length
+    left.directAccesses.length !== right.directAccesses.length ||
+    left.reachableAccesses.length !== right.reachableAccesses.length
   ) {
     return false;
   }
-  return left.parameterAccesses.every(
-    (access, parameter) => access === right.parameterAccesses[parameter],
+  return (
+    left.directAccesses.every(
+      (access, parameter) => access === right.directAccesses[parameter],
+    ) &&
+    left.reachableAccesses.every(
+      (access, parameter) => access === right.reachableAccesses[parameter],
+    )
   );
 };
 
@@ -131,21 +175,57 @@ export const joinOrdinaryMutationSummaries = (
   right: OrdinaryMutationSummary,
 ): OrdinaryMutationSummary => {
   const parameterCount = Math.max(
-    left.parameterAccesses.length,
-    right.parameterAccesses.length,
+    left.directAccesses.length,
+    right.directAccesses.length,
+    left.reachableAccesses.length,
+    right.reachableAccesses.length,
   );
   return {
-    parameterAccesses: Array.from({ length: parameterCount }, (_, parameter) =>
+    directAccesses: Array.from({ length: parameterCount }, (_, parameter) =>
       joinOrdinaryParameterAccess(
-        left.parameterAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
-        right.parameterAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
+        left.directAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
+        right.directAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
       ),
     ),
-    ambientObjectAccess: left.ambientObjectAccess || right.ambientObjectAccess,
-    invokesUnknownCallback:
-      left.invokesUnknownCallback || right.invokesUnknownCallback,
+    reachableAccesses: Array.from({ length: parameterCount }, (_, parameter) =>
+      joinOrdinaryParameterAccess(
+        left.reachableAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
+        right.reachableAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
+      ),
+    ),
+    ambientAccess: joinOrdinaryParameterAccess(
+      left.ambientAccess,
+      right.ambientAccess,
+    ),
+    reentrant: left.reentrant || right.reentrant,
     maySuspend: left.maySuspend || right.maySuspend,
   };
+};
+
+export const applyExactLocalCallbackHazards = ({
+  call,
+  callee,
+  localSummaries,
+}: {
+  call: Pick<OrdinaryMutationCall, "exactLocalCallbackSymbol">;
+  callee: OrdinaryMutationSummary;
+  localSummaries: ReadonlyMap<SymbolId, OrdinaryMutationSummary>;
+}): OrdinaryMutationSummary => {
+  const callback =
+    call.exactLocalCallbackSymbol === undefined
+      ? undefined
+      : localSummaries.get(call.exactLocalCallbackSymbol);
+  return callback
+    ? {
+        ...callee,
+        ambientAccess: joinOrdinaryParameterAccess(
+          callee.ambientAccess,
+          callback.ambientAccess,
+        ),
+        reentrant: callback.reentrant,
+        maySuspend: callee.maySuspend || callback.maySuspend,
+      }
+    : callee;
 };
 
 /**
@@ -159,13 +239,18 @@ export const ordinaryMutationSignatureUpperBound = ({
   signature: Pick<FunctionSignature, "parameters">;
   maySuspend?: boolean;
 }): OrdinaryMutationSummary => ({
-  parameterAccesses: signature.parameters.map((parameter) =>
+  directAccesses: signature.parameters.map((parameter) =>
     parameter.bindingKind === "mutable-ref"
       ? OrdinaryParameterAccess.Write
       : OrdinaryParameterAccess.Read,
   ),
-  ambientObjectAccess: false,
-  invokesUnknownCallback: false,
+  reachableAccesses: signature.parameters.map((parameter) =>
+    parameter.bindingKind === "mutable-ref"
+      ? OrdinaryParameterAccess.Write
+      : OrdinaryParameterAccess.Read,
+  ),
+  ambientAccess: OrdinaryParameterAccess.Unused,
+  reentrant: false,
   maySuspend,
 });
 
@@ -180,37 +265,60 @@ export const validateOrdinaryMutationSummaryBound = ({
 }): readonly OrdinaryMutationBoundViolation[] => {
   const violations: OrdinaryMutationBoundViolation[] = [];
   if (
-    implementation.parameterAccesses.length !==
-    declaration.parameterAccesses.length
+    implementation.directAccesses.length !==
+      declaration.directAccesses.length ||
+    implementation.reachableAccesses.length !==
+      declaration.reachableAccesses.length
   ) {
     violations.push({
       kind: "parameter-count",
       ...(symbol === undefined ? {} : { symbol }),
-      actual: implementation.parameterAccesses.length,
-      allowed: declaration.parameterAccesses.length,
+      actual: Math.max(
+        implementation.directAccesses.length,
+        implementation.reachableAccesses.length,
+      ),
+      allowed: Math.max(
+        declaration.directAccesses.length,
+        declaration.reachableAccesses.length,
+      ),
     });
   }
-  implementation.parameterAccesses.forEach((actual, parameter) => {
-    const allowed = declaration.parameterAccesses[parameter];
-    if (allowed === undefined || actual <= allowed) return;
-    violations.push({
-      kind: "parameter-access",
-      ...(symbol === undefined ? {} : { symbol }),
-      parameter,
-      actual,
-      allowed,
+  const validateParameterModes = (
+    access: "direct" | "reachable",
+    actualModes: readonly OrdinaryParameterAccess[],
+    allowedModes: readonly OrdinaryParameterAccess[],
+  ): void =>
+    actualModes.forEach((actual, parameter) => {
+      const allowed = allowedModes[parameter];
+      if (allowed === undefined || actual <= allowed) return;
+      violations.push({
+        kind: "parameter-access",
+        ...(symbol === undefined ? {} : { symbol }),
+        parameter,
+        access,
+        actual,
+        allowed,
+      });
     });
-  });
-  if (implementation.ambientObjectAccess && !declaration.ambientObjectAccess) {
+  validateParameterModes(
+    "direct",
+    implementation.directAccesses,
+    declaration.directAccesses,
+  );
+  validateParameterModes(
+    "reachable",
+    implementation.reachableAccesses,
+    declaration.reachableAccesses,
+  );
+  if (implementation.ambientAccess > declaration.ambientAccess) {
     violations.push({
       kind: "ambient-object-access",
       ...(symbol === undefined ? {} : { symbol }),
+      actual: implementation.ambientAccess,
+      allowed: declaration.ambientAccess,
     });
   }
-  if (
-    implementation.invokesUnknownCallback &&
-    !declaration.invokesUnknownCallback
-  ) {
+  if (implementation.reentrant && !declaration.reentrant) {
     violations.push({
       kind: "unknown-callback",
       ...(symbol === undefined ? {} : { symbol }),
@@ -228,22 +336,59 @@ export const validateOrdinaryMutationSummaryBound = ({
 const withParameterAccess = (
   summary: OrdinaryMutationSummary,
   parameter: number,
+  kind: "direct" | "reachable",
   access: OrdinaryParameterAccess,
 ): OrdinaryMutationSummary => {
-  const current = summary.parameterAccesses[parameter];
+  const accesses =
+    kind === "direct" ? summary.directAccesses : summary.reachableAccesses;
+  const current = accesses[parameter];
   if (current === undefined || current >= access) return summary;
-  const parameterAccesses = [...summary.parameterAccesses];
-  parameterAccesses[parameter] = access;
-  return { ...summary, parameterAccesses };
+  const next = [...accesses];
+  next[parameter] = access;
+  return kind === "direct"
+    ? { ...summary, directAccesses: next }
+    : { ...summary, reachableAccesses: next };
 };
+
+const withParameterPathAccess = (
+  summary: OrdinaryMutationSummary,
+  parameter: number,
+  path: readonly { kind: string }[],
+  parameterAllocationBacked: boolean,
+  access: OrdinaryParameterAccess,
+): OrdinaryMutationSummary => {
+  const boundaryPath =
+    parameterAllocationBacked && path[0]?.kind === "dereference"
+      ? path.slice(1)
+      : path;
+  const reachable = boundaryPath.some(
+    (projection) => projection.kind === "dereference",
+  );
+  if (!reachable) {
+    return withParameterAccess(summary, parameter, "direct", access);
+  }
+  const withHandleRead = withParameterAccess(
+    summary,
+    parameter,
+    "direct",
+    OrdinaryParameterAccess.Read,
+  );
+  return withParameterAccess(withHandleRead, parameter, "reachable", access);
+};
+
+const withAmbientAccess = (
+  summary: OrdinaryMutationSummary,
+  access: OrdinaryParameterAccess,
+): OrdinaryMutationSummary =>
+  summary.ambientAccess >= access
+    ? summary
+    : { ...summary, ambientAccess: access };
 
 const directAccesses = (
   index: CallableBorrowIndex,
 ): OrdinaryMutationSummary => {
   let summary: OrdinaryMutationSummary = {
     ...emptyOrdinaryMutationSummary(index.parameters.length),
-    ambientObjectAccess:
-      index.flags.hasModuleStorageAccess || index.flags.hasAmbientObjectCapture,
     maySuspend: index.flags.hasSuspension,
   };
   index.accesses.forEach((access) => {
@@ -255,11 +400,25 @@ const directAccesses = (
     ) {
       return;
     }
+    if (
+      access.place &&
+      ((index.directAmbientObjectRoots ?? []).includes(access.place.root) ||
+        (index.ambientObjectCaptures ?? []).includes(access.place.root))
+    ) {
+      summary = withAmbientAccess(
+        summary,
+        access.kind === "write"
+          ? OrdinaryParameterAccess.Write
+          : OrdinaryParameterAccess.Read,
+      );
+    }
     const source = parameterPlaceForIndexPlace(index, access.place);
     if (!source) return;
-    summary = withParameterAccess(
+    summary = withParameterPathAccess(
       summary,
       source.parameter,
+      source.path,
+      index.parameters[source.parameter]?.allocationBacked === true,
       access.kind === "write"
         ? OrdinaryParameterAccess.Write
         : OrdinaryParameterAccess.Read,
@@ -271,15 +430,17 @@ const directAccesses = (
     const argument = indexCallArgumentFor(call, 0);
     const source = parameterPlaceForIndexPlace(index, argument?.place);
     if (source) {
-      summary = withParameterAccess(
+      summary = withParameterPathAccess(
         summary,
         source.parameter,
+        source.path,
+        index.parameters[source.parameter]?.allocationBacked === true,
         intrinsicAccessAtCallableBoundary({ access, index, source }),
       );
       return;
     }
     if (argument?.moduleStorage === true) {
-      summary = { ...summary, ambientObjectAccess: true };
+      summary = withAmbientAccess(summary, access);
     }
   });
   return summary;
@@ -352,25 +513,14 @@ const callInput = ({
     return undefined;
   }
   const dynamicBound = call.ordinaryDynamicBound
-    ? {
-        parameterAccesses: call.ordinaryDynamicBound.parameterBindingKinds.map(
-          (kind) =>
-            kind === "mutable-ref"
-              ? OrdinaryParameterAccess.Write
-              : OrdinaryParameterAccess.Read,
-        ),
-        ambientObjectAccess: call.ordinaryDynamicBound.ambientObjectAccess,
-        invokesUnknownCallback:
-          call.ordinaryDynamicBound.invokesUnknownCallback,
-        maySuspend: call.ordinaryDynamicBound.maySuspend,
-      }
+    ? ordinaryMutationDynamicBoundSummary(call.ordinaryDynamicBound)
     : call.openTraitDispatch === true && call.signature
       ? {
           ...ordinaryMutationSignatureUpperBound({
             signature: call.signature,
           }),
-          ambientObjectAccess: true,
-          invokesUnknownCallback: true,
+          ambientAccess: OrdinaryParameterAccess.Write,
+          reentrant: true,
           maySuspend: true,
         }
       : undefined;
@@ -381,6 +531,19 @@ const callInput = ({
       return {
         parameter: argument.parameter,
         ...(source ? { callerParameter: source.parameter } : {}),
+        ...(source
+          ? {
+              callerAccess:
+                source.path.some(
+                  (projection) => projection.kind !== "identity",
+                ) &&
+                argument.referenceCapable === true &&
+                argument.bindingKind !== "mutable-ref" &&
+                argument.bindingKind !== "immutable-ref"
+                  ? ("reachable" as const)
+                  : ("direct" as const),
+            }
+          : {}),
         ambientObject: argument.moduleStorage === true,
         mayAliasParameters:
           source === undefined &&
@@ -402,6 +565,9 @@ const callInput = ({
     ...(call.compilerArrayIteratorNext === true
       ? { compilerArrayIteratorNext: true as const }
       : {}),
+    ...(call.exactLocalCallbackSymbol === undefined
+      ? {}
+      : { exactLocalCallbackSymbol: call.exactLocalCallbackSymbol }),
     unknownTarget:
       dynamicBound === undefined &&
       (call.targets.length === 0 || call.argumentPlanAmbiguous === true),
@@ -429,26 +595,53 @@ const targetKey = ({ moduleId, symbol }: SymbolRef): string =>
 
 const applyAccessToArgument = ({
   access,
+  kind,
   argument,
   summary,
 }: {
   access: OrdinaryParameterAccess;
+  kind: "direct" | "reachable";
   argument: OrdinaryMutationCallArgument | undefined;
   summary: OrdinaryMutationSummary;
 }): OrdinaryMutationSummary => {
   if (access === OrdinaryParameterAccess.Unused || !argument) return summary;
   if (argument.callerParameter !== undefined) {
-    return withParameterAccess(summary, argument.callerParameter, access);
+    const callerKind =
+      kind === "reachable" || argument.callerAccess === "reachable"
+        ? "reachable"
+        : "direct";
+    const withAccess = withParameterAccess(
+      summary,
+      argument.callerParameter,
+      callerKind,
+      access,
+    );
+    return callerKind === "reachable"
+      ? withParameterAccess(
+          withAccess,
+          argument.callerParameter,
+          "direct",
+          OrdinaryParameterAccess.Read,
+        )
+      : withAccess;
   }
   if (argument.ambientObject) {
-    return summary.ambientObjectAccess
-      ? summary
-      : { ...summary, ambientObjectAccess: true };
+    return withAmbientAccess(summary, access);
   }
-  return argument.mayAliasParameters.reduce(
-    (current, parameter) => withParameterAccess(current, parameter, access),
-    summary,
-  );
+  return argument.mayAliasParameters.reduce((current, parameter) => {
+    const withAccess = withParameterAccess(
+      current,
+      parameter,
+      "reachable",
+      access,
+    );
+    return withParameterAccess(
+      withAccess,
+      parameter,
+      "direct",
+      OrdinaryParameterAccess.Read,
+    );
+  }, summary);
 };
 
 const applyCalleeSummary = ({
@@ -462,19 +655,35 @@ const applyCalleeSummary = ({
 }): OrdinaryMutationSummary => {
   let next = {
     ...summary,
-    ambientObjectAccess:
-      summary.ambientObjectAccess || callee.ambientObjectAccess,
-    invokesUnknownCallback:
-      summary.invokesUnknownCallback || callee.invokesUnknownCallback,
+    ambientAccess: joinOrdinaryParameterAccess(
+      summary.ambientAccess,
+      callee.ambientAccess,
+    ),
+    reentrant: summary.reentrant || callee.reentrant,
     maySuspend: summary.maySuspend || callee.maySuspend,
   };
-  callee.parameterAccesses.forEach((access, parameter) => {
+  callee.directAccesses.forEach((access, parameter) => {
     const effectiveAccess =
       call.compilerArrayIteratorNext === true && parameter === 0
         ? OrdinaryParameterAccess.Read
         : access;
     next = applyAccessToArgument({
       access: effectiveAccess,
+      kind: "direct",
+      argument: call.arguments.find(
+        (argument) => argument.parameter === parameter,
+      ),
+      summary: next,
+    });
+  });
+  callee.reachableAccesses.forEach((access, parameter) => {
+    const effectiveAccess =
+      call.compilerArrayIteratorNext === true && parameter === 0
+        ? OrdinaryParameterAccess.Read
+        : access;
+    next = applyAccessToArgument({
+      access: effectiveAccess,
+      kind: "reachable",
       argument: call.arguments.find(
         (argument) => argument.parameter === parameter,
       ),
@@ -493,11 +702,18 @@ const applyUnknownTarget = ({
 }): OrdinaryMutationSummary => {
   let next: OrdinaryMutationSummary = {
     ...summary,
-    invokesUnknownCallback: true,
+    reentrant: true,
   };
   call.arguments.forEach((argument) => {
     next = applyAccessToArgument({
       access: argument.fallbackAccess,
+      kind: "direct",
+      argument,
+      summary: next,
+    });
+    next = applyAccessToArgument({
+      access: argument.fallbackAccess,
+      kind: "reachable",
       argument,
       summary: next,
     });
@@ -535,7 +751,12 @@ const evaluateInput = ({
         unknownTarget = true;
         return;
       }
-      next = applyCalleeSummary({ callee, call, summary: next });
+      const boundedCallee = applyExactLocalCallbackHazards({
+        call,
+        callee,
+        localSummaries: summaries,
+      });
+      next = applyCalleeSummary({ callee: boundedCallee, call, summary: next });
     });
     return unknownTarget ? applyUnknownTarget({ call, summary: next }) : next;
   }, input.direct);
@@ -553,11 +774,17 @@ const localDependencies = ({
     input.calls.flatMap((call) =>
       call.dynamicBound
         ? []
-        : call.targets.flatMap((target) =>
-            target.moduleId === moduleId && inputs.has(target.symbol)
-              ? [target.symbol]
-              : [],
-          ),
+        : [
+            ...call.targets.flatMap((target) =>
+              target.moduleId === moduleId && inputs.has(target.symbol)
+                ? [target.symbol]
+                : [],
+            ),
+            ...(call.exactLocalCallbackSymbol !== undefined &&
+            inputs.has(call.exactLocalCallbackSymbol)
+              ? [call.exactLocalCallbackSymbol]
+              : []),
+          ],
     ),
   );
 
@@ -616,10 +843,15 @@ const stronglyConnectedComponents = ({
   return components;
 };
 
+/** Maximum number of unit ascents in the refined finite summary lattice. */
+export const ordinaryMutationSummaryHeight = (parameterCount: number): number =>
+  4 * parameterCount + 4;
+
 /** Fixed-size retained representation: parameter count, flag byte, and modes. */
 export const ordinaryMutationSummaryRetainedBytes = (
   summary: OrdinaryMutationSummary,
-): number => 6 + summary.parameterAccesses.length;
+): number =>
+  6 + summary.directAccesses.length + summary.reachableAccesses.length;
 
 export const recordOrdinaryMutationMetrics = (
   metrics: OrdinaryMutationMetrics,
@@ -633,12 +865,32 @@ export const recordOrdinaryMutationMetrics = (
     metrics.callEdgeCount,
   );
   incrementCompilerPerfCounter(
+    "borrowing.ordinary.strictAscents",
+    metrics.strictSummaryAscents,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.ordinary.dependencyEnqueues",
+    metrics.dependencyEnqueues,
+  );
+  incrementCompilerPerfCounter(
     "borrowing.ordinary.summaryEvaluations",
     metrics.summaryEvaluations,
   );
   incrementCompilerPerfCounter(
     "borrowing.ordinary.sccReevaluations",
     metrics.sccReevaluations,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.ordinary.sccBodyVisits",
+    metrics.sccBodyVisits,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.ordinary.solverBound",
+    metrics.solverEvaluationBound,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.ordinary.solverBoundUsage",
+    metrics.solverBoundUsage,
   );
   incrementCompilerPerfCounter(
     "borrowing.ordinary.retainedSummaryBytes",
@@ -718,7 +970,25 @@ export const solveOrdinaryMutationSummaries = ({
   const summaries = new Map(
     Array.from(inputs, ([symbol, input]) => [symbol, input.direct]),
   );
+  const solverEvaluationBound =
+    inputs.size +
+    Array.from(dependencies.values()).reduce(
+      (bound, callees) =>
+        bound +
+        Array.from(callees).reduce(
+          (calleeBound, callee) =>
+            calleeBound +
+            ordinaryMutationSummaryHeight(
+              inputs.get(callee)?.direct.directAccesses.length ?? 0,
+            ),
+          0,
+        ),
+      0,
+    );
+  let strictSummaryAscents = 0;
+  let dependencyEnqueues = 0;
   let summaryEvaluations = 0;
+  let sccBodyVisits = 0;
   let sccReevaluations = 0;
   while (componentWorklist.length > 0) {
     const componentIndex = componentWorklist.shift()!;
@@ -733,6 +1003,7 @@ export const solveOrdinaryMutationSummaries = ({
       if (evaluated.has(symbol)) sccReevaluations += 1;
       evaluated.add(symbol);
       summaryEvaluations += 1;
+      sccBodyVisits += 1;
       const candidate = evaluateInput({
         input: inputs.get(symbol)!,
         summaries,
@@ -742,9 +1013,11 @@ export const solveOrdinaryMutationSummaries = ({
       if (ordinaryMutationSummariesEqual(summaries.get(symbol), candidate)) {
         continue;
       }
+      strictSummaryAscents += 1;
       summaries.set(symbol, candidate);
       (callers.get(symbol) ?? []).forEach((caller) => {
         if (!members.has(caller) || queued.has(caller)) return;
+        dependencyEnqueues += 1;
         queued.add(caller);
         worklist.push(caller);
       });
@@ -768,7 +1041,12 @@ export const solveOrdinaryMutationSummaries = ({
   const metrics: OrdinaryMutationMetrics = {
     callableCount: inputs.size,
     callEdgeCount: uniqueEdges.size,
+    strictSummaryAscents,
+    dependencyEnqueues,
     summaryEvaluations,
+    sccBodyVisits,
+    solverEvaluationBound,
+    solverBoundUsage: summaryEvaluations,
     sccReevaluations,
     retainedSummaryBytes: Array.from(summaries.values()).reduce(
       (bytes, summary) => bytes + ordinaryMutationSummaryRetainedBytes(summary),
@@ -777,6 +1055,11 @@ export const solveOrdinaryMutationSummaries = ({
     ordinaryProjectionFamilies: 0,
     ordinaryWidenings: 0,
   };
+  if (summaryEvaluations > solverEvaluationBound) {
+    throw new Error(
+      `ordinary mutation solver exceeded finite bound: ${summaryEvaluations} > ${solverEvaluationBound}`,
+    );
+  }
   if (recordMetrics) recordOrdinaryMutationMetrics(metrics);
   const declarationBoundViolations = declarationBounds
     ? Array.from(declarationBounds).flatMap(([symbol, declaration]) => {

@@ -24,7 +24,10 @@ import type {
   BorrowPlace,
   PlaceProjection,
 } from "./model.js";
-import { typeCanCarryReference } from "./reference-bearing.js";
+import {
+  typeCanCarryReference,
+  typeIsAllocationBacked,
+} from "./reference-bearing.js";
 import { typeContainsBorrowed } from "./borrowed-types.js";
 import {
   BORROW_IRRELEVANT_VALUE_INTRINSICS,
@@ -35,6 +38,7 @@ import {
   typeHasIntrinsicRole,
   typeHasNominalIdentity,
 } from "./intrinsic-type-role.js";
+import type { OrdinaryMutationSummary } from "./ordinary-mutation-summary.js";
 
 export type CallableBorrowIndexAccess = {
   exprId: HirExprId;
@@ -96,6 +100,10 @@ export type CallableBorrowIndexCall = {
   openTraitDispatch?: true;
   /** Exact compiler-owned SharedCell access nested inside a Borrow callback. */
   scopedSharedCellAccess?: true;
+  /** Exact compiler-owned SharedCell access with a locally visible callback. */
+  exactSharedCellAccess?: true;
+  /** Local closure passed to an exact compiler-owned callback boundary. */
+  exactLocalCallbackSymbol?: SymbolId;
   /** Exact std Array cursor step; mutates only the fresh cursor outer object. */
   compilerArrayIteratorNext?: true;
   /** Finite declaration ceiling for a constrained/open trait call. */
@@ -106,9 +114,11 @@ export type CallableBorrowIndexCall = {
       | "immutable-ref"
       | undefined
     )[];
-    ambientObjectAccess: boolean;
-    invokesUnknownCallback: boolean;
+    ambientAccess: "unused" | "read" | "write";
+    reentrant: boolean;
     maySuspend: boolean;
+    /** The open declaration explicitly promises checked isolation. */
+    checkedIsolation?: true;
   };
 };
 
@@ -132,6 +142,8 @@ export type CallableBorrowIndexParameter = {
   access: BorrowAccessMode;
   loanBearing?: true;
   referenceCapable?: true;
+  /** The parameter directly names an allocation; its leading dereference is direct. */
+  allocationBacked?: true;
 };
 
 /**
@@ -433,6 +445,9 @@ export const extractSingleCallableBorrowIndex = ({
       ...(typeof type === "number" ? { type } : {}),
       ...(typeof type !== "number" || typeCanCarryReference(type, typing)
         ? { referenceCapable: true as const }
+        : {}),
+      ...(typeof type === "number" && typeIsAllocationBacked(type, typing)
+        ? { allocationBacked: true as const }
         : {}),
       defaulted: typeof parameter.defaultValue === "number",
       ...(bindingKind === "mutable-ref" ||
@@ -1744,35 +1759,28 @@ export const extractSingleCallableBorrowIndex = ({
       const dynamicBoundParameters =
         constrainedParameters ??
         (openTraitDispatch ? signature?.parameters : undefined);
-      const ordinaryDynamicBound =
-        declarationTraitMethods.length > 0
+      const importedDeclarationBounds = targets.map((target) => {
+        const declaration = declarationRefForTarget(target);
+        if (!declaration || declaration.moduleId === context.moduleId) {
+          return undefined;
+        }
+        return context.dependencies
+          .get(declaration.moduleId)
+          ?.ordinaryMutationSummaries.get(declaration.symbol);
+      });
+      const ordinaryDynamicBound = openTraitDispatch
+        ? declarationTraitMethods.length > 0
           ? ordinaryDynamicBoundForTraitMethods(
               declarationTraitMethods,
               traitMethodMaySuspend,
-              (method) => {
-                if (!method.effectType) return true;
-                const target = canonicalSymbolRef({
-                  symbol: method.symbol,
-                  symbolTable,
-                  moduleId: context.moduleId,
-                });
-                const signature = targetSignatureFor(target);
-                if (signature) {
-                  return typing.effects.isOpen(signature.effectRow);
-                }
-                return (
-                  method.effectType.typeKind === "named" &&
-                  method.effectType.path.length === 1 &&
-                  method.effectType.path[0] === "open"
-                );
-              },
             )
-          : dynamicBoundParameters
-            ? ordinaryDynamicBoundForParameters(
-                dynamicBoundParameters,
-                dynamicBoundMaySuspend,
-              )
-            : undefined;
+          : ordinaryDynamicBoundForParameters(
+              dynamicBoundParameters ?? [],
+              dynamicBoundMaySuspend,
+              importedDeclarationBounds,
+              targets.length,
+            )
+        : undefined;
       const argumentsFromTyping =
         firstPlan ??
         (constrainedParameters
@@ -1961,6 +1969,15 @@ export const extractSingleCallableBorrowIndex = ({
       } satisfies CallableBorrowIndexCall;
       const call: CallableBorrowIndexCall = {
         ...indexedCall,
+        ...(callIsExactSharedCellAccess({
+          call: indexedCall,
+          typing,
+          symbolTable,
+          moduleId: context.moduleId,
+          imports: context.imports,
+        })
+          ? { exactSharedCellAccess: true as const }
+          : {}),
         ...(callIsScopedSharedCellNestedAccess({
           call: indexedCall,
           callableParameters: parameters,
@@ -1973,6 +1990,15 @@ export const extractSingleCallableBorrowIndex = ({
           ? { scopedSharedCellAccess: true as const }
           : {}),
       };
+      if (call.exactSharedCellAccess === true) {
+        const callbackExpression = indexCallArgumentFor(call, 1)?.expression;
+        if (
+          typeof callbackExpression === "number" &&
+          hir.expressions.get(callbackExpression)?.exprKind === "lambda"
+        ) {
+          call.exactLocalCallbackSymbol = (-1 - callbackExpression) as SymbolId;
+        }
+      }
       calls.push(call);
       callsByExpression.set(exprId, call);
       targets.forEach((target) =>
@@ -2296,22 +2322,51 @@ const ordinaryDynamicBoundForParameters = (
     bindingKind?: "value" | "mutable-ref" | "immutable-ref";
   }[],
   maySuspend: boolean,
-): NonNullable<CallableBorrowIndexCall["ordinaryDynamicBound"]> => ({
-  parameterBindingKinds: parameters.map((parameter) => parameter.bindingKind),
-  ambientObjectAccess: false,
-  invokesUnknownCallback: false,
-  maySuspend,
-});
+  declarationBounds: readonly (OrdinaryMutationSummary | undefined)[] = [],
+  candidateCount = declarationBounds.length,
+): NonNullable<CallableBorrowIndexCall["ordinaryDynamicBound"]> => {
+  const checkedIsolation = importedDeclarationBoundsHaveCheckedIsolation({
+    candidateCount,
+    declarationBounds,
+  });
+  return {
+    parameterBindingKinds: parameters.map((parameter) => parameter.bindingKind),
+    // Imported declaration summaries are the authoritative open-call contract.
+    // Without a checked promise, retain the conservative defaults.
+    ambientAccess: checkedIsolation ? "unused" : "write",
+    reentrant: !checkedIsolation,
+    maySuspend: checkedIsolation ? false : maySuspend,
+    ...(checkedIsolation ? { checkedIsolation: true as const } : {}),
+  };
+};
+
+export const importedDeclarationBoundsHaveCheckedIsolation = ({
+  candidateCount,
+  declarationBounds,
+}: {
+  candidateCount: number;
+  declarationBounds: readonly (OrdinaryMutationSummary | undefined)[];
+}): boolean =>
+  candidateCount > 0 &&
+  declarationBounds.length === candidateCount &&
+  declarationBounds.every(
+    (bound) =>
+      bound !== undefined &&
+      bound.ambientAccess === 0 &&
+      !bound.reentrant &&
+      !bound.maySuspend,
+  );
 
 const ordinaryDynamicBoundForTraitMethods = (
   methods: readonly HirTraitMethod[],
   maySuspend: (method: HirTraitMethod) => boolean,
-  invokesUnknownCallback: (method: HirTraitMethod) => boolean,
 ): NonNullable<CallableBorrowIndexCall["ordinaryDynamicBound"]> => {
   const parameterCount = Math.max(
     0,
     ...methods.map((method) => method.parameters.length),
   );
+  const checkedIsolation =
+    methods.length > 0 && methods.every((method) => method.isolated === true);
   return {
     parameterBindingKinds: Array.from(
       { length: parameterCount },
@@ -2323,11 +2378,11 @@ const ordinaryDynamicBoundForTraitMethods = (
         return kinds.includes("immutable-ref") ? "immutable-ref" : undefined;
       },
     ),
-    ambientObjectAccess: false,
-    // An open declaration row admits unknown implementation work. That same
-    // openness is the finite callback ceiling for dynamic dispatch.
-    invokesUnknownCallback: methods.some(invokesUnknownCallback),
-    maySuspend: methods.some(maySuspend),
+    ambientAccess: checkedIsolation ? "unused" : "write",
+    reentrant: !checkedIsolation,
+    // Suspension remains tied to the normalized declaration contract.
+    maySuspend: checkedIsolation ? false : methods.some(maySuspend),
+    ...(checkedIsolation ? { checkedIsolation: true as const } : {}),
   };
 };
 
@@ -2375,6 +2430,37 @@ const callIsScopedSharedCellNestedAccess = ({
         typing.arena.get(typing.arena.unfoldRecursive(parameter.type)).kind ===
           "borrowed",
     ) ||
+    !callIsExactSharedCellAccess({
+      call,
+      typing,
+      symbolTable,
+      moduleId,
+      imports,
+    })
+  ) {
+    return false;
+  }
+  const receiver = indexCallArgumentFor(call, 0);
+  if (!receiver?.place || !ambientObjectCaptures.has(receiver.place.root)) {
+    return false;
+  }
+  return true;
+};
+
+const callIsExactSharedCellAccess = ({
+  call,
+  typing,
+  symbolTable,
+  moduleId,
+  imports,
+}: {
+  call: CallableBorrowIndexCall;
+  typing: TypingResult;
+  symbolTable: SymbolTable;
+  moduleId: string;
+  imports: ReadonlyMap<SymbolId, SymbolRef>;
+}): boolean => {
+  if (
     call.targets.length !== 1 ||
     call.traitDispatch === true ||
     call.openTraitDispatch === true ||
@@ -2386,8 +2472,7 @@ const callIsScopedSharedCellNestedAccess = ({
   }
   const receiver = indexCallArgumentFor(call, 0);
   if (
-    !receiver?.place ||
-    !ambientObjectCaptures.has(receiver.place.root) ||
+    !receiver ||
     !typeHasIntrinsicRole({
       type: receiver.type,
       role: STD_INTRINSIC_TYPE.sharedCell,

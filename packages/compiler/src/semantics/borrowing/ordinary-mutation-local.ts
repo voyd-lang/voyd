@@ -26,12 +26,15 @@ import type {
 } from "./model.js";
 import { projectionPathsOverlap } from "./model.js";
 import {
+  applyExactLocalCallbackHazards,
   joinOrdinaryMutationSummaries,
+  ordinaryMutationDynamicBoundSummary,
   OrdinaryParameterAccess,
   ordinaryMutationSignatureUpperBound,
   type OrdinaryMutationSummary,
 } from "./ordinary-mutation-summary.js";
 import { placeOfExpression } from "./places.js";
+import { analyzeOrdinaryMutationLiveness } from "./ordinary-mutation-liveness.js";
 import {
   typeCanCarryReference,
   typeIsAllocationBacked,
@@ -70,6 +73,12 @@ export const checkOrdinaryLocalMutationSafety = ({
   plannedGuards: ReadonlyMap<number, readonly RuntimeIdentityGuard[]>;
 }): readonly Diagnostic[] => {
   const diagnostics: Diagnostic[] = [];
+  const liveness = analyzeOrdinaryMutationLiveness({
+    body,
+    index,
+    hir,
+    resolveContext,
+  });
   const positionByExpression = new Map<HirExprId, number>();
   const parentByExpression = new Map<HirExprId, HirExprId>();
   const returnedExpressions = new Set<HirExprId>();
@@ -252,15 +261,23 @@ export const checkOrdinaryLocalMutationSafety = ({
   const mutableParameters = index.parameters.filter(
     (parameter) => parameter.bindingKind === "mutable-ref",
   );
-  if (
-    ordinaryAmbientAccessMayOverlap({
-      index,
-      typing,
-      moduleId,
-      localSummaries,
-      importedSummaries,
-    })
-  ) {
+  const ambientRoots = new Set(index.directAmbientObjectRoots);
+  const directAmbientHazard = Array.from(places).find(([expression, place]) => {
+    if (!ambientRoots.has(place.root)) return false;
+    const liveMutableParameters = liveness
+      .liveCapabilitiesAfter(expression)
+      .flatMap((capability) => mutableParameters[capability] ?? []);
+    return (
+      liveMutableParameters.length > 0 &&
+      ambientRootMayOverlap({
+        root: place.root,
+        index,
+        typing,
+        mutableParameters: liveMutableParameters,
+      })
+    );
+  });
+  if (directAmbientHazard) {
     diagnostics.push(
       diagnosticFromCode({
         code: "TY0055",
@@ -268,7 +285,7 @@ export const checkOrdinaryLocalMutationSafety = ({
           kind: "ordinary-ambient-access",
           callable: symbolName(index.symbol, symbolTable),
         },
-        span: callableSpan,
+        span: hir.expressions.get(directAmbientHazard[0])?.span ?? callableSpan,
       }),
     );
   }
@@ -279,13 +296,45 @@ export const checkOrdinaryLocalMutationSafety = ({
       localSummaries,
       importedSummaries,
     });
+    if (
+      call.scopedSharedCellAccess !== true &&
+      call.formsExplicitBorrow !== true &&
+      (call.intrinsic !== true || call.maySuspend) &&
+      liveness.hasLiveCapabilityAfter(call.exprId)
+    ) {
+      const hazardKind =
+        call.maySuspend || summary?.maySuspend === true
+          ? ("ordinary-suspension" as const)
+          : summary?.reentrant === true || callHasUncertainDispatch(call)
+            ? ("ordinary-unknown-callback" as const)
+            : summary !== undefined &&
+                summary.ambientAccess !== OrdinaryParameterAccess.Unused
+              ? ("ordinary-ambient-access" as const)
+              : undefined;
+      if (hazardKind) {
+        diagnostics.push(
+          diagnosticFromCode({
+            code: "TY0055",
+            params: {
+              kind: hazardKind,
+              callable: symbolName(index.symbol, symbolTable),
+            },
+            span: call.span,
+          }),
+        );
+      }
+    }
     if (!summary) return;
     mutableParameters.forEach((mutableParameter) => {
       const mutablePlace: BorrowPlace = {
         root: mutableParameter.symbol,
         projections: [],
       };
-      summary.parameterAccesses.forEach((access, parameter) => {
+      summary.reachableAccesses.forEach((reachableAccess, parameter) => {
+        const access = Math.max(
+          reachableAccess,
+          summary.directAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
+        ) as OrdinaryParameterAccess;
         if (access === OrdinaryParameterAccess.Unused) return;
         const argument = indexCallArgumentFor(call, parameter);
         if (!argument) return;
@@ -1219,7 +1268,8 @@ const callAccessHasPlannedGuard = ({
 };
 
 const callHasUncertainDispatch = (call: CallableBorrowIndexCall): boolean =>
-  call.openTraitDispatch === true ||
+  (call.openTraitDispatch === true &&
+    call.ordinaryDynamicBound?.checkedIsolation !== true) ||
   call.argumentPlanAmbiguous === true ||
   call.targets.length === 0;
 
@@ -1579,7 +1629,14 @@ const localAccessForCallArgument = ({
     return OrdinaryParameterAccess.Read;
   }
   return (
-    summary?.parameterAccesses[argument.parameter] ??
+    (summary
+      ? (Math.max(
+          summary.directAccesses[argument.parameter] ??
+            OrdinaryParameterAccess.Unused,
+          summary.reachableAccesses[argument.parameter] ??
+            OrdinaryParameterAccess.Unused,
+        ) as OrdinaryParameterAccess)
+      : undefined) ??
     (callHasUncertainDispatch(call) && argument.referenceCapable === true
       ? OrdinaryParameterAccess.Write
       : OrdinaryParameterAccess.Unused)
@@ -1601,23 +1658,13 @@ const summaryForCall = ({
     return undefined;
   }
   if (call.ordinaryDynamicBound) {
-    return {
-      parameterAccesses: call.ordinaryDynamicBound.parameterBindingKinds.map(
-        (kind) =>
-          kind === "mutable-ref"
-            ? OrdinaryParameterAccess.Write
-            : OrdinaryParameterAccess.Read,
-      ),
-      ambientObjectAccess: call.ordinaryDynamicBound.ambientObjectAccess,
-      invokesUnknownCallback: call.ordinaryDynamicBound.invokesUnknownCallback,
-      maySuspend: call.ordinaryDynamicBound.maySuspend,
-    };
+    return ordinaryMutationDynamicBoundSummary(call.ordinaryDynamicBound);
   }
   if (call.openTraitDispatch && call.signature) {
     return {
       ...ordinaryMutationSignatureUpperBound({ signature: call.signature }),
-      ambientObjectAccess: true,
-      invokesUnknownCallback: true,
+      ambientAccess: OrdinaryParameterAccess.Write,
+      reentrant: true,
       maySuspend: true,
     };
   }
@@ -1633,16 +1680,30 @@ const summaryForCall = ({
       current ? joinOrdinaryMutationSummaries(current, summary) : summary,
     undefined,
   );
-  if (joined && summaries.length === call.targets.length) return joined;
+  if (joined && summaries.length === call.targets.length) {
+    return applyExactLocalCallbackHazards({
+      call,
+      callee: joined,
+      localSummaries,
+    });
+  }
   const bound = call.signature
     ? ordinaryMutationSignatureUpperBound({
         signature: call.signature,
         maySuspend: call.maySuspend,
       })
     : undefined;
-  return joined && bound
-    ? joinOrdinaryMutationSummaries(joined, bound)
-    : (joined ?? bound);
+  const resolved =
+    joined && bound
+      ? joinOrdinaryMutationSummaries(joined, bound)
+      : (joined ?? bound);
+  return resolved
+    ? applyExactLocalCallbackHazards({
+        call,
+        callee: resolved,
+        localSummaries,
+      })
+    : undefined;
 };
 
 export const ordinaryAmbientAccessMayOverlap = ({
@@ -1660,18 +1721,23 @@ export const ordinaryAmbientAccessMayOverlap = ({
 }): boolean => {
   if (!index.flags.hasMutableParameter) return false;
   const summary = localSummaries.get(index.symbol);
-  if (summary?.ambientObjectAccess !== true) return false;
+  if (!summary || summary.ambientAccess === OrdinaryParameterAccess.Unused) {
+    return false;
+  }
 
-  const hasPropagatedAmbientAccess = index.calls.some(
-    (call) =>
-      call.scopedSharedCellAccess !== true &&
-      summaryForCall({
-        call,
-        moduleId,
-        localSummaries,
-        importedSummaries,
-      })?.ambientObjectAccess === true,
-  );
+  const hasPropagatedAmbientAccess = index.calls.some((call) => {
+    if (call.scopedSharedCellAccess === true) return false;
+    const callSummary = summaryForCall({
+      call,
+      moduleId,
+      localSummaries,
+      importedSummaries,
+    });
+    return (
+      callSummary !== undefined &&
+      callSummary.ambientAccess !== OrdinaryParameterAccess.Unused
+    );
+  });
   if (hasPropagatedAmbientAccess) return true;
 
   const hasDirectAmbientAccess =
@@ -1679,29 +1745,40 @@ export const ordinaryAmbientAccessMayOverlap = ({
   if (!hasDirectAmbientAccess || index.directAmbientObjectRoots.length === 0) {
     return true;
   }
-  const mutableTypes = index.parameters.flatMap((parameter) =>
+  return index.directAmbientObjectRoots.some((root) =>
+    ambientRootMayOverlap({ root, index, typing }),
+  );
+};
+
+const ambientRootMayOverlap = ({
+  root,
+  index,
+  typing,
+  mutableParameters = index.parameters.filter(
+    (parameter) => parameter.bindingKind === "mutable-ref",
+  ),
+}: {
+  root: SymbolId;
+  index: CallableBorrowIndex;
+  typing: TypingResult;
+  mutableParameters?: CallableBorrowIndex["parameters"];
+}): boolean => {
+  const mutableTypes = mutableParameters.flatMap((parameter) =>
     parameter.bindingKind === "mutable-ref" &&
     typeof parameter.type === "number"
       ? [parameter.type]
       : [],
   );
-  if (
-    mutableTypes.length !==
-    index.parameters.filter(
-      (parameter) => parameter.bindingKind === "mutable-ref",
-    ).length
-  ) {
+  if (mutableTypes.length !== mutableParameters.length) {
     return true;
   }
-  return index.directAmbientObjectRoots.some((root) => {
-    const ambientType = typing.valueTypes.get(root);
-    return (
-      typeof ambientType !== "number" ||
-      mutableTypes.some((mutableType) =>
-        typesMayShareReachableIdentity(ambientType, mutableType, typing),
-      )
-    );
-  });
+  const ambientType = typing.valueTypes.get(root);
+  return (
+    typeof ambientType !== "number" ||
+    mutableTypes.some((mutableType) =>
+      typesMayShareReachableIdentity(ambientType, mutableType, typing),
+    )
+  );
 };
 
 const targetKey = ({ moduleId, symbol }: SymbolRef): string =>

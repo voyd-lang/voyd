@@ -21,8 +21,11 @@ import type {
   CallableBorrowIndexCall,
 } from "./callable-borrow-index.js";
 import type { PlaceProjection } from "./model.js";
+import { typeCanCarryReference } from "./reference-bearing.js";
 import {
   joinOrdinaryMutationSummaries,
+  ordinaryMutationDynamicBoundSummary,
+  OrdinaryParameterAccess,
   type OrdinaryMutationSummary,
 } from "./ordinary-mutation-summary.js";
 
@@ -320,6 +323,48 @@ export const checkScopedBorrowLocal = ({
     },
   });
 
+  const ordinaryAmbientAliasRoots = new Set<SymbolId>([
+    ...index.ambientObjectCaptures,
+    ...index.directAmbientObjectRoots,
+  ]);
+  for (let iteration = 0; iteration < maximumIterations; iteration += 1) {
+    let changed = false;
+    walkExpression({
+      exprId: body,
+      hir,
+      options: { skipLambdas: true },
+      onEnterStatement: (_statementId, statement) => {
+        if (statement.kind !== "let") return;
+        const source = ordinaryAliasRootOfExpression(
+          statement.initializer,
+          callsByExpression,
+          hir,
+        );
+        if (!source || !ordinaryAmbientAliasRoots.has(source)) return;
+        bindingSymbols(statement.pattern).forEach((symbol) => {
+          if (ordinaryAmbientAliasRoots.has(symbol)) return;
+          ordinaryAmbientAliasRoots.add(symbol);
+          changed = true;
+        });
+      },
+      onEnterExpression: (_expressionId, expression) => {
+        if (expression.exprKind !== "assign" || !expression.pattern) return;
+        const source = ordinaryAliasRootOfExpression(
+          expression.value,
+          callsByExpression,
+          hir,
+        );
+        if (!source || !ordinaryAmbientAliasRoots.has(source)) return;
+        bindingSymbols(expression.pattern).forEach((symbol) => {
+          if (ordinaryAmbientAliasRoots.has(symbol)) return;
+          ordinaryAmbientAliasRoots.add(symbol);
+          changed = true;
+        });
+      },
+    });
+    if (!changed) break;
+  }
+
   const activeOrigins = mergeOrigins(
     Array.from(borrowedParameters, (parameter) =>
       index.parameters[parameter]?.bindingKind === "mutable-ref"
@@ -457,6 +502,10 @@ export const checkScopedBorrowLocal = ({
       permitScopedSharedCellAccess: permittedSharedCellCaptureCalls.has(
         call.exprId,
       ),
+      activeOrigins,
+      originsOf,
+      typing,
+      ordinaryAmbientAliasRoots,
     });
     if (boundary) reportBoundary(expression.span, boundary);
 
@@ -558,15 +607,49 @@ export const checkScopedBorrowLocal = ({
       }
     },
   });
-  if (index.flags.hasModuleStorageAccess) {
-    reportBoundary(callableSpan, "ambient module storage access");
+  const directAmbientAccess = index.accesses.reduce(
+    (mode, access) =>
+      access.place &&
+      ordinaryAmbientAliasRoots.has(access.place.root) &&
+      !permittedSharedCellCaptureSymbols.has(access.place.root)
+        ? Math.max(
+            mode,
+            access.kind === "write"
+              ? OrdinaryParameterAccess.Write
+              : OrdinaryParameterAccess.Read,
+          )
+        : mode,
+    OrdinaryParameterAccess.Unused,
+  ) as OrdinaryParameterAccess;
+  if (scopedAccessConflicts(activeOrigins, directAmbientAccess)) {
+    reportBoundary(callableSpan, "ambient module or captured object access");
   }
-  if (
-    index.ambientObjectCaptures.some(
-      (symbol) => !permittedSharedCellCaptureSymbols.has(symbol),
-    )
-  ) {
-    reportBoundary(callableSpan, "an ambient-capturing callable");
+  const ordinaryParameterAccess = index.accesses.find((access) => {
+    if (!access.place) return false;
+    const source = index.parameterPlaces.get(access.place.root);
+    const parameter = source && index.parameters[source.parameter];
+    if (!source || borrowedParameters.has(source.parameter) || !parameter) {
+      return false;
+    }
+    const canAlias =
+      parameter.referenceCapable === true ||
+      parameter.loanBearing === true ||
+      (typeof parameter.type === "number" &&
+        typeCanCarryReference(parameter.type, typing));
+    const mode =
+      access.kind === "write"
+        ? OrdinaryParameterAccess.Write
+        : OrdinaryParameterAccess.Read;
+    return canAlias && scopedAccessConflicts(activeOrigins, mode);
+  });
+  if (ordinaryParameterAccess) {
+    reportBoundary(
+      ordinaryParameterAccess.place
+        ? (hir.expressions.get(ordinaryParameterAccess.exprId)?.span ??
+            callableSpan)
+        : callableSpan,
+      "an ordinary parameter alias",
+    );
   }
   reportEscape({
     origins: escapingOriginsOf({
@@ -714,6 +797,10 @@ const scopedBoundaryForCall = ({
   localSummaries,
   importedSummaries,
   permitScopedSharedCellAccess,
+  activeOrigins,
+  originsOf,
+  typing,
+  ordinaryAmbientAliasRoots,
 }: {
   expression: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
   call: CallableBorrowIndexCall;
@@ -723,6 +810,10 @@ const scopedBoundaryForCall = ({
   localSummaries: ReadonlyMap<SymbolId, OrdinaryMutationSummary>;
   importedSummaries: ReadonlyMap<string, OrdinaryMutationSummary>;
   permitScopedSharedCellAccess: boolean;
+  activeOrigins: ExplicitBorrowOrigins;
+  originsOf: (expression: HirExprId) => ExplicitBorrowOrigins;
+  typing: TypingResult;
+  ordinaryAmbientAliasRoots: ReadonlySet<SymbolId>;
 }): string | undefined => {
   if (callIsExternal(expression, hir, symbolTable)) {
     return "an external or host call";
@@ -742,14 +833,15 @@ const scopedBoundaryForCall = ({
         symbolTable.hasSymbol(target.symbol) &&
         symbolTable.getSymbol(target.symbol).kind === "effect-op",
     ) ||
-    call.maySuspend
+    call.maySuspend ||
+    (call.signature !== undefined &&
+      !typing.effects.isEmpty(call.signature.effectRow))
   ) {
     return "an effect, suspension, or continuation boundary";
   }
   if (
     !call.intrinsic &&
     (call.targets.length === 0 ||
-      call.openTraitDispatch === true ||
       call.argumentPlanAmbiguous === true)
   ) {
     return "unknown callback or open dispatch";
@@ -763,16 +855,95 @@ const scopedBoundaryForCall = ({
     importedSummaries,
   });
   if (!summary) return "a callable with unavailable safety information";
-  if (summary.ambientObjectAccess) {
+  if (scopedAccessConflicts(activeOrigins, summary.ambientAccess)) {
     return "a helper that accesses ambient module state";
   }
-  if (summary.invokesUnknownCallback) {
+  if (summary.reentrant) {
     return "a helper that invokes an unknown callback";
   }
-  return summary.maySuspend
-    ? "a helper that may suspend or perform an effect"
+  if (summary.maySuspend) {
+    return "a helper that may suspend or perform an effect";
+  }
+  const parameterCount = Math.max(
+    summary.directAccesses.length,
+    summary.reachableAccesses.length,
+  );
+  for (let parameter = 0; parameter < parameterCount; parameter += 1) {
+    const argument = call.arguments.find(
+      (candidate) => candidate.parameter === parameter,
+    );
+    if (typeof argument?.expression !== "number") continue;
+    const access = Math.max(
+      summary.directAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
+      summary.reachableAccesses[parameter] ?? OrdinaryParameterAccess.Unused,
+    ) as OrdinaryParameterAccess;
+    if (
+      argument.place &&
+      ordinaryAmbientAliasRoots.has(argument.place.root) &&
+      scopedAccessConflicts(activeOrigins, access)
+    ) {
+      return "a helper with incompatible ordinary alias access";
+    }
+    const argumentOrigins = originsOf(argument.expression);
+    if (!originsOverlap(activeOrigins, argumentOrigins)) continue;
+    const parameterType = call.signature?.parameters[parameter]?.type;
+    if (
+      typeof parameterType === "number" &&
+      typing.arena.get(typing.arena.unfoldRecursive(parameterType)).kind ===
+        "borrowed"
+    ) {
+      continue;
+    }
+    if (scopedAccessConflicts(argumentOrigins, access)) {
+      return "a helper with incompatible access to borrowed data";
+    }
+  }
+  return undefined;
+};
+
+const ordinaryAliasRootOfExpression = (
+  expressionId: HirExprId,
+  callsByExpression: ReadonlyMap<HirExprId, CallableBorrowIndexCall>,
+  hir: HirGraph,
+): SymbolId | undefined => {
+  const expression = hir.expressions.get(expressionId);
+  if (!expression) return undefined;
+  if (expression.exprKind === "identifier") return expression.symbol;
+  if (expression.exprKind === "field-access") {
+    return ordinaryAliasRootOfExpression(
+      expression.target,
+      callsByExpression,
+      hir,
+    );
+  }
+  if (expression.exprKind === "block" && typeof expression.value === "number") {
+    return ordinaryAliasRootOfExpression(expression.value, callsByExpression, hir);
+  }
+  const call = callsByExpression.get(expressionId);
+  if (call?.intrinsicName !== "~" || expression.exprKind !== "call") {
+    return undefined;
+  }
+  const source = expression.args.at(-1)?.expr;
+  return typeof source === "number"
+    ? ordinaryAliasRootOfExpression(source, callsByExpression, hir)
     : undefined;
 };
+
+const scopedAccessConflicts = (
+  origins: ExplicitBorrowOrigins,
+  access: OrdinaryParameterAccess,
+): boolean =>
+  origins.exclusive.size > 0
+    ? access !== OrdinaryParameterAccess.Unused
+    : origins.shared.size > 0 && access === OrdinaryParameterAccess.Write;
+
+const originsOverlap = (
+  left: ExplicitBorrowOrigins,
+  right: ExplicitBorrowOrigins,
+): boolean =>
+  [...left.shared, ...left.exclusive].some(
+    (origin) => right.shared.has(origin) || right.exclusive.has(origin),
+  );
 
 const callIsScopedSharedCellAccess = (call: CallableBorrowIndexCall): boolean =>
   call.scopedSharedCellAccess === true;
@@ -788,6 +959,9 @@ const completeSummaryForCall = ({
   localSummaries: ReadonlyMap<SymbolId, OrdinaryMutationSummary>;
   importedSummaries: ReadonlyMap<string, OrdinaryMutationSummary>;
 }): OrdinaryMutationSummary | undefined => {
+  if (call.ordinaryDynamicBound) {
+    return ordinaryMutationDynamicBoundSummary(call.ordinaryDynamicBound);
+  }
   const summaries = call.targets.flatMap((target) => {
     const summary =
       target.moduleId === moduleId

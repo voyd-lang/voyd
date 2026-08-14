@@ -377,6 +377,7 @@ export const lowerTraitDecl = (trait: BoundTrait, ctx: LowerContext): void => {
       returnType: lowerTypeExpr(method.returnTypeExpr, ctx, methodScope),
       ...(effectType ? { effectType } : {}),
       defaultBody,
+      ...(method.isolated ? { isolated: true as const } : {}),
     };
   });
 

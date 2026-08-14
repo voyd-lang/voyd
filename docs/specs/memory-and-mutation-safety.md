@@ -87,9 +87,10 @@ panic. The guard ends with the call and does not install persistent loan state.
 A callable whose normalized signature does not contain `Borrow<T>` uses an
 ordinary mutation summary. The summary contains exactly:
 
-- one access mode per parameter: `unused`, `read`, or `write`;
-- an ambient-object-access bit;
-- an unknown-callback bit; and
+- one direct access mode per parameter: `unused`, `read`, or `write`;
+- one reachable access mode per parameter: `unused`, `read`, or `write`;
+- one ambient reference-bearing access mode: `unused`, `read`, or `write`;
+- a reentrant-control bit; and
 - a suspension bit.
 
 The summary MUST NOT contain field, tuple, index, dereference, region, result, or
@@ -98,36 +99,64 @@ projection depth, generic nesting, aggregate result shape, call-path count, or
 trait implementation count.
 
 Local analysis MAY distinguish fields and stable indices within one callable.
-At a call or package boundary, that detail collapses to the whole parameter or
-referenced allocation.
+At a call or package boundary, that detail collapses to direct and reachable
+whole-parameter modes. Direct access includes the parameter place, inline data,
+and an object allocation named directly by the parameter. Reachable access
+follows an object handle stored in that data. Different root identities can
+prove direct roots distinct, but MUST NOT prove reachable graphs disjoint.
 
 ```voyd
 fn update(~state: State) -> void
   state.profile.count = state.profile.count + 1
 ```
 
-`update` publishes only that it writes parameter zero.
+`update` publishes a direct read and reachable write for parameter zero.
 
 An ordinary signature is an upper bound. Plain `T` permits at most `read`; `~T`
 permits at most `write`. A trait declaration provides the bound for dynamic
 dispatch, and every implementation MUST fit it. Dynamic dispatch MUST NOT join
 implementation-specific field footprints.
 
-Every callable with a `~T` parameter MUST prove that it does not:
+An open trait declaration is authoritative for dynamic calls. Unless the
+declaration explicitly excludes them, ambient access defaults to `write` and
+reentrant control and suspension default to true. The declaration's normalized
+effect row is checked separately from mutation-summary inference.
+
+A trait method MAY be marked `@isolated` only when it declares an explicit
+empty effect row, `: ()`. The attribute applies to the full invocation and sets
+the declaration bound's ambient access to `unused`, reentrant-control bit to
+false, and suspension bit to false. It does not change direct or reachable
+parameter modes. Every implementation and any default body MUST fit this bound.
+Imported declarations MUST preserve the bound through the published ordinary
+mutation summary; an importer MUST NOT inspect implementation bodies or rely on
+a declaration name to recover it.
+
+Every callable with a `~T` parameter MUST use callable-local backward CFG
+liveness to prove that, while a capability or derived local alias remains live,
+it does not:
 
 - perform potentially overlapping ambient object access;
-- invoke an unknown callback; or
+- invoke unknown or reentrant control;
+- perform an effect; or
 - suspend.
+
+Branches and loop backedges join conservatively. Passing `~T` as the caller's
+final use transfers the capability into the nested invocation. When the caller
+uses the parent afterward, the parent stays suspended for the full nested call,
+whose published hazards cover its full invocation.
 
 While an exclusive capability is active, a known call is allowed only when its
 summary is compatible. An unknown callback, suspension, or effect operation is
 rejected. Ambient access is allowed only when local analysis proves it disjoint
 from every active exclusive capability.
 
-The summary solver MUST use a finite lattice and a dependency worklist. It MUST
-revisit callers only when a dependency summary changes and converge per strongly
-connected component. Programs without `Borrow<T>` MUST create zero explicit
-borrow-provenance facts.
+For `P` parameters, the summary lattice has at most `4P + 4` strict ascents.
+The summary solver MUST use a dependency worklist, revisit callers only when a
+dependency summary changes, and satisfy
+`C + sum(H(callee) for each affected dependency edge)` evaluations. Local
+liveness with `B` CFG blocks, `E` edges, and `L` capabilities MUST insert at
+most `B * L` state facts and process at most `B + E * L` work items. Programs
+without `Borrow<T>` MUST create zero explicit borrow-provenance facts.
 
 ## 4. The `Borrow<T>` type
 

@@ -496,7 +496,72 @@ fn append_placement_preview(
       let origin = world_to_canvas(view, origin_au)
       let cursor = world_to_canvas(view, cursor_au)
       let radius = preview_radius(kind)
-      append_preview_body(draws, kind, origin, radius)
+      match(kind)
+        BodyKind::Star:
+          draws.push(circle(
+            center: origin,
+            radius: radius,
+            alpha: 0.82,
+            glow_color: "#ffd279",
+            glow_blur: 18.0,
+            radial_gradient: radial_gradient(
+              inner_color: "#ffffff",
+              outer_color: "#f2a447",
+              outer_radius: radius
+            )
+          ))
+        BodyKind::Planet:
+          draws.push(circle(
+            center: origin,
+            radius: radius,
+            stroke: "#a6ddff",
+            stroke_width: 0.8,
+            alpha: 0.82,
+            radial_gradient: radial_gradient(
+              inner_color: "#7fd1ff",
+              outer_color: "#31558c",
+              outer_radius: radius
+            )
+          ))
+        BodyKind::Moon:
+          draws.push(circle(
+            center: origin,
+            radius: radius,
+            fill: "#cbd4e0",
+            stroke: "#717d8b",
+            stroke_width: 0.8,
+            alpha: 0.82
+          ))
+        BodyKind::Asteroid:
+          draws.push(ellipse(
+            center: origin,
+            radius_x: radius * 1.2,
+            radius_y: radius * 0.74,
+            rotation: -0.42,
+            fill: "#aea295",
+            stroke: "#625951",
+            stroke_width: 0.8,
+            alpha: 0.82
+          ))
+        BodyKind::BlackHole:
+          draws.push(ellipse(
+            center: origin,
+            radius_x: radius * 1.8,
+            radius_y: radius * 0.34,
+            rotation: -0.22,
+            fill: "#e89d59",
+            alpha: 0.36
+          ))
+          draws.push(circle(
+            center: origin,
+            radius: radius,
+            fill: "#010107",
+            stroke: "#e89d59",
+            stroke_width: 1.4,
+            alpha: 0.9,
+            glow_color: "#e89d59",
+            glow_blur: 12.0
+          ))
       draws.push(circle(
         center: origin,
         radius: radius + 7.0,
@@ -592,79 +657,6 @@ fn append_canvas_title(
     glow_blur: 4.0
   ))
   draws.push(restore())
-
-fn append_preview_body(
-  ~draws: Array<Draw>,
-  kind: BodyKind,
-  center: Point,
-  radius: f64
-) -> void
-  match(kind)
-    BodyKind::Star:
-      draws.push(circle(
-        center: center,
-        radius: radius,
-        alpha: 0.82,
-        glow_color: "#ffd279",
-        glow_blur: 18.0,
-        radial_gradient: radial_gradient(
-          inner_color: "#ffffff",
-          outer_color: "#f2a447",
-          outer_radius: radius
-        )
-      ))
-    BodyKind::Planet:
-      draws.push(circle(
-        center: center,
-        radius: radius,
-        stroke: "#a6ddff",
-        stroke_width: 0.8,
-        alpha: 0.82,
-        radial_gradient: radial_gradient(
-          inner_color: "#7fd1ff",
-          outer_color: "#31558c",
-          outer_radius: radius
-        )
-      ))
-    BodyKind::Moon:
-      draws.push(circle(
-        center: center,
-        radius: radius,
-        fill: "#cbd4e0",
-        stroke: "#717d8b",
-        stroke_width: 0.8,
-        alpha: 0.82
-      ))
-    BodyKind::Asteroid:
-      draws.push(ellipse(
-        center: center,
-        radius_x: radius * 1.2,
-        radius_y: radius * 0.74,
-        rotation: -0.42,
-        fill: "#aea295",
-        stroke: "#625951",
-        stroke_width: 0.8,
-        alpha: 0.82
-      ))
-    BodyKind::BlackHole:
-      draws.push(ellipse(
-        center: center,
-        radius_x: radius * 1.8,
-        radius_y: radius * 0.34,
-        rotation: -0.22,
-        fill: "#e89d59",
-        alpha: 0.36
-      ))
-      draws.push(circle(
-        center: center,
-        radius: radius,
-        fill: "#010107",
-        stroke: "#e89d59",
-        stroke_width: 1.4,
-        alpha: 0.9,
-        glow_color: "#e89d59",
-        glow_blur: 12.0
-      ))
 
 fn append_arrow(
   ~draws: Array<Draw>,

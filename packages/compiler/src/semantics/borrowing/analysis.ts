@@ -366,6 +366,7 @@ const buildOrdinaryDeclarationBounds = ({
                       method.symbol,
                       symbolTable,
                     ),
+                  method.isolated === true,
                 ),
               ] as const,
           )
@@ -430,6 +431,7 @@ const addDeclarationOrdinaryMutationSummaries = ({
             }),
             traitMethodAllowsUnknownCallback(method, typing) ||
               traitMethodInvokesUnknownCallback(method.symbol, symbolTable),
+            method.isolated === true,
           ),
         ),
       );
@@ -448,7 +450,7 @@ const addDeclarationOrdinaryMutationSummaries = ({
         "resume";
       summaries.set(operation.symbol, {
         ...ordinaryMutationSignatureUpperBound({ signature, maySuspend }),
-        ambientObjectAccess: true,
+        ambientAccess: OrdinaryParameterAccess.Write,
       });
     });
   });
@@ -472,13 +474,17 @@ const ordinaryMutationDeclarationBoundForHirParameters = (
     bindingKind?: "value" | "mutable-ref" | "immutable-ref";
   }[],
   maySuspend = false,
-  invokesUnknownCallback = false,
+  _invokesUnknownCallback = false,
+  isolated = false,
 ): OrdinaryMutationSummary => {
   const parameterBound = ordinaryMutationUpperBoundForHirParameters(parameters);
   return {
     ...parameterBound,
-    maySuspend,
-    invokesUnknownCallback,
+    ambientAccess: isolated
+      ? OrdinaryParameterAccess.Unused
+      : OrdinaryParameterAccess.Write,
+    maySuspend: isolated ? false : maySuspend,
+    reentrant: !isolated,
   };
 };
 
@@ -585,28 +591,13 @@ const collectOrdinaryMutationViolations = ({
   exclusiveDeclarationSymbols: ReadonlySet<SymbolId>;
 }): readonly OrdinaryMutationBoundViolation[] => {
   const violations = [...declarationViolations];
-  const addExclusiveObligations = (
-    symbol: SymbolId,
-    summary: OrdinaryMutationSummary,
-    includeAmbient: boolean,
-  ): void => {
-    if (includeAmbient && summary.ambientObjectAccess) {
-      violations.push({ kind: "ambient-object-access", symbol });
-    }
-    if (summary.invokesUnknownCallback) {
-      violations.push({ kind: "unknown-callback", symbol });
-    }
-    if (summary.maySuspend) {
-      violations.push({ kind: "suspension", symbol });
-    }
-  };
   indexes.forEach((index, symbol) => {
     const summary = summaries.get(symbol);
     if (!summary) return;
     const parameterBound = {
       ...ordinaryMutationUpperBoundForHirParameters(index.parameters),
-      ambientObjectAccess: true,
-      invokesUnknownCallback: true,
+      ambientAccess: OrdinaryParameterAccess.Write,
+      reentrant: true,
       maySuspend: true,
     } satisfies OrdinaryMutationSummary;
     violations.push(
@@ -616,15 +607,8 @@ const collectOrdinaryMutationViolations = ({
         symbol,
       }),
     );
-    if (index.flags.hasMutableParameter) {
-      addExclusiveObligations(symbol, summary, false);
-    }
   });
-  exclusiveDeclarationSymbols.forEach((symbol) => {
-    if (indexes.has(symbol)) return;
-    const summary = summaries.get(symbol);
-    if (summary) addExclusiveObligations(symbol, summary, true);
-  });
+  void exclusiveDeclarationSymbols;
   return Array.from(
     new Map(
       violations.map((violation) => [JSON.stringify(violation), violation]),

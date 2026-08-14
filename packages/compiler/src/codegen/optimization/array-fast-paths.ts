@@ -509,13 +509,17 @@ const safeLoopResolvedCallDecision = ({
     if (summary.maySuspend) {
       return { accepted: false, reason: "suspending-call" };
     }
-    if (summary.ambientObjectAccess) {
+    if (summary.ambientAccess !== "unused") {
       return { accepted: false, reason: "ambient-access" };
     }
-    if (summary.invokesUnknownCallback) {
+    if (summary.reentrant) {
       return { accepted: false, reason: "unknown-callback" };
     }
-    if (summary.parameterAccesses.some((access) => access === "write")) {
+    if (
+      [...summary.directAccesses, ...summary.reachableAccesses].some(
+        (access) => access === "write",
+      )
+    ) {
       return { accepted: false, reason: "parameter-write" };
     }
   }

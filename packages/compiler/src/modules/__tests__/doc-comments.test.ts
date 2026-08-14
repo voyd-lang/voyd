@@ -241,6 +241,23 @@ pub fn documented(
     expect(documented?.params[0]?.documentation).toBe(" Documented parameter.");
   });
 
+  it("preserves documented isolated trait methods", async () => {
+    const { diagnostics, semantics } = await compileSingleModule(`
+/// Key behavior.
+pub trait Key<K>
+  /// Computes a hash.
+  @isolated
+  fn hash(self): () -> i32
+`);
+
+    expect(diagnostics.filter((entry) => entry.code === "MD0004")).toHaveLength(0);
+    const key = semantics
+      .get("src::main")
+      ?.binding.traits.find((trait) => trait.name === "Key");
+    expect(key?.documentation).toBe(" Key behavior.");
+    expect(key?.methods[0]?.documentation).toBe(" Computes a hash.");
+  });
+
   it("preserves parameter docs when an attribute macro emits an object field", async () => {
     const { diagnostics, semantics } = await compileSingleModule(`
 macro locate(value, source)

@@ -15,8 +15,8 @@ pub fn document_json(
   routes: Array<RouteDocument>,
   { include_doc_comments: bool }
 ) -> JsonValue
-  let ~paths = Dict<String, JsonValue>::init()
-  let ~components = Dict<String, JsonValue>::init()
+  var paths = Dict<String, JsonValue>::init()
+  var components = Dict<String, JsonValue>::init()
   var index = 0
   while index < routes.len():
     let route = routes.at(index)
@@ -29,37 +29,41 @@ pub fn document_json(
           JsonObject: active.value
           else: Dict<String, JsonValue>::init()
       None: Dict<String, JsonValue>::init()
-    let ~operation_components = Dict<String, JsonValue>::init()
+    let rendered_operation = operation_json(
+      route.operation,
+      prefix: "Operation".concat(to_string(index).as_slice()),
+      include_doc_comments: include_doc_comments
+    )
     let path_item = existing.setting(
       method_as_string(route.method).lowered(),
-      operation_json(route.operation, prefix: "Operation".concat(to_string(index).as_slice()), components: operation_components, include_doc_comments: include_doc_comments)
+      rendered_operation.value
     )
-    paths.set(route.path, JsonObject { value: path_item })
-    components.extend(operation_components)
+    paths = paths.setting(route.path, JsonObject { value: path_item })
+    components = components.merged(rendered_operation.components)
     index = index + 1
-  let ~root = Dict<String, JsonValue>::init()
-  root.set("openapi", JsonString { value: "3.1.0".to_string() })
-  root.set("info", info_json(info))
-  root.set("paths", JsonObject { value: paths })
+  var root = Dict<String, JsonValue>::init()
+  root = root.setting("openapi", JsonString { value: "3.1.0".to_string() })
+  root = root.setting("info", info_json(info))
+  root = root.setting("paths", JsonObject { value: paths })
   if not components.is_empty():
-    let ~component_root = Dict<String, JsonValue>::init()
-    component_root.set("schemas", JsonObject { value: components })
-    root.set("components", JsonObject { value: component_root })
+    var component_root = Dict<String, JsonValue>::init()
+    component_root = component_root.setting("schemas", JsonObject { value: components })
+    root = root.setting("components", JsonObject { value: component_root })
   JsonObject { value: root }
 
 fn info_json(value: Info) -> JsonValue
-  let ~out = Dict<String, JsonValue>::init()
-  out.set("title", JsonString { value: value.title })
-  out.set("version", JsonString { value: value.version })
-  set_optional_string(out, "description", value.description)
+  var out = Dict<String, JsonValue>::init()
+  out = out.setting("title", JsonString { value: value.title })
+  out = out.setting("version", JsonString { value: value.version })
+  out = setting_optional_string(out, "description", value.description)
   JsonObject { value: out }
 
-fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> void
+fn setting_optional_string(target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> Dict<String, JsonValue>
   match(value)
     Some<String> { value }:
-      target.set(key.to_string(), JsonString { value: value })
+      target.setting(key.to_string(), JsonString { value: value })
     None:
-      void
+      target
 
-fn set_optional_string(~target: Dict<String, JsonValue>, key: String, value: Option<String>) -> void
-  set_optional_string(target, key.as_slice(), value)
+fn setting_optional_string(target: Dict<String, JsonValue>, key: String, value: Option<String>) -> Dict<String, JsonValue>
+  setting_optional_string(target, key.as_slice(), value)

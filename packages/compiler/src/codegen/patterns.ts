@@ -270,19 +270,17 @@ const projectedFieldPlace = ({
 
 const declarePatternLocal = ({
   pattern,
-  mutable,
   typeId,
   ctx,
   fnCtx,
 }: {
   pattern: Extract<HirPattern, { kind: "identifier" }>;
-  mutable: boolean;
   typeId: TypeId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }) =>
   pattern.bindingKind === "mutable-ref" ||
-  (mutable && ctx.module.mutableStorageSymbols.has(pattern.symbol))
+  ctx.module.mutableStorageSymbols.has(pattern.symbol)
     ? declareMutableLocalWithTypeId(pattern.symbol, typeId, ctx, fnCtx)
     : declareLocalWithTypeId(pattern.symbol, typeId, ctx, fnCtx);
 
@@ -530,7 +528,6 @@ export const compilePatternInitialization = ({
   const binding = options.declare
     ? declarePatternLocal({
         pattern,
-        mutable: options.mutable === true,
         typeId: targetTypeId,
         ctx,
         fnCtx,
@@ -597,7 +594,6 @@ export const compilePatternInitializationFromValue = ({
     const binding = options.declare
       ? declarePatternLocal({
           pattern,
-          mutable: options.mutable === true,
           typeId: targetTypeId,
           ctx,
           fnCtx,
@@ -655,7 +651,6 @@ export const compilePatternInitializationFromValue = ({
     const binding = options.declare
       ? declarePatternLocal({
           pattern: subPattern,
-          mutable: options.mutable === true,
           typeId: targetTypeId,
           ctx,
           fnCtx,
@@ -746,7 +741,6 @@ const compileTuplePattern = ({
     const binding = options.declare
       ? declarePatternLocal({
           pattern: subPattern,
-          mutable: options.mutable === true,
           typeId: targetTypeId,
           ctx,
           fnCtx,
@@ -837,7 +831,6 @@ const compileDestructurePattern = ({
     const binding = options.declare
       ? declarePatternLocal({
           pattern: subPattern,
-          mutable: options.mutable === true,
           typeId: targetTypeId,
           ctx,
           fnCtx,
@@ -930,7 +923,6 @@ const compilePatternFromScalarAggregate = ({
     const targetBinding = options.declare
       ? declarePatternLocal({
           pattern: subPattern,
-          mutable: options.mutable === true,
           typeId: targetTypeId,
           ctx,
           fnCtx,

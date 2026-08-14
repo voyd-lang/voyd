@@ -303,7 +303,9 @@ const specializeEnvField = ({
         }) !== "direct"
       : field.storageRef === true;
   const storageRefType = storageRef
-    ? field.bindingKind === "mutable-ref"
+    ? field.bindingKind === "mutable-ref" ||
+      (typeof field.symbol === "number" &&
+        ctx.module.mutableStorageSymbols.has(field.symbol))
       ? getMutableRefStorageType({ typeId: specializedTypeId, ctx })
       : getInlineHeapBoxType({ typeId: specializedTypeId, ctx })
     : undefined;

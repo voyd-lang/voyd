@@ -12,7 +12,7 @@ impl HitRecord
     HitRecord { t: 0 }
 
 pub trait Hittable
-  fn hit(self, { ray: Ray, ray_tmin: f64, ray_tmax: f64, ~rec: HitRecord }): () -> bool
+  fn hit(self, { ray: Ray, ray_tmin: f64, ray_tmax: f64, rec: HitRecord }): () -> HitRecord
 
 pub obj Sphere {}
 
@@ -20,12 +20,11 @@ impl Hittable for Sphere
   fn init()
     Sphere {}
 
-  fn hit(self, { ray: Ray, ray_tmin: f64, ray_tmax: f64, ~rec: HitRecord }) -> bool
+  fn hit(self, { ray: Ray, ray_tmin: f64, ray_tmax: f64, rec: HitRecord }) -> HitRecord
     if ray.direction > 0.0 and ray_tmin <= ray_tmax:
-      rec.t = 1
-      true
+      HitRecord { t: rec.t + 1 }
     else:
-      false
+      rec
 
 pub obj World {
   object: Hittable
@@ -35,15 +34,11 @@ impl World
   fn init(object: Hittable)
     World { object }
 
-  fn cast(self, ray: Ray, ~rec: HitRecord) -> bool
+  fn cast(self, ray: Ray, rec: HitRecord): (open) -> HitRecord
     self.object.hit({ ray, ray_tmin: 0.0, ray_tmax: 10.0, rec })
 
-pub fn trait_dispatch_labeled_container() -> i32
+pub fn trait_dispatch_labeled_container(): (open) -> i32
   let world = World(Sphere())
-  var ~rec = HitRecord()
+  let rec = HitRecord()
   let ray = Ray { origin: 7.0, direction: 1.0 }
-
-  if world.cast(ray, rec):
-    rec.t
-  else:
-    -1
+  world.cast(ray, rec).t

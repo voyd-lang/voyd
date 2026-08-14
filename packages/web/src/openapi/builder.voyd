@@ -78,16 +78,14 @@ pub fn operation_with_request(value: Operation, request: OpenApiRequestContract)
 
 /// Renders one reusable operation plus the components it references.
 pub fn operation_fragment(value: Operation, { include_doc_comments: bool }) -> JsonValue
-  let ~components = Dict<String, JsonValue>::init()
   let rendered = operation_json(
     value,
     prefix: "Operation".to_string(),
-    components: components,
     include_doc_comments: include_doc_comments
   )
-  let ~out = Dict<String, JsonValue>::init()
-  out.set("operation", rendered)
-  out.set("components", JsonObject { value: components })
+  var out = Dict<String, JsonValue>::init()
+  out = out.setting("operation", rendered.value)
+  out = out.setting("components", JsonObject { value: rendered.components })
   JsonObject { value: out }
 
 fn append_document_route(

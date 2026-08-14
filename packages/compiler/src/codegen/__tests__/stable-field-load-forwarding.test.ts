@@ -149,14 +149,24 @@ describe("stable field load forwarding", () => {
     );
     expect(exactMetricsBeforeOptimization.requests).toBe(0);
     expect(program.exactCallOptimizations.getMetrics()).toMatchObject({
+      cacheMisses: 1,
+      bodyVisits: 1,
       acceptedFacts: 1,
       fallbacks: 0,
+      budgetExhaustions: 0,
     });
     expect(
       program.exactCallOptimizations.getMetrics().cacheHits,
     ).toBeGreaterThan(0);
     expect(recordedCounters()).toContain(
       "optimize.pass.stable-field-load-forwarding.accepted",
+    );
+    expect(recordedCounters()).toEqual(
+      expect.arrayContaining([
+        "codegen.exact_call.cache_misses",
+        "codegen.exact_call.body_visits",
+        "codegen.exact_call.analysis_operations",
+      ]),
     );
   });
 
@@ -267,8 +277,9 @@ pub fn main() -> i32
     );
   });
 
-  it("bails out for dynamic method dispatch", () => {
-    const { optimized, moduleId } = compile(`
+  it("rejects dynamic mutation whose open declaration cannot exclude aliasing", () => {
+    expect(() =>
+      compile(`
 obj Record { stable: i32, changing: i32 }
 trait Mutator
   fn bump(self, ~value: Record): () -> void
@@ -298,10 +309,8 @@ fn run(mutator: Mutator) -> i32
 pub fn main(flag: i32) -> i32
   let mutator: Mutator = if flag == 0 then: Increment {} else: Reset {}
   run(mutator)
-`);
-    expect(
-      optimized.facts.stableFieldLoadForwarding.get(moduleId)?.size ?? 0,
-    ).toBe(0);
+`),
+    ).toThrow(/TY0048/);
   });
 
   it("bails out for an unresolved function-value call", () => {

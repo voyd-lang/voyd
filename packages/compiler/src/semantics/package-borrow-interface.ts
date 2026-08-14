@@ -284,9 +284,10 @@ export const buildPackageSemanticInterface = ({
 const publicOrdinaryMutationSummary = (
   summary: OrdinaryMutationSummary,
 ): PackageOrdinaryMutationSummary => ({
-  parameterAccesses: [...summary.parameterAccesses],
-  ambientObjectAccess: summary.ambientObjectAccess,
-  invokesUnknownCallback: summary.invokesUnknownCallback,
+  directAccesses: [...summary.directAccesses],
+  reachableAccesses: [...summary.reachableAccesses],
+  ambientAccess: summary.ambientAccess,
+  reentrant: summary.reentrant,
   maySuspend: summary.maySuspend,
 });
 

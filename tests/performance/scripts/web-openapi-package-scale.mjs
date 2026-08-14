@@ -29,7 +29,10 @@ const V500_REQUIRED_PHASES = [
   "analyzeBorrowing.ordinaryMutation",
   "analyzeBorrowing.explicitBorrow",
 ];
-const V500_REQUIRED_ANALYSIS_COUNTERS = [
+// Counters shared by every revision supported by this historical comparison.
+// Revision-specific zero-presence counters come from that checkout's declared
+// schema, so adding a counter does not make older baselines unmeasurable.
+const STABLE_REQUIRED_ANALYSIS_COUNTERS = [
   "borrowing.ordinary.callables",
   "borrowing.ordinary.callEdges",
   "borrowing.ordinary.summaryEvaluations",
@@ -424,7 +427,7 @@ export const validateCompilerSummaries = ({
       : ["total"];
     const requiredCounters = counterSchema?.available
       ? [
-          ...V500_REQUIRED_ANALYSIS_COUNTERS,
+          ...STABLE_REQUIRED_ANALYSIS_COUNTERS,
           ...counterSchema.counters,
         ]
       : [];

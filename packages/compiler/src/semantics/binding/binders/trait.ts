@@ -276,6 +276,7 @@ const bindTraitMethod = ({
     effectTypeExpr: decl.signature.effectType,
     defaultBody: decl.body,
     intrinsic: decl.intrinsic,
+    ...(decl.isolated ? { isolated: true } : {}),
     documentation: declarationDocForSyntax(decl.signature.name, ctx),
   };
 };

@@ -29,10 +29,10 @@ pub fn copy_json_array(source: Array<JsonValue>) -> Array<JsonValue>
 
 pub fn copy_json_object(source: Dict<String, JsonValue>) -> Dict<String, JsonValue>
   let entries = source.entries()
-  let ~out = Dict<String, JsonValue>::with_capacity(entries.len())
+  var out = Dict<String, JsonValue>::with_capacity(entries.len())
   var index = 0
   while index < entries.len():
     let entry = entries.at(index)
-    out.set(entry.0.as_slice().to_string(), copy_json_value(entry.1))
+    out = out.setting(entry.0.as_slice().to_string(), copy_json_value(entry.1))
     index = index + 1
   out

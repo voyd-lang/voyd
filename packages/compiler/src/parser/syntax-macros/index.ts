@@ -13,6 +13,7 @@ import { SyntaxMacro } from "./types.js";
 import { functionalMacroExpander } from "./functional-macro-expander/index.js";
 import { testBlockMacro } from "./test-block.js";
 import { validateSurfaceSyntax } from "./validate-surface-syntax.js";
+import { isolatedAttributeMacro } from "./isolated-attribute.js";
 
 /** Caution: Order matters */
 export const BASE_SYNTAX_MACROS: SyntaxMacro[] = [
@@ -21,6 +22,7 @@ export const BASE_SYNTAX_MACROS: SyntaxMacro[] = [
   attachColonClauses,
   constructorObjectLiteral,
   validateSurfaceSyntax,
+  isolatedAttributeMacro,
 ];
 
 export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
@@ -30,6 +32,7 @@ export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
   intrinsicTypeAttributeMacro,
   externalAttributeMacro,
   effectAttributeMacro,
+  isolatedAttributeMacro,
   testBlockMacro,
 ];
 
