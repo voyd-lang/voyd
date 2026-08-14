@@ -15,9 +15,11 @@ use std::subscript::SubscriptRead
 /// Implementors define stable hashing and equality for dictionary lookups.
 pub trait DictKey<K>
   /// Returns a hash used to choose the key bucket.
+  @isolated
   fn dict_hash(self): () -> i32
 
   /// Returns true when this key equals `other`.
+  @isolated
   fn dict_eq(self, other: K): () -> bool
 
 /// Entry handle for conditional dictionary updates.
@@ -38,7 +40,7 @@ pub obj DictEntryRemove<K, V> {
   api value: Optional<V>
 }
 
-/// Hash-map dictionary with hash-bucket storage.
+/// Mutable dictionary with hash-bucket storage.
 ///
 /// Stores values by key and preserves only one value per key.
 pub obj Dict<K, V> {
@@ -112,6 +114,53 @@ impl<K: DictKey<K>, V> Dict<K, V>
     let storage = bucket.raw_storage()
     let entry = __array_get(storage, entry_index)
     Some<V> { value: entry.value }
+
+  /// Inserts or replaces the value for a key.
+  api fn set(
+    ~self,
+    /// Key to insert or update.
+    key: K,
+    /// Value to store at `key`.
+    value: V
+  ) -> void
+    let bucket_count = __array_len(self.buckets)
+    let bucket_index = bucket_index_for_key(bucket_count, key)
+    let bucket = __array_get(self.buckets, bucket_index)
+    let bucket_storage = bucket.storage
+    let bucket_len = bucket.count
+    let entry_index = self.find_entry_index(bucket_index, key)
+    let inserted = entry_index < 0
+    let next_count = if inserted then: bucket_len + 1 else: bucket_len
+    let next_storage = new_fixed_array<DictPair<K, V>>(next_count)
+    __array_copy(next_storage, {
+      from: bucket_storage,
+      to_index: 0,
+      from_index: 0,
+      count: bucket_len
+    })
+    let write_index = if inserted then: bucket_len else: entry_index
+    __array_set(
+      next_storage,
+      write_index,
+      DictPair<K, V> { key, value }
+    )
+    let next_bucket = new_array_unchecked<DictPair<K, V>>({ from: next_storage })
+    __array_set(self.buckets, bucket_index, next_bucket)
+    if inserted:
+      self.count = self.count + 1
+      if should_grow(self.count, bucket_count):
+        rehash_owned(~self, bucket_count * 2)
+
+  fn find_entry_index(self, bucket_index: i32, key: K) -> i32
+    let bucket = __array_get(self.buckets, bucket_index)
+    let storage = bucket.storage
+    var index = 0
+    while index < bucket.count:
+      let entry = __array_get(storage, index)
+      if key_equals(entry.key, key):
+        return index
+      index = index + 1
+    -1
 
   /// Returns a dictionary with `key` inserted or updated.
   api fn setting(self, key: K, value: V) -> Dict<K, V>
@@ -500,6 +549,60 @@ fn copy_buckets<K, V>(
     count: length
   })
   copy
+
+fn should_grow(count: i32, bucket_count: i32) -> bool
+  if bucket_count <= 0:
+    return true
+  (count * 4) > (bucket_count * 3)
+
+fn rehash_owned<K: DictKey<K>, V>(
+  ~dict: Dict<K, V>,
+  bucket_count: i32
+) -> void
+  let next_bucket_count = if bucket_count > 0 then: bucket_count else: 1
+  let ~next_buckets = new_fixed_array<Array<DictPair<K, V>>>(next_bucket_count)
+  initialize_buckets(~next_buckets)
+
+  let previous_bucket_count = __array_len(dict.buckets)
+  var bucket_index = 0
+  while bucket_index < previous_bucket_count:
+    let bucket = __array_get(dict.buckets, bucket_index)
+    let source_storage = bucket.storage
+    var source_index = 0
+    while source_index < bucket.count:
+      let next_bucket_index = bucket_index_for_stored_entry(
+        dict,
+        next_bucket_count,
+        bucket_index,
+        source_index
+      )
+      let entry = __array_get(source_storage, source_index)
+      let next_bucket = __array_get(next_buckets, next_bucket_index)
+      let next_count = next_bucket.count + 1
+      let next_storage = new_fixed_array<DictPair<K, V>>(next_count)
+      __array_copy(next_storage, {
+        from: next_bucket.storage,
+        to_index: 0,
+        from_index: 0,
+        count: next_bucket.count
+      })
+      __array_set(next_storage, next_bucket.count, entry)
+      let copied_bucket = new_array_unchecked<DictPair<K, V>>({ from: next_storage })
+      __array_set(next_buckets, next_bucket_index, copied_bucket)
+      source_index = source_index + 1
+    bucket_index = bucket_index + 1
+
+  dict.buckets = next_buckets
+
+fn bucket_index_for_stored_entry<K: DictKey<K>, V>(
+  dict: Dict<K, V>,
+  bucket_count: i32,
+  bucket_index: i32,
+  entry_index: i32
+) -> i32
+  let bucket = __array_get(dict.buckets, bucket_index)
+  let entry = __array_get(bucket.storage, entry_index)
+  bucket_index_for_key(bucket_count, entry.key)
 
 fn find_entry_index_in_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, key: K) -> i32
   let storage = bucket.raw_storage()

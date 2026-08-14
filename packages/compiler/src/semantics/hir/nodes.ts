@@ -332,6 +332,8 @@ export interface HirTraitMethod {
   returnType?: HirTypeExpr;
   effectType?: HirTypeExpr;
   defaultBody?: HirExprId;
+  /** Checked full-invocation promise for safe open dispatch under exclusivity. */
+  isolated?: true;
 }
 
 export interface HirMethodParameter {

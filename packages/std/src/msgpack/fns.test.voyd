@@ -10,9 +10,9 @@ test "msgpack encode/decode roundtrip for nested values":
   items.push(make_i32(1))
   items.push(make_string("hi"))
 
-  let map = Dict<String, MsgPack>::init()
-    .setting("items", make_array(items))
-    .setting("flag", make_bool(true))
+  let ~map = Dict<String, MsgPack>::init()
+  map.set("items", make_array(items))
+  map.set("flag", make_bool(true))
 
   let value = make_map(map)
   let written = encode_value(value, base, 1024)

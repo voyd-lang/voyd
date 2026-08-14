@@ -138,6 +138,7 @@ export interface TraitMethodDecl {
   effectTypeExpr?: Expr;
   defaultBody?: Expr;
   intrinsic?: IntrinsicAttribute;
+  isolated?: true;
   documentation?: string;
 }
 

@@ -114,6 +114,30 @@ test "dict setting get contains removing clear":
   cleared.clear()
   assert(cleared.len(), eq: 0)
 
+test "dict set updates fresh mutable dictionaries":
+  let ~strings = Dict<String, i32>::init()
+  strings.set("a", 1)
+  strings.set("a", 2)
+  strings.set("b", 3)
+  assert(strings.len(), eq: 2)
+  match(strings.get("a"))
+    Some<i32> { value }:
+      assert(value, eq: 2)
+    None:
+      assert(false)
+
+  let ~custom = Dict<IntKey, i32>::init()
+  var index = 0
+  while index < 40:
+    custom.set(IntKey { value: index }, index)
+    index = index + 1
+  assert(custom.len(), eq: 40)
+  match(custom.get(IntKey { value: 39 }))
+    Some<i32> { value }:
+      assert(value, eq: 39)
+    None:
+      assert(false)
+
 test "dict persistent updates and copies remain isolated":
   let source = Dict<String, i32>::init().setting("a", 1)
 

@@ -38,6 +38,7 @@ import {
   typeHasIntrinsicRole,
   typeHasNominalIdentity,
 } from "./intrinsic-type-role.js";
+import type { OrdinaryMutationSummary } from "./ordinary-mutation-summary.js";
 
 export type CallableBorrowIndexAccess = {
   exprId: HirExprId;
@@ -116,6 +117,8 @@ export type CallableBorrowIndexCall = {
     ambientAccess: "unused" | "read" | "write";
     reentrant: boolean;
     maySuspend: boolean;
+    /** The open declaration explicitly promises checked isolation. */
+    checkedIsolation?: true;
   };
 };
 
@@ -1756,6 +1759,15 @@ export const extractSingleCallableBorrowIndex = ({
       const dynamicBoundParameters =
         constrainedParameters ??
         (openTraitDispatch ? signature?.parameters : undefined);
+      const importedDeclarationBounds = targets.map((target) => {
+        const declaration = declarationRefForTarget(target);
+        if (!declaration || declaration.moduleId === context.moduleId) {
+          return undefined;
+        }
+        return context.dependencies
+          .get(declaration.moduleId)
+          ?.ordinaryMutationSummaries.get(declaration.symbol);
+      });
       const ordinaryDynamicBound = openTraitDispatch
         ? declarationTraitMethods.length > 0
           ? ordinaryDynamicBoundForTraitMethods(
@@ -1765,6 +1777,8 @@ export const extractSingleCallableBorrowIndex = ({
           : ordinaryDynamicBoundForParameters(
               dynamicBoundParameters ?? [],
               dynamicBoundMaySuspend,
+              importedDeclarationBounds,
+              targets.length,
             )
         : undefined;
       const argumentsFromTyping =
@@ -2308,14 +2322,40 @@ const ordinaryDynamicBoundForParameters = (
     bindingKind?: "value" | "mutable-ref" | "immutable-ref";
   }[],
   maySuspend: boolean,
-): NonNullable<CallableBorrowIndexCall["ordinaryDynamicBound"]> => ({
-  parameterBindingKinds: parameters.map((parameter) => parameter.bindingKind),
-  // Open dispatch has no implementation-wide ambient or reentrancy promise,
-  // even when its declaration has a closed effect row.
-  ambientAccess: "write",
-  reentrant: true,
-  maySuspend,
-});
+  declarationBounds: readonly (OrdinaryMutationSummary | undefined)[] = [],
+  candidateCount = declarationBounds.length,
+): NonNullable<CallableBorrowIndexCall["ordinaryDynamicBound"]> => {
+  const checkedIsolation = importedDeclarationBoundsHaveCheckedIsolation({
+    candidateCount,
+    declarationBounds,
+  });
+  return {
+    parameterBindingKinds: parameters.map((parameter) => parameter.bindingKind),
+    // Imported declaration summaries are the authoritative open-call contract.
+    // Without a checked promise, retain the conservative defaults.
+    ambientAccess: checkedIsolation ? "unused" : "write",
+    reentrant: !checkedIsolation,
+    maySuspend: checkedIsolation ? false : maySuspend,
+    ...(checkedIsolation ? { checkedIsolation: true as const } : {}),
+  };
+};
+
+export const importedDeclarationBoundsHaveCheckedIsolation = ({
+  candidateCount,
+  declarationBounds,
+}: {
+  candidateCount: number;
+  declarationBounds: readonly (OrdinaryMutationSummary | undefined)[];
+}): boolean =>
+  candidateCount > 0 &&
+  declarationBounds.length === candidateCount &&
+  declarationBounds.every(
+    (bound) =>
+      bound !== undefined &&
+      bound.ambientAccess === 0 &&
+      !bound.reentrant &&
+      !bound.maySuspend,
+  );
 
 const ordinaryDynamicBoundForTraitMethods = (
   methods: readonly HirTraitMethod[],
@@ -2325,6 +2365,8 @@ const ordinaryDynamicBoundForTraitMethods = (
     0,
     ...methods.map((method) => method.parameters.length),
   );
+  const checkedIsolation =
+    methods.length > 0 && methods.every((method) => method.isolated === true);
   return {
     parameterBindingKinds: Array.from(
       { length: parameterCount },
@@ -2336,12 +2378,11 @@ const ordinaryDynamicBoundForTraitMethods = (
         return kinds.includes("immutable-ref") ? "immutable-ref" : undefined;
       },
     ),
-    // Source declarations currently have no tighter ambient or reentrancy
-    // promise, so an open trait publishes the refined conservative defaults.
-    ambientAccess: "write",
-    reentrant: true,
+    ambientAccess: checkedIsolation ? "unused" : "write",
+    reentrant: !checkedIsolation,
     // Suspension remains tied to the normalized declaration contract.
-    maySuspend: methods.some(maySuspend),
+    maySuspend: checkedIsolation ? false : methods.some(maySuspend),
+    ...(checkedIsolation ? { checkedIsolation: true as const } : {}),
   };
 };
 

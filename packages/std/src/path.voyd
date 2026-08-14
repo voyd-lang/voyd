@@ -3,8 +3,9 @@
 //! `std::path` performs lexical path composition and inspection without touching
 //! the file system. Use `std::fs` when you need host-backed path existence or I/O.
 
+use std::fixed_array::fns::new_fixed_array
 use std::optional::types::all
-use std::string::type::{ String, StringSlice }
+use std::string::type::{ String, StringSlice, new_string }
 
 pub obj Path {
   raw: String
@@ -117,10 +118,49 @@ fn byte_at_or(value: StringSlice, index: i32, fallback: i32) -> i32
       fallback
 
 fn concat_slices(left: StringSlice, right: StringSlice): () -> String
-  left.to_string().concat(right)
+  let left_len = string_len(left)
+  let right_len = string_len(right)
+  let storage = new_fixed_array<i32>(left_len + right_len)
+  var index = 0
+  while index < left_len:
+    match(left.get_byte(index))
+      Some<i32> { value }:
+        __array_set(storage, index, value)
+      None:
+        return "".to_string()
+    index = index + 1
+  index = 0
+  while index < right_len:
+    match(right.get_byte(index))
+      Some<i32> { value }:
+        __array_set(storage, left_len + index, value)
+      None:
+        return "".to_string()
+    index = index + 1
+  new_string(storage)
 
 fn concat_slices_with_separator(left: StringSlice, right: StringSlice): () -> String
-  left.to_string().concat("/").concat(right)
+  let left_len = string_len(left)
+  let right_len = string_len(right)
+  let storage = new_fixed_array<i32>(left_len + right_len + 1)
+  var index = 0
+  while index < left_len:
+    match(left.get_byte(index))
+      Some<i32> { value }:
+        __array_set(storage, index, value)
+      None:
+        return "".to_string()
+    index = index + 1
+  __array_set(storage, left_len, 47)
+  index = 0
+  while index < right_len:
+    match(right.get_byte(index))
+      Some<i32> { value }:
+        __array_set(storage, left_len + index + 1, value)
+      None:
+        return "".to_string()
+    index = index + 1
+  new_string(storage)
 
 fn string_len(value: StringSlice): () -> i32
   value.byte_len()

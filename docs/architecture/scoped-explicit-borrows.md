@@ -246,16 +246,22 @@ treated as reentrant control while an overlapping exclusive capability or
 scoped borrow is active. Allowing a checked non-reentrant effect requires a
 separate contract decision.
 
-An open trait declaration is the authoritative contract for dynamic calls. In
-the initial model, source syntax provides no promise that an open implementation
-avoids ambient reference-bearing state or reentrant control. Those hazards
-therefore default to `write` and `true` for an open dynamic call. Suspension
-also defaults to `true` unless the normalized declaration excludes it. The
-declaration's effect row is authoritative; an unknown or polymorphic row is
-hazardous. Implementations must fit the declared parameter modes, suspension,
-and effect row. A closed or statically resolved call may use its concrete finite
-summary. Future syntax may publish tighter ambient or reentrancy bounds, but an
-implementation must never be inspected transitively to tighten an open call.
+An open trait declaration is the authoritative contract for dynamic calls.
+Without `@isolated`, ambient access defaults to `write`, reentrant control
+defaults to `true`, and suspension defaults to `true` unless the normalized
+declaration excludes it. The declaration's effect row is authoritative; an
+unknown or polymorphic row is hazardous. A trait method marked `@isolated`
+must declare an explicit empty effect row, `: ()`. It publishes ambient
+`unused`, reentrant `false`, and suspension `false` for the full invocation.
+Its direct and reachable parameter modes still come from the ordinary
+signature.
+
+Every local implementation and default body of an `@isolated` method is
+checked against that finite declaration bound. An imported isolated method is
+recognized only from its published ordinary mutation summary, so package and
+cached-module boundaries preserve the same contract. A closed or statically
+resolved call may use its concrete finite summary. An implementation must never
+be inspected transitively to tighten an open call.
 
 Every callable with a `~T` parameter must prove that, while one of its exclusive
 capabilities remains locally live, it does not perform potentially aliasing
@@ -841,12 +847,12 @@ helper, or use an explicit runtime-checked abstraction such as `SharedCell`. A
 future callable effect or capture contract may accept more cases without
 restoring general provenance inference.
 
-Open dynamic calls are also conservative while an overlapping capability is
-active because the current trait syntax cannot promise the absence of ambient
-or reentrant access. Code can end the capability before the dynamic call, use a
-statically resolved helper, or accept a bounded guard where exact root identity
-is sufficient. Reachable graph overlap is rejected unless local structure
-proves disjointness.
+Open dynamic calls without `@isolated` are conservative while an overlapping
+capability is active. An `@isolated` trait method can be called in that region
+when its declared parameter modes are also compatible. Otherwise, code can end
+the capability before the dynamic call, use a statically resolved helper, or
+accept a bounded guard where exact root identity is sufficient. Reachable graph
+overlap is rejected unless local structure proves disjointness.
 
 Scoped callbacks are less convenient when several borrowed values must be used
 together:

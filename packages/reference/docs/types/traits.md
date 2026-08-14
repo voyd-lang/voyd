@@ -39,6 +39,27 @@ trait One
 
 Implementations can keep the default or override it.
 
+## Isolated dynamic calls
+
+Use `@isolated` when every implementation of a trait method must avoid ambient
+mutable state, callbacks or other reentrant control, effects, and suspension
+for the full call.
+
+```voyd
+trait DictKey<K>
+  @isolated
+  fn dict_hash(self): () -> i32
+```
+
+An isolated method must write the explicit empty effect row `: ()`. The
+compiler checks a default body and every implementation against the contract,
+including implementations compiled in another module. Parameter access remains
+part of the normal signature: a plain parameter may be read, while a `~`
+parameter may be written.
+
+This contract lets compatible dynamic calls run while an exclusive capability
+is live. Calls with overlapping parameter access are still rejected.
+
 ## Trait-typed values
 
 Traits are valid type positions for fields and parameters.

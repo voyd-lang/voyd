@@ -3,9 +3,10 @@ import type { ModuleGraph, ModuleNode } from "../../../modules/types.js";
 import { parse } from "../../../parser/index.js";
 import { analyzeModules } from "../../../pipeline.js";
 import { semanticsPipeline } from "../../pipeline.js";
-import type {
-  CallableBorrowIndex,
-  CallableBorrowIndexCall,
+import {
+  importedDeclarationBoundsHaveCheckedIsolation,
+  type CallableBorrowIndex,
+  type CallableBorrowIndexCall,
 } from "../callable-borrow-index.js";
 import type { PlaceProjection } from "../model.js";
 import {
@@ -1460,6 +1461,78 @@ fn read_dynamic(reader: Reader): () -> i32
     );
   });
 
+  it("allows checked isolated trait dispatch while an exclusive receiver is live", () => {
+    const result = semanticsPipeline(
+      parse(
+        `obj State { value: i32 }
+obj Key { value: i32 }
+
+trait Hashable<K>
+  @isolated
+  fn hash(self): () -> i32
+
+impl Hashable<Key> for Key
+  fn hash(self): () -> i32
+    self.value
+
+fn write_hash<K: Hashable<K>>(~state: State, key: K): () -> void
+  let value = key.hash()
+  state.value = value
+`,
+        "ordinary-isolated-trait-summary.test.voyd",
+      ),
+    );
+    const hashable = Array.from(result.hir.items.values()).find(
+      (item) => item.kind === "trait",
+    );
+
+    expect(result.diagnostics).toHaveLength(0);
+    expect(
+      hashable?.kind === "trait"
+        ? result.borrowing.ordinaryMutationSummaries.get(
+            hashable.methods[0]!.symbol,
+          )
+        : undefined,
+    ).toEqual(summary([Access.Read]));
+  });
+
+  it("rejects ambient access from isolated trait implementations", () => {
+    expect(() =>
+      semanticsPipeline(
+        parse(
+          `obj Box { value: i32 }
+
+let ambient = Box { value: 1 }
+
+trait Reader
+  @isolated
+  fn read(self): () -> i32
+
+impl Reader for Box
+  fn read(self): () -> i32
+    ambient.value
+`,
+          "ordinary-isolated-trait-ambient.test.voyd",
+        ),
+      ),
+    ).toThrow(/TY0055/);
+  });
+
+  it("rejects reentrant callbacks from isolated trait default bodies", () => {
+    expect(() =>
+      semanticsPipeline(
+        parse(
+          `trait Runner
+  @isolated
+  fn run(self, callback: fn() : () -> i32): () -> i32
+    callback()
+`,
+          "ordinary-isolated-trait-default.test.voyd",
+        ),
+      ),
+    ).toThrow(/TY0055/);
+  });
+
   it("uses only the selected same-name trait overload bound", () => {
     const result = semanticsPipeline(
       parse(
@@ -1679,6 +1752,137 @@ impl Reader for Box
     });
 
     expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("preserves and enforces checked isolated trait bounds across imports", () => {
+    const dependency: ModuleNode = {
+      id: "src::isolated_trait_dependency",
+      path: { namespace: "src", segments: ["isolated_trait_dependency"] },
+      origin: {
+        kind: "file",
+        filePath: "isolated-trait-dependency.test.voyd",
+      },
+      source: "",
+      dependencies: [],
+      ast: parse(
+        `pub trait Hashable<K>
+  @isolated
+  fn hash(self): () -> i32
+`,
+        "isolated-trait-dependency.test.voyd",
+      ),
+    };
+    const consumer: ModuleNode = {
+      id: "src::isolated_trait_consumer",
+      path: { namespace: "src", segments: ["isolated_trait_consumer"] },
+      origin: {
+        kind: "file",
+        filePath: "isolated-trait-consumer.test.voyd",
+      },
+      source: "",
+      dependencies: [{ kind: "use", path: dependency.path }],
+      ast: parse(
+        `use src::isolated_trait_dependency::Hashable
+
+obj State { value: i32 }
+obj Key { value: i32 }
+
+impl Hashable<Key> for Key
+  fn hash(self): () -> i32
+    self.value
+
+fn write_hash<K: Hashable<K>>(~state: State, key: K): () -> void
+  let value = key.hash()
+  state.value = value
+`,
+        "isolated-trait-consumer.test.voyd",
+      ),
+    };
+    const graph: ModuleGraph = {
+      entry: consumer.id,
+      modules: new Map([
+        [dependency.id, dependency],
+        [consumer.id, consumer],
+      ]),
+      diagnostics: [],
+    };
+    const dependencyResult = semanticsPipeline({ module: dependency, graph });
+    const result = semanticsPipeline({
+      module: consumer,
+      graph,
+      exports: new Map([[dependency.id, dependencyResult.exports]]),
+      dependencies: new Map([[dependency.id, dependencyResult]]),
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+
+    const hostileConsumer: ModuleNode = {
+      id: "src::isolated_trait_hostile_consumer",
+      path: {
+        namespace: "src",
+        segments: ["isolated_trait_hostile_consumer"],
+      },
+      origin: {
+        kind: "file",
+        filePath: "isolated-trait-hostile-consumer.test.voyd",
+      },
+      source: "",
+      dependencies: [{ kind: "use", path: dependency.path }],
+      ast: parse(
+        `use src::isolated_trait_dependency::Hashable
+
+obj Box { value: i32 }
+obj Key { value: i32 }
+
+let ambient = Box { value: 1 }
+
+impl Hashable<Key> for Key
+  fn hash(self): () -> i32
+    self.value + ambient.value
+`,
+        "isolated-trait-hostile-consumer.test.voyd",
+      ),
+    };
+    const hostileGraph: ModuleGraph = {
+      entry: hostileConsumer.id,
+      modules: new Map([
+        [dependency.id, dependency],
+        [hostileConsumer.id, hostileConsumer],
+      ]),
+      diagnostics: [],
+    };
+
+    expect(() =>
+      semanticsPipeline({
+        module: hostileConsumer,
+        graph: hostileGraph,
+        exports: new Map([[dependency.id, dependencyResult.exports]]),
+        dependencies: new Map([[dependency.id, dependencyResult]]),
+      }),
+    ).toThrow(/TY0055/);
+  });
+
+  it("requires every imported dispatch candidate to publish isolation", () => {
+    const isolated = summary([Access.Read]);
+
+    expect(
+      importedDeclarationBoundsHaveCheckedIsolation({
+        candidateCount: 2,
+        declarationBounds: [isolated, isolated],
+      }),
+    ).toBe(true);
+    expect(
+      importedDeclarationBoundsHaveCheckedIsolation({
+        candidateCount: 2,
+        declarationBounds: [isolated, undefined],
+      }),
+    ).toBe(false);
+    expect(
+      importedDeclarationBoundsHaveCheckedIsolation({
+        candidateCount: 2,
+        declarationBounds: [isolated],
+      }),
+    ).toBe(false);
   });
 
   it("keeps fallback imported open receivers conservative while preserving suspension", () => {

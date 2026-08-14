@@ -725,10 +725,10 @@ fn msgpack_from_data_value(value: DataValue) -> MsgPack
     DataBytes:
       make_binary(Binary { bytes: data.value.to_array() })
     DataArray:
-      var values = Array<MsgPack>::with_capacity(data.values.len())
+      let ~values = Array<MsgPack>::with_capacity(data.values.len())
       var index = 0
       while index < data.values.len():
-        values = values.pushed(msgpack_from_data_value(data.values.at(index)))
+        values.push(msgpack_from_data_value(data.values.at(index)))
         index = index + 1
       make_array(values)
     DataObject:
@@ -742,11 +742,11 @@ fn msgpack_from_data_value(value: DataValue) -> MsgPack
 fn msgpack_entries_from_data_fields(
   fields: Array<DataField>
 ) -> Array<(String, MsgPack)>
-  var entries = Array<(String, MsgPack)>::with_capacity(fields.len())
+  let ~entries = Array<(String, MsgPack)>::with_capacity(fields.len())
   var index = 0
   while index < fields.len():
     let field = fields.at(index)
-    entries = entries.pushed((field.name, msgpack_from_data_value(field.value)))
+    entries.push((field.name, msgpack_from_data_value(field.value)))
     index = index + 1
   entries
 

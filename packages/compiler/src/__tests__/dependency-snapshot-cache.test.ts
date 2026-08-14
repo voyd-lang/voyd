@@ -272,6 +272,8 @@ pub obj PublicBox { api visible: i32, hidden: i32 }
 pub trait Reader
   fn read(self, value: i32) -> i32
   fn read(self, value: bool) -> i32
+  @isolated
+  fn stable(self): () -> i32
 
 @effect(id: "voyd.test.clock")
 pub eff Clock
@@ -311,7 +313,22 @@ pub fn defaulted(value: i32 = 0) -> i32
       expect.arrayContaining([
         expect.objectContaining({ name: "read", kind: "trait-method" }),
         expect.objectContaining({ name: "read", kind: "trait-method" }),
+        expect.objectContaining({ name: "stable", kind: "trait-method" }),
       ]),
+    );
+    const isolatedSummaryId = first.exports
+      .find((entry) => entry.name === "Reader")
+      ?.members.find((member) => member.name === "stable")
+      ?.ordinaryMutationSummaryId;
+    const isolatedSummary = first.ordinaryMutationSummaries.find(
+      (entry) => entry.id === isolatedSummaryId,
+    )?.summary;
+    expect(isolatedSummary).toEqual(
+      expect.objectContaining({
+        ambientAccess: 0,
+        reentrant: false,
+        maySuspend: false,
+      }),
     );
     expect(
       first.exports.find((entry) => entry.name === "Clock")?.members,

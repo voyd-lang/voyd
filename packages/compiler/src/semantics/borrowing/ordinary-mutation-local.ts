@@ -1268,7 +1268,8 @@ const callAccessHasPlannedGuard = ({
 };
 
 const callHasUncertainDispatch = (call: CallableBorrowIndexCall): boolean =>
-  call.openTraitDispatch === true ||
+  (call.openTraitDispatch === true &&
+    call.ordinaryDynamicBound?.checkedIsolation !== true) ||
   call.argumentPlanAmbiguous === true ||
   call.targets.length === 0;
 

@@ -122,6 +122,15 @@ declaration explicitly excludes them, ambient access defaults to `write` and
 reentrant control and suspension default to true. The declaration's normalized
 effect row is checked separately from mutation-summary inference.
 
+A trait method MAY be marked `@isolated` only when it declares an explicit
+empty effect row, `: ()`. The attribute applies to the full invocation and sets
+the declaration bound's ambient access to `unused`, reentrant-control bit to
+false, and suspension bit to false. It does not change direct or reachable
+parameter modes. Every implementation and any default body MUST fit this bound.
+Imported declarations MUST preserve the bound through the published ordinary
+mutation summary; an importer MUST NOT inspect implementation bodies or rely on
+a declaration name to recover it.
+
 Every callable with a `~T` parameter MUST use callable-local backward CFG
 liveness to prove that, while a capability or derived local alias remains live,
 it does not:

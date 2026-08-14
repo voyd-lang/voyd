@@ -366,6 +366,7 @@ const buildOrdinaryDeclarationBounds = ({
                       method.symbol,
                       symbolTable,
                     ),
+                  method.isolated === true,
                 ),
               ] as const,
           )
@@ -430,6 +431,7 @@ const addDeclarationOrdinaryMutationSummaries = ({
             }),
             traitMethodAllowsUnknownCallback(method, typing) ||
               traitMethodInvokesUnknownCallback(method.symbol, symbolTable),
+            method.isolated === true,
           ),
         ),
       );
@@ -473,13 +475,16 @@ const ordinaryMutationDeclarationBoundForHirParameters = (
   }[],
   maySuspend = false,
   _invokesUnknownCallback = false,
+  isolated = false,
 ): OrdinaryMutationSummary => {
   const parameterBound = ordinaryMutationUpperBoundForHirParameters(parameters);
   return {
     ...parameterBound,
-    ambientAccess: OrdinaryParameterAccess.Write,
-    maySuspend,
-    reentrant: true,
+    ambientAccess: isolated
+      ? OrdinaryParameterAccess.Unused
+      : OrdinaryParameterAccess.Write,
+    maySuspend: isolated ? false : maySuspend,
+    reentrant: !isolated,
   };
 };
 
