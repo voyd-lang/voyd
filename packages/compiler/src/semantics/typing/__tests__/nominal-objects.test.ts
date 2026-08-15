@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
+import { parse } from "../../../parser/index.js";
 
 describe("nominal objects", () => {
   it("preserves nominal identity while allowing structural use", () => {
@@ -54,5 +55,28 @@ describe("nominal objects", () => {
     if (typeof bType === "number") {
       expect(typing.arena.get(bType).kind).toBe("structural-object");
     }
+  });
+
+  it("types deeply nested non-generic construction without repeated inference", () => {
+    const depth = 32;
+    const layers = Array.from(
+      { length: depth },
+      (_, index) =>
+        `obj Layer${index} { child: ${index === 0 ? "Leaf" : `Layer${index - 1}`} }`,
+    );
+    const value = Array.from(
+      { length: depth },
+      (_, index) => `Layer${depth - index - 1} { child: `,
+    ).join("");
+    const source = `obj Leaf { value: i32 }
+${layers.join("\n")}
+
+fn make() -> Layer${depth - 1}
+  ${value}Leaf { value: 1 }${" }".repeat(depth)}
+`;
+
+    expect(() =>
+      semanticsPipeline(parse(source, "deep-nominal-construction.voyd")),
+    ).not.toThrow();
   });
 });

@@ -395,16 +395,16 @@ const typeNominalObjectLiteral = (
     targetSymbol,
     ctx,
   });
-  const hasExplicitTypeArgsForAllParams =
-    (aliasResolution?.inferenceParams.length ?? 0) === 0 &&
+  const requiresTypeArgumentInference =
     template.params.length > 0 &&
-    template.params.every(
-      (_, index) =>
-        typeof explicitTypeArgs[index] === "number" &&
-        explicitTypeArgs[index] !== ctx.primitives.unknown,
-    );
+    ((aliasResolution?.inferenceParams.length ?? 0) > 0 ||
+      template.params.some(
+        (_, index) =>
+          typeof explicitTypeArgs[index] !== "number" ||
+          explicitTypeArgs[index] === ctx.primitives.unknown,
+      ));
 
-  if (!hasExplicitTypeArgsForAllParams) {
+  if (requiresTypeArgumentInference) {
     withSpeculativeExprTyping(ctx, () => {
       expr.entries.forEach((entry) =>
         bindNominalObjectEntry({
