@@ -598,63 +598,74 @@ pub fn main() -> i32
   });
 
   it("keeps warm, fresh, and cache-disabled runtime and ABI results equal", async () => {
-    const sdk = createSdk();
-    const entryPath = path.join(
-      repoRoot,
-      "tests",
-      "integration",
-      "fixtures",
-      "std-math-transcendentals.voyd",
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-voyd-sdk-snapshot-parity-"),
     );
-    const source = await fs.readFile(entryPath, "utf8");
+    const srcDir = path.join(projectRoot, "src");
+    const packageRoot = path.join(projectRoot, "packages");
+    const packageSrcDir = path.join(packageRoot, "dep", "src");
+    const entryPath = path.join(srcDir, "main.voyd");
+    const roots = { src: srcDir, pkgDirs: [packageRoot] };
+    const source = `#!no_prelude
+use pkg::dep::{ dependency_value }
+
+pub fn main() -> i32
+  dependency_value() + 40
+`;
     const editedSource = `${source}\nfn dependency_snapshot_app_edit_marker() -> i32\n  1\n`;
+    const compile = (sdk: ReturnType<typeof createSdk>, nextSource: string) =>
+      sdk.compile({ entryPath, roots, source: nextSource });
 
-    const cold = expectCompileSuccess(
-      await sdk.compile({ entryPath, source, optimize: true }),
-    );
-    const warm = expectCompileSuccess(
-      await sdk.compile({ entryPath, source: editedSource, optimize: true }),
-    );
-    const warmNoOp = expectCompileSuccess(
-      await sdk.compile({ entryPath, source: editedSource, optimize: true }),
-    );
-    const secondWarmNoOp = expectCompileSuccess(
-      await sdk.compile({ entryPath, source: editedSource, optimize: true }),
-    );
-    const fresh = expectCompileSuccess(
-      await createSdk().compile({
-        entryPath,
-        source: editedSource,
-        optimize: true,
-      }),
-    );
-    const cacheDisabledSdk = createSdk({ compilerCache: "none" });
-    expectCompileSuccess(
-      await cacheDisabledSdk.compile({ entryPath, source, optimize: true }),
-    );
-    const cacheDisabled = expectCompileSuccess(
-      await cacheDisabledSdk.compile({
-        entryPath,
-        source: editedSource,
-        optimize: true,
-      }),
-    );
+    try {
+      await fs.mkdir(srcDir, { recursive: true });
+      await fs.mkdir(packageSrcDir, { recursive: true });
+      await fs.writeFile(
+        path.join(packageSrcDir, "pkg.voyd"),
+        "#!no_prelude\npub use src::api::dependency_value\n",
+      );
+      await fs.writeFile(
+        path.join(packageSrcDir, "api.voyd"),
+        "#!no_prelude\npub fn dependency_value() -> i32\n  2\n",
+      );
 
-    const results = [warm, warmNoOp, secondWarmNoOp, fresh, cacheDisabled];
-    const abiFor = (result: Extract<CompileResult, { success: true }>) =>
-      parseExportAbi(new WebAssembly.Module(wasmBufferSource(result.wasm)))
-        .exports;
+      const sdk = createSdk();
+      const cold = expectCompileSuccess(await compile(sdk, source));
+      const warm = expectCompileSuccess(await compile(sdk, editedSource));
+      const warmNoOp = expectCompileSuccess(await compile(sdk, editedSource));
+      const secondWarmNoOp = expectCompileSuccess(
+        await compile(sdk, editedSource),
+      );
+      const fresh = expectCompileSuccess(
+        await compile(createSdk(), editedSource),
+      );
+      const cacheDisabled = expectCompileSuccess(
+        await compile(createSdk({ compilerCache: "none" }), editedSource),
+      );
 
-    expect(cold.wasm.byteLength).toBeGreaterThan(0);
-    results.forEach((result) => {
-      expect(result.wasm.byteLength).toBe(fresh.wasm.byteLength);
-      expect(abiFor(result)).toEqual(abiFor(fresh));
-    });
-    await Promise.all(
-      results.map((result) =>
-        expect(result.run<number>({ entryName: "main" })).resolves.toBe(1),
-      ),
-    );
+      const editedResults = [
+        warm,
+        warmNoOp,
+        secondWarmNoOp,
+        fresh,
+        cacheDisabled,
+      ];
+      const abiFor = (result: Extract<CompileResult, { success: true }>) =>
+        parseExportAbi(new WebAssembly.Module(wasmBufferSource(result.wasm)))
+          .exports;
+
+      editedResults.forEach((result) => {
+        expect(result.wasm.byteLength).toBe(fresh.wasm.byteLength);
+        expect(abiFor(result)).toEqual(abiFor(fresh));
+      });
+      expect(abiFor(cold)).toEqual(abiFor(fresh));
+      await Promise.all(
+        [cold, ...editedResults].map((result) =>
+          expect(result.run<number>({ entryName: "main" })).resolves.toBe(42),
+        ),
+      );
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it("runs typed boundary exports through the existing host and sdk APIs", async () => {
