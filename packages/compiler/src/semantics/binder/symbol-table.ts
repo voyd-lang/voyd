@@ -30,7 +30,11 @@ const symbolUsesTypeNamespace = (kind: SymbolKind): boolean =>
 
 const cloneScopeInfo = (info: ScopeInfo): ScopeInfo => ({ ...info });
 
-const cloneSymbolRecord = (symbol: SymbolRecord): SymbolRecord => ({
+const copySymbolRecord = (symbol: SymbolRecord): SymbolRecord => ({ ...symbol });
+
+const cloneSymbolRecordForOwnershipBoundary = (
+  symbol: SymbolRecord,
+): SymbolRecord => ({
   ...symbol,
   metadata: symbol.metadata
     ? cloneSymbolMetadataValue(symbol.metadata)
@@ -250,7 +254,7 @@ export class SymbolTable {
       throw new Error(`symbol ${id} does not exist`);
     }
 
-    return cloneSymbolRecord(record);
+    return copySymbolRecord(record);
   }
 
   hasSymbol(id: SymbolId): boolean {
@@ -502,7 +506,7 @@ export class SymbolTable {
       nextScope: this.nextScope,
       nextSymbol: this.nextSymbol,
       scopes: this.scopeBuckets.map((bucket) => cloneScopeInfo(bucket.info)),
-      symbols: this.symbolRecords.map(cloneSymbolRecord),
+      symbols: this.symbolRecords.map(cloneSymbolRecordForOwnershipBoundary),
       ...(this.aliasBindings.length > 0
         ? { aliases: this.aliasBindings.map((alias) => ({ ...alias })) }
         : {}),
@@ -527,7 +531,7 @@ export class SymbolTable {
 
     this.symbolRecords.length = 0;
     snap.symbols.forEach((symbol) => {
-      const record = cloneSymbolRecord(symbol);
+      const record = cloneSymbolRecordForOwnershipBoundary(symbol);
       this.symbolRecords[record.id] = record;
 
       const bucket = ensureScopeExists(

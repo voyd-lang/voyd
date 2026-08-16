@@ -48,7 +48,7 @@ describe("SymbolTable", () => {
     expect(table.symbolsNamedInScope("alias", table.rootScope)).toEqual([root]);
   });
 
-  it("isolates nested metadata across writes, reads, snapshots, and restores", () => {
+  it("isolates nested metadata across writes, snapshots, and restores", () => {
     const table = new SymbolTable({ rootOwner: 0 });
     const symbol = table.declare({
       name: "value",
@@ -64,8 +64,6 @@ describe("SymbolTable", () => {
     restored.restore(snapshot);
 
     input.import.names.push("input-mutation");
-    const read = table.getSymbol(symbol).metadata as typeof input;
-    read.import.names.push("read-mutation");
     const snapshotMetadata = snapshot.symbols[symbol]!.metadata as typeof input;
     snapshotMetadata.import.names.push("snapshot-mutation");
 
