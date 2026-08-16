@@ -118,39 +118,13 @@ export const compileBlockExpr = (
     run: () => {
       expr.statements.forEach((stmtId, statementIndex) => {
         statements.push(
-          tryCompileArraySafeWhileStatement({
+          compileBlockStatement({
             block: expr,
             statementIndex,
             ctx,
             fnCtx,
             compileExpr,
-          }) ??
-            tryCompileArrayForStatement({
-              block: expr,
-              statementIndex,
-              ctx,
-              fnCtx,
-              compileExpr,
-              compileStatement: (nestedStmtId) =>
-                compileStatement(nestedStmtId, ctx, fnCtx, compileExpr),
-            }) ??
-            tryCompileRangeForStatement({
-              block: expr,
-              statementIndex,
-              ctx,
-              fnCtx,
-              compileExpr,
-              compileStatement: (nestedStmtId) =>
-                compileStatement(nestedStmtId, ctx, fnCtx, compileExpr),
-            }) ??
-            withExactIteratorForCallTargets({
-              block: expr,
-              statementIndex,
-              ctx,
-              fnCtx,
-              compile: () => compileStatement(stmtId, ctx, fnCtx, compileExpr),
-            }) ??
-            compileStatement(stmtId, ctx, fnCtx, compileExpr),
+          }),
         );
         const lengthBinding = arrayLengthBindingForStatement({
           stmtId,
@@ -249,6 +223,63 @@ export const compileBlockExpr = (
       };
     },
   });
+};
+
+export const compileBlockStatement = ({
+  block,
+  statementIndex,
+  ctx,
+  fnCtx,
+  compileExpr,
+  continuationAwareOnly = false,
+}: {
+  block: HirBlockExpr;
+  statementIndex: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+  continuationAwareOnly?: boolean;
+}): binaryen.ExpressionRef => {
+  const stmtId = block.statements[statementIndex]!;
+  const compileNestedStatement = (nestedStmtId: HirStmtId) =>
+    compileStatement(nestedStmtId, ctx, fnCtx, compileExpr);
+  const rangeLoop = tryCompileRangeForStatement({
+    block,
+    statementIndex,
+    ctx,
+    fnCtx,
+    compileExpr,
+    compileStatement: compileNestedStatement,
+  });
+  if (continuationAwareOnly) {
+    return rangeLoop ?? compileStatement(stmtId, ctx, fnCtx, compileExpr);
+  }
+  return (
+    tryCompileArraySafeWhileStatement({
+      block,
+      statementIndex,
+      ctx,
+      fnCtx,
+      compileExpr,
+    }) ??
+    tryCompileArrayForStatement({
+      block,
+      statementIndex,
+      ctx,
+      fnCtx,
+      compileExpr,
+      compileStatement: compileNestedStatement,
+    }) ??
+    rangeLoop ??
+    withExactIteratorForCallTargets({
+      block,
+      statementIndex,
+      ctx,
+      fnCtx,
+      compile: () => compileStatement(stmtId, ctx, fnCtx, compileExpr),
+    }) ??
+    compileStatement(stmtId, ctx, fnCtx, compileExpr)
+  );
 };
 
 export const compileStatement = (

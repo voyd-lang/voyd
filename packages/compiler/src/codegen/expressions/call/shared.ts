@@ -15,9 +15,9 @@ import {
   loadLocalValue,
   storeLocalValue,
 } from "../../locals.js";
-import { getUnresolvedExprType, wasmTypeFor } from "../../types.js";
-import { resolveTempCaptureTypeId } from "../../effects/temp-capture-types.js";
+import { getUnresolvedExprType } from "../../types.js";
 import { coerceExprToWasmType } from "../../wasm-type-coercions.js";
+import { getOrCreateContinuationTempLocal } from "../../effects/temp-locals.js";
 
 export const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
@@ -59,35 +59,6 @@ const activeSiteInSet = ({
     (acc, cmp) => ctx.mod.i32.or(acc, cmp),
     ctx.mod.i32.const(0),
   );
-};
-
-const getOrCreateTempLocal = ({
-  tempId,
-  ctx,
-  fnCtx,
-}: {
-  tempId: number;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): ReturnType<typeof allocateTempLocal> => {
-  const existing = fnCtx.tempLocals.get(tempId);
-  if (existing) return existing;
-
-  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const typeId =
-    typeof typeInstanceId === "number"
-      ? resolveTempCaptureTypeId({
-          tempId,
-          ctx,
-          typeInstanceId,
-        })
-      : (ctx.effectLowering.tempTypeIds.get(tempId) ??
-        ctx.program.primitives.unknown);
-
-  const wasmType = wasmTypeFor(typeId, ctx);
-  const local = allocateTempLocal(wasmType, fnCtx, typeId, ctx);
-  fnCtx.tempLocals.set(tempId, local);
-  return local;
 };
 
 const storeAndLoadTempValue = ({
@@ -222,7 +193,11 @@ export const compileCallArgExpressionsWithTemps = ({
       return compileValue();
     }
 
-    const tempLocal = getOrCreateTempLocal({ tempId, ctx, fnCtx });
+    const tempLocal = getOrCreateContinuationTempLocal({
+      tempId,
+      ctx,
+      fnCtx,
+    });
     const value = compileValue();
     const compute = storeAndLoadTempValue({
       binding: tempLocal,
@@ -269,7 +244,7 @@ export const compileCallCalleeExpressionWithTemp = ({
     return calleeValue;
   }
 
-  const tempLocal = getOrCreateTempLocal({
+  const tempLocal = getOrCreateContinuationTempLocal({
     tempId: calleeTemp.tempId,
     ctx,
     fnCtx,

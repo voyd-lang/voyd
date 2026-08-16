@@ -1,3 +1,6 @@
+use std::array::Array
+use std::fixed_array::fns::{ new_fixed_array, get, set }
+
 obj RenderState {
   stable: i32,
   changing: i32
@@ -5,6 +8,18 @@ obj RenderState {
 
 fn advance(~state: RenderState) -> void
   state.changing = state.changing + 1
+
+fn raw_get(log: FixedArray<i32>, index: i32) -> i32
+  match(log.get<i32>(index))
+    Some<i32> { value }:
+      value
+    None:
+      -1
+
+fn record(log: FixedArray<i32>, value: i32) -> void
+  let count = raw_get(log, 0)
+  let _ = log.set<i32>(count + 1, value)
+  let _ = log.set<i32>(0, count + 1)
 
 pub fn stable_range_sum() -> i32
   let ~state = RenderState { stable: 3, changing: 0 }
@@ -15,3 +30,167 @@ pub fn stable_range_sum() -> i32
     advance(~state)
     total = total + alias.stable
   total + state.changing
+
+eff RangeResume
+  value(resume, tag: i32, result: i32) -> i32
+
+eff RangeTail
+  value(tail, result: i32) -> i32
+
+pub fn effectful_range_bounds_and_progress() -> i32
+  let ~events = Array<i32>::with_capacity(6)
+  try
+    var total = 0
+    for index in RangeResume::value(1, -1)..RangeResume::value(2, 4):
+      let current = RangeResume::value(3, index)
+      if current == 0:
+        continue
+      total = total * 10 + current
+      if current == 2:
+        break
+    events.len() * 10000000
+      + events.at(0) * 100000
+      + events.at(1) * 10000
+      + events.at(2) * 1000
+      + events.at(3) * 100
+      + events.at(4) * 10
+      + events.at(5)
+      + total
+  RangeResume::value(resume, tag: i32, result: i32):
+    events.push(tag)
+    resume(result)
+
+pub fn effectful_range_work_around_suspension() -> i32
+  let events = new_fixed_array<i32>(7)
+  try
+    var total = 0
+    for index in 0..3:
+      record(events, 1)
+      total = total + 100
+      let value = RangeResume::value(0, index)
+      total = total + value
+      record(events, 2)
+    raw_get(events, 0) * 100000
+      + raw_get(events, 1)
+      + raw_get(events, 2) * 10
+      + raw_get(events, 3) * 100
+      + raw_get(events, 4) * 1000
+      + raw_get(events, 5) * 10000
+      + raw_get(events, 6) * 100000
+      + total
+  RangeResume::value(resume, tag: i32, result: i32):
+    resume(result)
+
+pub fn effectful_range_multiple_suspensions() -> i32
+  let events = new_fixed_array<i32>(4)
+  try
+    var total = 0
+    for index in 0..1:
+      record(events, 1)
+      total = total + 1
+      let first = RangeResume::value(10, index)
+      total = total + first
+      record(events, 2)
+      total = total + 100
+      let second = RangeResume::value(20, index)
+      total = total + second
+      record(events, 3)
+    raw_get(events, 0) * 1000
+      + raw_get(events, 1) * 100
+      + raw_get(events, 2) * 10
+      + raw_get(events, 3)
+      + total
+  RangeResume::value(resume, tag: i32, result: i32):
+    resume(result)
+
+pub fn effectful_range_nested_suspending_statement() -> i32
+  let events = new_fixed_array<i32>(5)
+  try
+    var total = 0
+    for index in 0..1:
+      record(events, 1)
+      total = total + 100
+      if index == 0:
+        record(events, 2)
+        total = total + 10
+        let value = RangeResume::value(30, index)
+        total = total + value + 1
+        record(events, 3)
+      total = total + 1000
+      record(events, 4)
+    raw_get(events, 0) * 10000
+      + raw_get(events, 1) * 1000
+      + raw_get(events, 2) * 100
+      + raw_get(events, 3) * 10
+      + raw_get(events, 4)
+      + total
+  RangeResume::value(resume, tag: i32, result: i32):
+    resume(result)
+
+pub fn effectful_nested_range_control() -> i32
+  try
+    var total = 0
+    for outer in 0..3:
+      for inner in 0..3:
+        let current = RangeResume::value(0, outer * 10 + inner)
+        if inner == 1:
+          continue
+        total = total + current
+        if outer == 2:
+          break
+      if outer == 1:
+        continue
+      total = total + 100
+    total
+  RangeResume::value(resume, tag: i32, result: i32):
+    resume(result)
+
+pub fn effectful_inclusive_max_tail() -> i32
+  try
+    var total = 0
+    for index in 2147483647..=2147483647:
+      total = total + RangeTail::value(index - 2147483646)
+    total
+  RangeTail::value(tail, result: i32):
+    tail(result)
+
+pub fn effectful_handler_inside_loop() -> i32
+  var total = 0
+  for index in -2..=2:
+    try
+      total = total + RangeResume::value(0, index)
+    RangeResume::value(resume, tag: i32, result: i32):
+      resume(result + 1)
+  total
+
+pub fn effectful_range_checked_array_access() -> i32
+  let ~values = Array<i32>::with_capacity(3)
+  values.push(2)
+  values.push(4)
+  values.push(6)
+  try
+    var total = 0
+    for index in 0..values.len():
+      RangeTail::value(0)
+      total = total + values.at(index)
+    total
+  RangeTail::value(tail, result: i32):
+    tail(result)
+
+pub fn effectful_range_checked_array_get() -> i32
+  let ~values = Array<i32>::with_capacity(3)
+  values.push(2)
+  values.push(4)
+  values.push(6)
+  try
+    var total = 0
+    for index in 0..values.len():
+      RangeTail::value(0)
+      match(values.get(index))
+        Some<i32> { value }:
+          total = total + value
+        None:
+          total = total - 100
+    total
+  RangeTail::value(tail, result: i32):
+    tail(result)

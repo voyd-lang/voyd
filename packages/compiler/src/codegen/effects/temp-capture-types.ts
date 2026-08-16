@@ -44,9 +44,7 @@ const tempArgExprIdFor = ({
     return callExpr.args[argIndex]?.expr;
   }
   if (callExpr.exprKind === "method-call") {
-    return argIndex === 0
-      ? callExpr.target
-      : callExpr.args[argIndex - 1]?.expr;
+    return argIndex === 0 ? callExpr.target : callExpr.args[argIndex - 1]?.expr;
   }
   if (callExpr.exprKind === "object-literal") {
     return callExpr.entries[argIndex]?.value;
@@ -101,17 +99,19 @@ export const resolveTempCaptureTypeId = ({
   }
   const origins = tempOriginsFor(ctx);
   const origin = origins.get(tempId);
-  if (!origin) {
+  const fallbackTypeId =
+    origin?.fallbackTypeId ?? ctx.effectLowering.tempTypeIds.get(tempId);
+  if (typeof fallbackTypeId !== "number") {
     throw new Error(`missing continuation temp origin ${tempId}`);
   }
   const typeId = (() => {
-    if (typeof origin.argExprId === "number") {
+    if (typeof origin?.argExprId === "number") {
       return getRequiredExprType(origin.argExprId, ctx, typeInstanceId);
     }
     const substitution = buildInstanceSubstitution({ ctx, typeInstanceId });
     return substitution
-      ? ctx.program.types.substitute(origin.fallbackTypeId, substitution)
-      : origin.fallbackTypeId;
+      ? ctx.program.types.substitute(fallbackTypeId, substitution)
+      : fallbackTypeId;
   })();
   byKey.set(key, typeId);
   return typeId;

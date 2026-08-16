@@ -17,10 +17,13 @@ import type {
 } from "../../context.js";
 import { allocateTempLocal } from "../../locals.js";
 import { getRequiredExprType, wasmTypeFor } from "../../types.js";
-import { compileCallExpr, compileMethodCallExpr } from "../../expressions/call/index.js";
+import {
+  compileCallExpr,
+  compileMethodCallExpr,
+} from "../../expressions/call/index.js";
 import {
   compileBlockExpr,
-  compileStatement,
+  compileBlockStatement,
   withBlockScope,
 } from "../../expressions/blocks.js";
 import {
@@ -48,6 +51,10 @@ import type { GroupContinuationCfg } from "../continuation-cfg.js";
 import { unboxOutcomeValue } from "../outcome-values.js";
 import { coerceToBinaryenType } from "../../expressions/utils.js";
 import { coerceValueToType } from "../../structural.js";
+import {
+  activeContinuationSiteInSet,
+  continuationStatementShouldRun,
+} from "./statement-routing.js";
 
 const coerceDirectContinuationResult = ({
   value,
@@ -66,7 +73,8 @@ const coerceDirectContinuationResult = ({
 }): binaryen.ExpressionRef => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const targetTypeId =
-    expectedResultTypeId ?? getRequiredExprType(targetExprId, ctx, typeInstanceId);
+    expectedResultTypeId ??
+    getRequiredExprType(targetExprId, ctx, typeInstanceId);
   const targetType = wasmTypeFor(targetTypeId, ctx);
   const actualTypeId = getRequiredExprType(valueExprId, ctx, typeInstanceId);
   const valueType = binaryen.getExpressionType(value);
@@ -85,25 +93,6 @@ const coerceDirectContinuationResult = ({
 
 const hasGroupSites = (exprId: HirExprId, cfg: GroupContinuationCfg): boolean =>
   (cfg.sitesByExpr.get(exprId)?.size ?? 0) > 0;
-
-const activeSiteInSet = ({
-  sites,
-  activeSiteOrder,
-  ctx,
-}: {
-  sites: ReadonlySet<number>;
-  activeSiteOrder: () => binaryen.ExpressionRef;
-  ctx: CodegenContext;
-}): binaryen.ExpressionRef => {
-  if (sites.size === 0) return ctx.mod.i32.const(0);
-  const comparisons = [...sites].map((siteOrder) =>
-    ctx.mod.i32.eq(activeSiteOrder(), ctx.mod.i32.const(siteOrder))
-  );
-  return comparisons.reduce(
-    (acc, cmp) => ctx.mod.i32.or(acc, cmp),
-    ctx.mod.i32.const(0)
-  );
-};
 
 const compileGroupedContinuationBlockExpr = ({
   expr,
@@ -133,7 +122,7 @@ const compileGroupedContinuationBlockExpr = ({
       fnCtx,
       compileExpr,
       tailPosition,
-      expectedResultTypeId
+      expectedResultTypeId,
     );
   }
 
@@ -141,7 +130,8 @@ const compileGroupedContinuationBlockExpr = ({
   const resultTypeId =
     expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
   const resultType = wasmTypeFor(resultTypeId, ctx);
-  const started = () => ctx.mod.local.get(startedLocal.index, startedLocal.type);
+  const started = () =>
+    ctx.mod.local.get(startedLocal.index, startedLocal.type);
   return withBlockScope({
     expr,
     ctx,
@@ -149,18 +139,27 @@ const compileGroupedContinuationBlockExpr = ({
     run: () => {
       const statements: binaryen.ExpressionRef[] = [];
 
-      expr.statements.forEach((stmtId) => {
+      expr.statements.forEach((stmtId, statementIndex) => {
         const sites = cfg.sitesByStmt.get(stmtId) ?? new Set<number>();
-        const shouldRun =
-          sites.size === 0
-            ? started()
-            : ctx.mod.i32.or(started(), activeSiteInSet({ sites, activeSiteOrder, ctx }));
+        const shouldRun = continuationStatementShouldRun({
+          sites,
+          executionStarted: started,
+          activeSiteOrder,
+          ctx,
+        });
         statements.push(
           ctx.mod.if(
             shouldRun,
-            compileStatement(stmtId, ctx, fnCtx, compileExpr),
-            ctx.mod.nop()
-          )
+            compileBlockStatement({
+              block: expr,
+              statementIndex,
+              ctx,
+              fnCtx,
+              compileExpr,
+              continuationAwareOnly: true,
+            }),
+            ctx.mod.nop(),
+          ),
         );
       });
 
@@ -245,11 +244,12 @@ const compileGroupedContinuationIfExpr = ({
       fnCtx,
       compileExpr,
       tailPosition,
-      expectedResultTypeId
+      expectedResultTypeId,
     );
   }
 
-  const started = () => ctx.mod.local.get(startedLocal.index, startedLocal.type);
+  const started = () =>
+    ctx.mod.local.get(startedLocal.index, startedLocal.type);
   const beforeActive = () => ctx.mod.i32.eqz(started());
 
   let fallback = compileIfExpr(
@@ -258,13 +258,14 @@ const compileGroupedContinuationIfExpr = ({
     fnCtx,
     compileExpr,
     tailPosition,
-    expectedResultTypeId
+    expectedResultTypeId,
   );
 
   if (typeof expr.defaultBranch === "number") {
-    const defaultSites = cfg.sitesByExpr.get(expr.defaultBranch) ?? new Set<number>();
+    const defaultSites =
+      cfg.sitesByExpr.get(expr.defaultBranch) ?? new Set<number>();
     if (defaultSites.size > 0) {
-      const activeInDefault = activeSiteInSet({
+      const activeInDefault = activeContinuationSiteInSet({
         sites: defaultSites,
         activeSiteOrder,
         ctx,
@@ -299,12 +300,12 @@ const compileGroupedContinuationIfExpr = ({
     if (valueSites.size === 0) continue;
     const conditionSites =
       cfg.sitesByExpr.get(branch.condition) ?? new Set<number>();
-    const activeInValue = activeSiteInSet({
+    const activeInValue = activeContinuationSiteInSet({
       sites: valueSites,
       activeSiteOrder,
       ctx,
     });
-    const activeInCondition = activeSiteInSet({
+    const activeInCondition = activeContinuationSiteInSet({
       sites: conditionSites,
       activeSiteOrder,
       ctx,
@@ -318,7 +319,7 @@ const compileGroupedContinuationIfExpr = ({
     });
     const cond = ctx.mod.i32.and(
       beforeActive(),
-      ctx.mod.i32.and(activeInValue, ctx.mod.i32.eqz(activeInCondition))
+      ctx.mod.i32.and(activeInValue, ctx.mod.i32.eqz(activeInCondition)),
     );
     const typedThen = coerceDirectContinuationResult({
       value: branchExpr.expr,
@@ -370,11 +371,12 @@ const compileGroupedContinuationMatchExpr = ({
       fnCtx,
       compileExpr,
       tailPosition,
-      expectedResultTypeId
+      expectedResultTypeId,
     );
   }
 
-  const started = () => ctx.mod.local.get(startedLocal.index, startedLocal.type);
+  const started = () =>
+    ctx.mod.local.get(startedLocal.index, startedLocal.type);
   const beforeActive = () => ctx.mod.i32.eqz(started());
 
   let fallback = compileMatchExpr(
@@ -383,12 +385,12 @@ const compileGroupedContinuationMatchExpr = ({
     fnCtx,
     compileExpr,
     tailPosition,
-    expectedResultTypeId
+    expectedResultTypeId,
   );
 
   const discriminantSites =
     cfg.sitesByExpr.get(expr.discriminant) ?? new Set<number>();
-  const activeInDiscriminant = activeSiteInSet({
+  const activeInDiscriminant = activeContinuationSiteInSet({
     sites: discriminantSites,
     activeSiteOrder,
     ctx,
@@ -400,14 +402,14 @@ const compileGroupedContinuationMatchExpr = ({
     if (valueSites.size === 0) continue;
     const guardSites =
       typeof arm.guard === "number"
-        ? cfg.sitesByExpr.get(arm.guard) ?? new Set<number>()
+        ? (cfg.sitesByExpr.get(arm.guard) ?? new Set<number>())
         : new Set<number>();
-    const activeInValue = activeSiteInSet({
+    const activeInValue = activeContinuationSiteInSet({
       sites: valueSites,
       activeSiteOrder,
       ctx,
     });
-    const activeInGuard = activeSiteInSet({
+    const activeInGuard = activeContinuationSiteInSet({
       sites: guardSites,
       activeSiteOrder,
       ctx,
@@ -427,9 +429,9 @@ const compileGroupedContinuationMatchExpr = ({
         activeInValue,
         ctx.mod.i32.and(
           ctx.mod.i32.eqz(activeInGuard),
-          ctx.mod.i32.eqz(activeInDiscriminant)
-        )
-      )
+          ctx.mod.i32.eqz(activeInDiscriminant),
+        ),
+      ),
     );
     const typedThen = coerceDirectContinuationResult({
       value: armExpr.expr,
@@ -477,17 +479,26 @@ const compileGroupedContinuationWhileExpr = ({
     return compileWhileExpr(expr, ctx, fnCtx, compileExpr);
   }
 
-  const started = () => ctx.mod.local.get(startedLocal.index, startedLocal.type);
+  const started = () =>
+    ctx.mod.local.get(startedLocal.index, startedLocal.type);
   const beforeActive = () => ctx.mod.i32.eqz(started());
   const skipFlag = allocateTempLocal(binaryen.i32, fnCtx);
   const shouldSkipOnce = ctx.mod.i32.and(
     beforeActive(),
     ctx.mod.i32.and(
-      activeSiteInSet({ sites: bodySites, activeSiteOrder, ctx }),
+      activeContinuationSiteInSet({
+        sites: bodySites,
+        activeSiteOrder,
+        ctx,
+      }),
       ctx.mod.i32.eqz(
-        activeSiteInSet({ sites: conditionSites, activeSiteOrder, ctx })
-      )
-    )
+        activeContinuationSiteInSet({
+          sites: conditionSites,
+          activeSiteOrder,
+          ctx,
+        }),
+      ),
+    ),
   );
 
   const { loopLabel, breakLabel } = allocateLoopLabels({
@@ -505,13 +516,13 @@ const compileGroupedContinuationWhileExpr = ({
   const conditionCheck = ctx.mod.if(
     ctx.mod.i32.eqz(ctx.mod.local.get(skipFlag.index, binaryen.i32)),
     ctx.mod.if(ctx.mod.i32.eqz(conditionExpr), ctx.mod.br(breakLabel)),
-    ctx.mod.nop()
+    ctx.mod.nop(),
   );
 
   const body = withLoopScope(
     fnCtx,
     { breakLabel, continueLabel: loopLabel },
-    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr
+    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr,
   );
   const loopBody = ctx.mod.block(
     null,
@@ -521,14 +532,14 @@ const compileGroupedContinuationWhileExpr = ({
       body,
       ctx.mod.br(loopLabel),
     ],
-    binaryen.none
+    binaryen.none,
   );
 
   return {
     expr: ctx.mod.block(
       breakLabel,
       [initSkipFlag, ctx.mod.loop(loopLabel, loopBody)],
-      binaryen.none
+      binaryen.none,
     ),
     usedReturnCall: false,
   };
@@ -567,12 +578,17 @@ export const createGroupedContinuationExpressionCompiler = ({
         throw new Error("missing site metadata for continuation target");
       }
       const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-      const resumeTypeId = getRequiredExprType(site.exprId, ctx, typeInstanceId);
+      const resumeTypeId = getRequiredExprType(
+        site.exprId,
+        ctx,
+        typeInstanceId,
+      );
       const valueType = wasmTypeFor(resumeTypeId, ctx);
-      const started = () => ctx.mod.local.get(startedLocal.index, startedLocal.type);
+      const started = () =>
+        ctx.mod.local.get(startedLocal.index, startedLocal.type);
       const cond = ctx.mod.i32.and(
         ctx.mod.i32.eqz(started()),
-        ctx.mod.i32.eq(activeSiteOrder(), ctx.mod.i32.const(siteOrder))
+        ctx.mod.i32.eq(activeSiteOrder(), ctx.mod.i32.const(siteOrder)),
       );
       const normal =
         expr.exprKind === "call"
@@ -585,9 +601,12 @@ export const createGroupedContinuationExpressionCompiler = ({
               ctx,
               fnCtx,
               compileExpr,
-              { tailPosition, expectedResultTypeId }
+              { tailPosition, expectedResultTypeId },
             );
-      const resumeSet = ctx.mod.local.set(startedLocal.index, ctx.mod.i32.const(1));
+      const resumeSet = ctx.mod.local.set(
+        startedLocal.index,
+        ctx.mod.i32.const(1),
+      );
       const resumeBox = resumeLocal
         ? ctx.mod.local.get(resumeLocal.index, resumeLocal.type)
         : ctx.mod.ref.null(binaryen.eqref);
@@ -600,12 +619,25 @@ export const createGroupedContinuationExpressionCompiler = ({
               typeId: resumeTypeId,
               ctx,
             });
-      const resumedExpr = ctx.mod.block(null, [resumeSet, resumedValue], valueType);
+      const resumedExpr = ctx.mod.block(
+        null,
+        [resumeSet, resumedValue],
+        valueType,
+      );
       const exprResultTypeId =
-        expectedResultTypeId ?? getRequiredExprType(exprId, ctx, typeInstanceId);
+        expectedResultTypeId ??
+        getRequiredExprType(exprId, ctx, typeInstanceId);
       const exprResultType = wasmTypeFor(exprResultTypeId, ctx);
-      const typedResumed = coerceToBinaryenType(ctx, resumedExpr, exprResultType);
-      const typedNormal = coerceToBinaryenType(ctx, normal.expr, exprResultType);
+      const typedResumed = coerceToBinaryenType(
+        ctx,
+        resumedExpr,
+        exprResultType,
+      );
+      const typedNormal = coerceToBinaryenType(
+        ctx,
+        normal.expr,
+        exprResultType,
+      );
       return {
         expr: ctx.mod.if(cond, typedResumed, typedNormal),
         usedReturnCall: normal.usedReturnCall,
@@ -691,7 +723,7 @@ export const createGroupedContinuationExpressionCompiler = ({
           fnCtx,
           compileExpr,
           tailPosition,
-          expectedResultTypeId
+          expectedResultTypeId,
         );
       case "cond":
       case "if":
@@ -701,7 +733,7 @@ export const createGroupedContinuationExpressionCompiler = ({
           fnCtx,
           compileExpr,
           tailPosition,
-          expectedResultTypeId
+          expectedResultTypeId,
         );
       case "match":
         return compileMatchExpr(
@@ -710,7 +742,7 @@ export const createGroupedContinuationExpressionCompiler = ({
           fnCtx,
           compileExpr,
           tailPosition,
-          expectedResultTypeId
+          expectedResultTypeId,
         );
       case "while":
         return compileWhileExpr(expr, ctx, fnCtx, compileExpr);

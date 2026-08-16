@@ -199,6 +199,7 @@ const codegenProgramWithModule = ({
       callArgTemps: new Map(),
       tempTypeIds: new Map(),
       defaultParamTemps: new Map(),
+      generatedStatesByStatement: new Map(),
     },
     outcomeValueTypes,
     optimization,

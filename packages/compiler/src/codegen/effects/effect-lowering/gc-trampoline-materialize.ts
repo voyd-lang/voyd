@@ -210,5 +210,6 @@ export const materializeGcTrampolineEffectLowering = ({
     callArgTemps: eir.callArgTemps,
     tempTypeIds: eir.tempTypeIds,
     defaultParamTemps: eir.defaultParamTemps,
+    generatedStatesByStatement: eir.generatedStatesByStatement,
   };
 };
