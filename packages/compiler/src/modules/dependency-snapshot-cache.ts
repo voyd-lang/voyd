@@ -1,15 +1,6 @@
-import {
-  createEffectInterner,
-  type EffectInterner,
-  type EffectInternerSnapshot,
-} from "../semantics/effects/effect-table.js";
+import type { EffectInterner } from "../semantics/effects/effect-table.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
-import {
-  createTypeArena,
-  type TypeArenaSnapshot,
-} from "../semantics/typing/type-arena.js";
 import { incrementCompilerPerfCounter } from "../perf.js";
-import { cloneSemanticsMapForTypingState } from "./semantic-snapshot.js";
 import type {
   ModuleDependency,
   ModuleGraph,
@@ -28,11 +19,7 @@ export type CompilerDependencySnapshotCache = {
 
 type CompilerDependencySnapshotEntry = {
   key: string;
-  moduleFingerprints: ReadonlyMap<string, string>;
-  moduleIds: readonly string[];
-  arena: TypeArenaSnapshot;
-  effectInterner: EffectInternerSnapshot;
-  semantics: ReadonlyMap<string, SemanticsPipelineResult>;
+  snapshot: ReusableDependencySemanticsSnapshot;
 };
 
 export type PreparedDependencySnapshotReuse = {
@@ -87,16 +74,10 @@ export const prepareDependencySnapshotReuse = ({
     };
   }
 
-  const arena = createTypeArena(cached.arena);
-  const effectInterner = createEffectInterner(cached.effectInterner);
-  const previousSemantics = cloneSemanticsMapForTypingState({
-    semantics: cached.semantics,
-    arena,
-    effectInterner,
-  });
+  const restored = cached.snapshot.restore();
 
   incrementCompilerPerfCounter("compiler.dependency_snapshot.hit");
-  cached.moduleIds.forEach((moduleId) =>
+  cached.snapshot.moduleIds.forEach((moduleId) =>
     incrementCompilerPerfCounter(
       `compiler.dependency_snapshot.reuse.${moduleNamespaceForId(moduleId)}.count`,
     ),
@@ -106,8 +87,8 @@ export const prepareDependencySnapshotReuse = ({
     cache,
     key,
     moduleFingerprints,
-    previousSemantics,
-    typingState: { arena, effectInterner },
+    previousSemantics: restored.semantics,
+    typingState: restored.typingState,
     hit: true,
   };
 };
@@ -140,11 +121,7 @@ export const commitDependencySnapshot = ({
 
   prepared.cache.dependency = {
     key: prepared.key,
-    moduleFingerprints: prepared.moduleFingerprints,
-    moduleIds: dependencySnapshot.moduleIds,
-    arena: dependencySnapshot.arena,
-    effectInterner: dependencySnapshot.effectInterner,
-    semantics: dependencySnapshot.semantics,
+    snapshot: dependencySnapshot,
   };
   incrementCompilerPerfCounter("compiler.dependency_snapshot.write");
 };

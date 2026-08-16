@@ -597,7 +597,7 @@ pub fn main() -> i32
     );
   });
 
-  it("emits the same optimized wasm for fresh and dependency snapshot app edits", async () => {
+  it("keeps warm, fresh, and cache-disabled runtime and ABI results equal", async () => {
     const sdk = createSdk();
     const entryPath = path.join(
       repoRoot,
@@ -609,10 +609,16 @@ pub fn main() -> i32
     const source = await fs.readFile(entryPath, "utf8");
     const editedSource = `${source}\nfn dependency_snapshot_app_edit_marker() -> i32\n  1\n`;
 
-    expectCompileSuccess(
+    const cold = expectCompileSuccess(
       await sdk.compile({ entryPath, source, optimize: true }),
     );
     const warm = expectCompileSuccess(
+      await sdk.compile({ entryPath, source: editedSource, optimize: true }),
+    );
+    const warmNoOp = expectCompileSuccess(
+      await sdk.compile({ entryPath, source: editedSource, optimize: true }),
+    );
+    const secondWarmNoOp = expectCompileSuccess(
       await sdk.compile({ entryPath, source: editedSource, optimize: true }),
     );
     const fresh = expectCompileSuccess(
@@ -622,10 +628,33 @@ pub fn main() -> i32
         optimize: true,
       }),
     );
+    const cacheDisabledSdk = createSdk({ compilerCache: "none" });
+    expectCompileSuccess(
+      await cacheDisabledSdk.compile({ entryPath, source, optimize: true }),
+    );
+    const cacheDisabled = expectCompileSuccess(
+      await cacheDisabledSdk.compile({
+        entryPath,
+        source: editedSource,
+        optimize: true,
+      }),
+    );
 
-    expect(warm.wasm.byteLength).toBe(fresh.wasm.byteLength);
-    await expect(warm.run<number>({ entryName: "main" })).resolves.toBe(1);
-    await expect(fresh.run<number>({ entryName: "main" })).resolves.toBe(1);
+    const results = [warm, warmNoOp, secondWarmNoOp, fresh, cacheDisabled];
+    const abiFor = (result: Extract<CompileResult, { success: true }>) =>
+      parseExportAbi(new WebAssembly.Module(wasmBufferSource(result.wasm)))
+        .exports;
+
+    expect(cold.wasm.byteLength).toBeGreaterThan(0);
+    results.forEach((result) => {
+      expect(result.wasm.byteLength).toBe(fresh.wasm.byteLength);
+      expect(abiFor(result)).toEqual(abiFor(fresh));
+    });
+    await Promise.all(
+      results.map((result) =>
+        expect(result.run<number>({ entryName: "main" })).resolves.toBe(1),
+      ),
+    );
   });
 
   it("runs typed boundary exports through the existing host and sdk APIs", async () => {

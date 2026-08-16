@@ -244,9 +244,11 @@ Added compiler-owned dependency semantic snapshots for repeated
 
 Snapshot safety:
 
-- The snapshot freezes a cloned dependency semantics map at the pre-`src`
-  boundary. This avoids source-time generic/type mutations leaking back into the
-  cached std/pkg state.
+- The snapshot retains an opaque canonical dependency graph at the pre-`src`
+  boundary. The only public operation restores a fresh mutable working graph,
+  so source-time generic/type mutations cannot acquire or modify cached
+  std/pkg state. The complete ownership inventory is documented in
+  [Dependency snapshot ownership](architecture/dependency-snapshot-ownership.md).
 - `TypeArena` is cloneable through an internal snapshot of descriptors,
   descriptor cache canonical ids, schemes, recursive unfold cache, and ID
   counters. Restored arenas preserve the same canonical type ids as the

@@ -329,11 +329,26 @@ export class FunctionStore {
     );
   }
 
-  clone(): FunctionStore {
+  clone(options?: {
+    resolveFunction?: (symbol: SymbolId) => HirFunction | undefined;
+    cloneSignature?: (
+      symbol: SymbolId,
+      signature: FunctionSignature,
+    ) => FunctionSignature;
+  }): FunctionStore {
     const copy = new FunctionStore();
-    this.#bySymbol.forEach((fn, symbol) => copy.#bySymbol.set(symbol, fn));
+    this.#bySymbol.forEach((fn, symbol) => {
+      const resolved = options?.resolveFunction
+        ? (options.resolveFunction(symbol) ?? cloneTypingData(fn))
+        : fn;
+      copy.#bySymbol.set(symbol, resolved);
+    });
     this.#signatures.forEach((signature, symbol) =>
-      copy.#signatures.set(symbol, cloneFunctionSignature(signature)),
+      copy.#signatures.set(
+        symbol,
+        options?.cloneSignature?.(symbol, signature) ??
+          cloneFunctionSignature(signature),
+      ),
     );
     this.#instances.forEach((type, key) => copy.#instances.set(key, type));
     this.#instantiationInfo.forEach((info, symbolRefKey) =>
@@ -471,17 +486,25 @@ export class ObjectStore {
     return this.#resolving.has(symbol);
   }
 
-  clone(): ObjectStore {
+  clone(options?: {
+    resolveDecl?: (symbol: SymbolId) => HirObjectDecl | undefined;
+    cloneTraitImpl?: (implementation: TraitImplInstance) => TraitImplInstance;
+  }): ObjectStore {
     const copy = new ObjectStore();
     copy.#base = { ...this.#base };
     this.#templates.forEach((template, symbol) =>
       copy.#templates.set(symbol, cloneObjectTemplate(template)),
     );
     this.#instances.forEach((info, key) =>
-      copy.addInstance(key, cloneObjectTypeInfo(info)),
+      copy.addInstance(key, cloneObjectTypeInfo(info, options?.cloneTraitImpl)),
     );
     this.#byName.forEach((symbol, name) => copy.#byName.set(name, symbol));
-    this.#decls.forEach((decl, symbol) => copy.#decls.set(symbol, decl));
+    this.#decls.forEach((decl, symbol) => {
+      const resolved = options?.resolveDecl
+        ? (options.resolveDecl(symbol) ?? cloneTypingData(decl))
+        : decl;
+      copy.#decls.set(symbol, resolved);
+    });
     return copy;
   }
 }
@@ -547,9 +570,16 @@ export class TraitStore {
     return this.#implTemplatesByTrait.get(symbol) ?? [];
   }
 
-  clone(): TraitStore {
+  clone(options?: {
+    resolveDecl?: (symbol: SymbolId) => HirTraitDecl | undefined;
+  }): TraitStore {
     const copy = new TraitStore();
-    this.#decls.forEach((decl, symbol) => copy.#decls.set(symbol, decl));
+    this.#decls.forEach((decl, symbol) => {
+      const resolved = options?.resolveDecl
+        ? (options.resolveDecl(symbol) ?? cloneTypingData(decl))
+        : decl;
+      copy.#decls.set(symbol, resolved);
+    });
     this.#byName.forEach((symbol, name) => copy.#byName.set(name, symbol));
     this.#implTemplates.forEach((template) =>
       copy.registerImplTemplate(cloneTraitImplTemplate(template)),
@@ -671,15 +701,24 @@ export class TypeAliasStore {
     return this.#instances.entries();
   }
 
-  clone(): TypeAliasStore {
+  clone(options?: {
+    resolveTemplate?: (symbol: SymbolId) => TypeAliasTemplate | undefined;
+  }): TypeAliasStore {
     const copy = new TypeAliasStore();
-    this.#templates.forEach((template, symbol) =>
+    this.#templates.forEach((template, symbol) => {
+      const resolved = options?.resolveTemplate?.(symbol);
       copy.#templates.set(symbol, {
         symbol: template.symbol,
-        params: template.params.map((param) => ({ ...param })),
-        target: template.target,
-      }),
-    );
+        params: template.params.map((param) => ({
+          ...param,
+          constraint:
+            resolved?.params.find(
+              (resolvedParam) => resolvedParam.symbol === param.symbol,
+            )?.constraint ?? cloneTypingData(param.constraint),
+        })),
+        target: resolved?.target ?? cloneTypingData(template.target),
+      });
+    });
     this.#instances.forEach((type, key) => copy.#instances.set(key, type));
     this.#instanceSymbols.forEach((symbols, type) =>
       copy.#instanceSymbols.set(type, new Set(symbols)),
@@ -855,10 +894,10 @@ const cloneFunctionSignature = (
   typeId: signature.typeId,
   parameters: signature.parameters.map((param) => ({ ...param })),
   returnType: signature.returnType,
-  resultIdentity: signature.resultIdentity,
-  stagedAccess: signature.stagedAccess,
-  builderAccess: signature.builderAccess,
-  declaredReturnType: signature.declaredReturnType,
+  resultIdentity: cloneTypingData(signature.resultIdentity),
+  stagedAccess: cloneTypingData(signature.stagedAccess),
+  builderAccess: cloneTypingData(signature.builderAccess),
+  declaredReturnType: cloneTypingData(signature.declaredReturnType),
   hasExplicitReturn: signature.hasExplicitReturn,
   annotatedReturn: signature.annotatedReturn,
   effectRow: signature.effectRow,
@@ -883,7 +922,12 @@ const cloneObjectField = (field: ObjectField): ObjectField => ({
   documentation: field.documentation,
 });
 
-const cloneObjectTypeInfo = (info: ObjectTypeInfo): ObjectTypeInfo => ({
+const cloneObjectTypeInfo = (
+  info: ObjectTypeInfo,
+  cloneTraitImpl: (
+    implementation: TraitImplInstance,
+  ) => TraitImplInstance = cloneTraitImplInstance,
+): ObjectTypeInfo => ({
   objectKind: info.objectKind,
   nominal: info.nominal,
   structural: info.structural,
@@ -891,7 +935,7 @@ const cloneObjectTypeInfo = (info: ObjectTypeInfo): ObjectTypeInfo => ({
   fields: info.fields.map(cloneObjectField),
   visibility: info.visibility ? { ...info.visibility } : undefined,
   baseNominal: info.baseNominal,
-  traitImpls: info.traitImpls?.map(cloneTraitImplInstance),
+  traitImpls: info.traitImpls?.map(cloneTraitImpl),
 });
 
 const cloneObjectTemplate = (template: ObjectTemplate): ObjectTemplate => ({
@@ -928,3 +972,23 @@ const cloneTraitImplInstance = (
   staticMethods: new Map(impl.staticMethods),
   implSymbol: impl.implSymbol,
 });
+
+const cloneTypingData = <T>(value: T): T => {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(cloneTypingData) as T;
+  }
+  if (value instanceof Map) {
+    return new Map(
+      Array.from(value, ([key, entry]) => [key, cloneTypingData(entry)]),
+    ) as T;
+  }
+  if (value instanceof Set) {
+    return new Set(Array.from(value, cloneTypingData)) as T;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, cloneTypingData(entry)]),
+  ) as T;
+};
