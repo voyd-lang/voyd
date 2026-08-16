@@ -46,11 +46,20 @@ import { compilePatternInitializationFromValue } from "../patterns.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import {
   isStdIntrinsicNominalType,
-  isStdIntrinsicNominalTypeInstantiation,
   STD_INTRINSIC_TYPE,
 } from "../../compiler-contracts/types.js";
 import { incrementCompilerPerfCounter } from "../../perf.js";
 import type { ArrayLoopProofFallbackReason } from "../../perf-counter-schema.js";
+import {
+  analyzeGeneratedRangeLoop,
+  generatedRangeLoopStateMatchesShape,
+  generatedStateField,
+  generatedStateResumeRegion,
+  type GeneratedRangeLoopShape,
+  type GeneratedRangeLoopState,
+} from "../generated-state.js";
+import { getOrCreateContinuationTempLocal } from "../effects/temp-locals.js";
+import { continuationStatementShouldRun } from "../effects/continuation-compiler/statement-routing.js";
 
 type ArrayMethodInfo = {
   targetTypeId: TypeId;
@@ -65,14 +74,7 @@ type SafeArrayWhileLoopAnalysis = {
   cachedLengthExpr?: HirExprId;
 };
 
-type RangeForLoopAnalysis = {
-  whileExpr: HirWhileExpr;
-  startExpr: HirExprId;
-  endExpr: HirExprId;
-  includeEnd: boolean;
-  indexSymbol: SymbolId;
-  userBodyExpr: HirExprId;
-  userStatements: readonly number[];
+type RangeForLoopAnalysis = GeneratedRangeLoopShape & {
   safeArrayScope?: SafeArrayLoopScope;
 };
 
@@ -1101,13 +1103,6 @@ export const tryCompileArraySafeWhileStatement = ({
   });
 };
 
-const patternTypeName = (pattern: HirPattern): string | undefined => {
-  if (pattern.kind !== "type" || pattern.type.typeKind !== "named") {
-    return undefined;
-  }
-  return pattern.type.path.at(-1);
-};
-
 const isStdIntrinsicTypePattern = ({
   pattern,
   intrinsicType,
@@ -1479,32 +1474,6 @@ const intrinsicArrayForLoopCandidate = ({
   return isStdArrayType({ typeId, ctx });
 };
 
-const intrinsicRangeForLoopCandidate = ({
-  block,
-  statementIndex,
-  ctx,
-  fnCtx,
-}: {
-  block: HirBlockExpr;
-  statementIndex: number;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): boolean => {
-  const iterCall = forLoopIteratorCall({ block, statementIndex, ctx });
-  if (!iterCall) return false;
-  const typeId = getRequiredExprType(
-    iterCall.target,
-    ctx,
-    fnCtx.typeInstanceId ?? fnCtx.instanceId,
-  );
-  return isStdIntrinsicNominalTypeInstantiation({
-    program: ctx.program,
-    typeId,
-    intrinsicType: STD_INTRINSIC_TYPE.range,
-    typeArgs: [ctx.program.primitives.i32],
-  });
-};
-
 const compileArrayForLoop = ({
   analysis,
   ctx,
@@ -1712,118 +1681,6 @@ export const tryCompileArrayForStatement = ({
     : undefined;
 };
 
-const somePayloadExpr = ({
-  exprId,
-  ctx,
-}: {
-  exprId: HirExprId;
-  ctx: CodegenContext;
-}): HirExprId | undefined => {
-  const expr = ctx.module.hir.expressions.get(exprId);
-  if (
-    !expr ||
-    expr.exprKind !== "call" ||
-    !isCallNamed({ expr, name: "some", ctx, allowSourceName: true }) ||
-    expr.args.length !== 1
-  ) {
-    return undefined;
-  }
-  return expr.args[0]!.expr;
-};
-
-const parseRangeForIterator = ({
-  initializer,
-  ctx,
-  fnCtx,
-}: {
-  initializer: HirExprId;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}):
-  | {
-      startExpr: HirExprId;
-      endExpr: HirExprId;
-      includeEnd: boolean;
-      safeArray?: { arraySymbol: SymbolId };
-    }
-  | undefined => {
-  const iterCall = ctx.module.hir.expressions.get(initializer);
-  if (
-    iterCall?.exprKind !== "method-call" ||
-    iterCall.method !== "iter" ||
-    iterCall.args.length !== 0
-  ) {
-    return undefined;
-  }
-  const range = ctx.module.hir.expressions.get(iterCall.target);
-  if (range?.exprKind !== "object-literal" || range.literalKind !== "nominal") {
-    return undefined;
-  }
-  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const rangeTypeId = getRequiredExprType(iterCall.target, ctx, typeInstanceId);
-  if (
-    !isStdIntrinsicNominalTypeInstantiation({
-      program: ctx.program,
-      typeId: rangeTypeId,
-      intrinsicType: STD_INTRINSIC_TYPE.range,
-      typeArgs: [ctx.program.primitives.i32],
-    })
-  ) {
-    return undefined;
-  }
-  const start = range.entries.find(
-    (entry) => entry.kind === "field" && entry.name === "start",
-  );
-  const end = range.entries.find(
-    (entry) => entry.kind === "field" && entry.name === "end",
-  );
-  const includeEnd = range.entries.find(
-    (entry) => entry.kind === "field" && entry.name === "include_end",
-  );
-  if (!start || start.kind !== "field" || !end || end.kind !== "field") {
-    return undefined;
-  }
-  if (!includeEnd || includeEnd.kind !== "field") {
-    return undefined;
-  }
-  const startValue = somePayloadExpr({ exprId: start.value, ctx });
-  const endValue = somePayloadExpr({ exprId: end.value, ctx });
-  const isInclusive = isLiteralBoolean({
-    exprId: includeEnd.value,
-    value: "true",
-    ctx,
-  });
-  const isHalfOpen = isLiteralBoolean({
-    exprId: includeEnd.value,
-    value: "false",
-    ctx,
-  });
-  if (
-    typeof startValue !== "number" ||
-    typeof endValue !== "number" ||
-    (!isInclusive && !isHalfOpen)
-  ) {
-    return undefined;
-  }
-  const length = parseArrayLenExpr({
-    exprId: endValue,
-    ctx,
-    fnCtx,
-  });
-  const safeArray =
-    isHalfOpen &&
-    isLiteralI32({ exprId: startValue, value: "0", ctx }) &&
-    length
-      ? { arraySymbol: length.arraySymbol }
-      : undefined;
-  return {
-    startExpr: startValue,
-    endExpr: endValue,
-    includeEnd: isInclusive,
-    safeArray,
-  };
-};
-
 const isLiteralBoolean = ({
   exprId,
   value,
@@ -1860,94 +1717,6 @@ const isBreakBlock = ({
   );
 };
 
-const parseRangeForBody = ({
-  whileExpr,
-  iteratorSymbol,
-  ctx,
-}: {
-  whileExpr: HirWhileExpr;
-  iteratorSymbol: SymbolId;
-  ctx: CodegenContext;
-}):
-  | {
-      indexSymbol: SymbolId;
-      userBodyExpr: HirExprId;
-      userStatements: readonly number[];
-    }
-  | undefined => {
-  if (!isLiteralBoolean({ exprId: whileExpr.condition, value: "true", ctx })) {
-    return undefined;
-  }
-  const body = ctx.module.hir.expressions.get(whileExpr.body);
-  if (body?.exprKind !== "block" || body.statements.length !== 1) {
-    return undefined;
-  }
-  const nextStmt = ctx.module.hir.statements.get(body.statements[0]!);
-  if (
-    nextStmt?.kind !== "let" ||
-    nextStmt.mutable ||
-    nextStmt.pattern.kind !== "identifier"
-  ) {
-    return undefined;
-  }
-  const nextValueSymbol = nextStmt.pattern.symbol;
-  const nextCall = ctx.module.hir.expressions.get(nextStmt.initializer);
-  if (
-    nextCall?.exprKind !== "method-call" ||
-    nextCall.method !== "next" ||
-    nextCall.args.length !== 0 ||
-    expressionSymbol({ exprId: nextCall.target, ctx }) !== iteratorSymbol
-  ) {
-    return undefined;
-  }
-  const match =
-    typeof body.value === "number"
-      ? ctx.module.hir.expressions.get(body.value)
-      : undefined;
-  if (
-    match?.exprKind !== "match" ||
-    match.arms.length !== 2 ||
-    expressionSymbol({ exprId: match.discriminant, ctx }) !== nextValueSymbol
-  ) {
-    return undefined;
-  }
-  const someArm = match.arms.find(
-    (arm) => patternTypeName(arm.pattern) === "Some",
-  );
-  const noneArm = match.arms.find(
-    (arm) => patternTypeName(arm.pattern) === "None",
-  );
-  if (!someArm || !noneArm || !isBreakBlock({ exprId: noneArm.value, ctx })) {
-    return undefined;
-  }
-  const someBlock = ctx.module.hir.expressions.get(someArm.value);
-  if (someBlock?.exprKind !== "block" || someBlock.statements.length === 0) {
-    return undefined;
-  }
-  const indexStmt = ctx.module.hir.statements.get(someBlock.statements[0]!);
-  if (
-    indexStmt?.kind !== "let" ||
-    indexStmt.mutable ||
-    indexStmt.pattern.kind !== "identifier"
-  ) {
-    return undefined;
-  }
-  const payload = ctx.module.hir.expressions.get(indexStmt.initializer);
-  if (
-    payload?.exprKind !== "field-access" ||
-    payload.field !== "value" ||
-    expressionSymbol({ exprId: payload.target, ctx }) !== nextValueSymbol
-  ) {
-    return undefined;
-  }
-  const indexSymbol = indexStmt.pattern.symbol;
-  return {
-    indexSymbol,
-    userBodyExpr: someArm.value,
-    userStatements: someBlock.statements.slice(1),
-  };
-};
-
 const tryAnalyzeRangeForLoop = ({
   block,
   statementIndex,
@@ -1959,50 +1728,31 @@ const tryAnalyzeRangeForLoop = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): RangeForLoopAnalysis | undefined => {
-  const currentStmt = ctx.module.hir.statements.get(
-    block.statements[statementIndex]!,
-  );
-  if (currentStmt?.kind !== "expr-stmt") {
-    return undefined;
-  }
-  const wrapper = ctx.module.hir.expressions.get(currentStmt.expr);
-  if (wrapper?.exprKind !== "block" || wrapper.statements.length !== 1) {
-    return undefined;
-  }
-  const iteratorStmt = ctx.module.hir.statements.get(wrapper.statements[0]!);
-  if (
-    iteratorStmt?.kind !== "let" ||
-    iteratorStmt.mutable ||
-    iteratorStmt.pattern.kind !== "identifier"
-  ) {
-    return undefined;
-  }
-  const iterator = parseRangeForIterator({
-    initializer: iteratorStmt.initializer,
+  const statementId = block.statements[statementIndex];
+  if (typeof statementId !== "number") return undefined;
+  const shape = analyzeGeneratedRangeLoop({
+    statementId,
+    ctx,
+    typeInstanceId: fnCtx.typeInstanceId ?? fnCtx.instanceId,
+  });
+  if (!shape) return undefined;
+  const length = parseArrayLenExpr({
+    exprId: shape.endExpr,
     ctx,
     fnCtx,
   });
-  const whileExpr =
-    typeof wrapper.value === "number"
-      ? ctx.module.hir.expressions.get(wrapper.value)
+  const safeArray =
+    !shape.includeEnd &&
+    isLiteralI32({ exprId: shape.startExpr, value: "0", ctx }) &&
+    length
+      ? { arraySymbol: length.arraySymbol }
       : undefined;
-  if (!iterator || whileExpr?.exprKind !== "while") {
-    return undefined;
-  }
-  const body = parseRangeForBody({
-    whileExpr,
-    iteratorSymbol: iteratorStmt.pattern.symbol,
-    ctx,
-  });
-  if (!body) {
-    return undefined;
-  }
   let safeArrayScope: SafeArrayLoopScope | undefined;
-  if (iterator.safeArray) {
+  if (safeArray) {
     const proof = bodyPreservesArrayLoopProof({
-      bodyExprId: body.userBodyExpr,
-      indexSymbol: body.indexSymbol,
-      arraySymbol: iterator.safeArray.arraySymbol,
+      bodyExprId: shape.userBodyExpr,
+      indexSymbol: shape.indexSymbol,
+      arraySymbol: safeArray.arraySymbol,
       indexUpdate: "none",
       ctx,
       fnCtx,
@@ -2014,31 +1764,27 @@ const tryAnalyzeRangeForLoop = ({
     });
     if (proof.accepted) {
       safeArrayScope = {
-        arraySymbol: iterator.safeArray.arraySymbol,
-        indexSymbol: body.indexSymbol,
+        arraySymbol: safeArray.arraySymbol,
+        indexSymbol: shape.indexSymbol,
       };
     }
   }
   return {
-    whileExpr,
-    startExpr: iterator.startExpr,
-    endExpr: iterator.endExpr,
-    includeEnd: iterator.includeEnd,
-    indexSymbol: body.indexSymbol,
-    userBodyExpr: body.userBodyExpr,
-    userStatements: body.userStatements,
+    ...shape,
     safeArrayScope,
   };
 };
 
 const compileRangeForLoop = ({
   analysis,
+  generatedState,
   ctx,
   fnCtx,
   compileExpr,
   compileStatement,
 }: {
   analysis: RangeForLoopAnalysis;
+  generatedState?: GeneratedRangeLoopState;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -2048,28 +1794,34 @@ const compileRangeForLoop = ({
     fnCtx,
     prefix: "range_for_loop",
   });
-  const cursorLocal = allocateTempLocal(
-    binaryen.i32,
-    fnCtx,
-    ctx.program.primitives.i32,
-    ctx,
-  );
-  const endLocal = allocateTempLocal(binaryen.i32, fnCtx);
-  const indexLocal = allocateTempLocal(
-    binaryen.i32,
-    fnCtx,
-    ctx.program.primitives.i32,
-    ctx,
-  );
-  const doneLocal = analysis.includeEnd
-    ? allocateTempLocal(binaryen.i32, fnCtx)
-    : undefined;
   const previousIndexBinding = fnCtx.bindings.get(analysis.indexSymbol);
-  fnCtx.bindings.set(analysis.indexSymbol, {
-    ...indexLocal,
-    kind: "local",
-    typeId: ctx.program.primitives.i32,
-  });
+  const indexLocal =
+    previousIndexBinding?.kind === "local"
+      ? previousIndexBinding
+      : allocateTempLocal(binaryen.i32, fnCtx, ctx.program.primitives.i32, ctx);
+  if (!previousIndexBinding) {
+    fnCtx.bindings.set(analysis.indexSymbol, {
+      ...indexLocal,
+      kind: "local",
+      typeId: ctx.program.primitives.i32,
+    });
+  }
+  const stateLocal = (name: string) => {
+    const field = generatedState
+      ? generatedStateField({ state: generatedState, name })
+      : undefined;
+    return field
+      ? getOrCreateContinuationTempLocal({
+          tempId: field.tempId,
+          fallbackTypeId: field.typeId,
+          ctx,
+          fnCtx,
+        })
+      : allocateTempLocal(binaryen.i32, fnCtx, ctx.program.primitives.i32, ctx);
+  };
+  const cursorLocal = stateLocal("cursor");
+  const endLocal = stateLocal("end");
+  const doneLocal = analysis.includeEnd ? stateLocal("done") : undefined;
   const { setup: forwardingStores, value: body } = (() => {
     try {
       return withStableFieldLoadForwarding({
@@ -2082,9 +1834,28 @@ const compileRangeForLoop = ({
             withLoopScope(fnCtx, { breakLabel, continueLabel: loopLabel }, () =>
               ctx.mod.block(
                 null,
-                analysis.userStatements.map((stmtId) =>
-                  compileStatement(stmtId),
-                ),
+                analysis.userStatements.map((stmtId) => {
+                  const statement = compileStatement(stmtId);
+                  const continuation = fnCtx.continuation;
+                  if (!continuation) return statement;
+                  const shouldRun = continuationStatementShouldRun({
+                    sites:
+                      continuation.cfg.sitesByStmt.get(stmtId) ??
+                      new Set<number>(),
+                    executionStarted: () =>
+                      ctx.mod.local.get(
+                        continuation.startedLocal.index,
+                        continuation.startedLocal.type,
+                      ),
+                    activeSiteOrder: () =>
+                      ctx.mod.local.get(
+                        continuation.activeSiteLocal.index,
+                        continuation.activeSiteLocal.type,
+                      ),
+                    ctx,
+                  });
+                  return ctx.mod.if(shouldRun, statement, ctx.mod.nop());
+                }),
                 binaryen.none,
               ),
             );
@@ -2098,9 +1869,7 @@ const compileRangeForLoop = ({
         },
       });
     } finally {
-      if (previousIndexBinding) {
-        fnCtx.bindings.set(analysis.indexSymbol, previousIndexBinding);
-      } else {
+      if (!previousIndexBinding) {
         fnCtx.bindings.delete(analysis.indexSymbol);
       }
     }
@@ -2130,12 +1899,59 @@ const compileRangeForLoop = ({
         cursorLocal.index,
         ctx.mod.i32.add(cursor(), ctx.mod.i32.const(1)),
       );
+  const continuation = fnCtx.continuation;
+  const activeSiteInRegion = (regionName: string) => {
+    const region = generatedState
+      ? generatedStateResumeRegion({ state: generatedState, name: regionName })
+      : undefined;
+    const sites =
+      region && continuation
+        ? (continuation.cfg.sitesByExpr.get(region.exprId) ?? new Set<number>())
+        : new Set<number>();
+    const activeSite = continuation
+      ? ctx.mod.local.get(
+          continuation.activeSiteLocal.index,
+          continuation.activeSiteLocal.type,
+        )
+      : ctx.mod.i32.const(-1);
+    const activeInSites = [...sites].reduce(
+      (matches, site) =>
+        ctx.mod.i32.or(
+          matches,
+          ctx.mod.i32.eq(activeSite, ctx.mod.i32.const(site)),
+        ),
+      ctx.mod.i32.const(0),
+    );
+    return continuation
+      ? ctx.mod.i32.and(
+          ctx.mod.i32.eqz(
+            ctx.mod.local.get(
+              continuation.startedLocal.index,
+              continuation.startedLocal.type,
+            ),
+          ),
+          activeInSites,
+        )
+      : ctx.mod.i32.const(0);
+  };
+  const resumeInEnd = () => activeSiteInRegion("end-bound");
+  const resumeInBody = () => activeSiteInRegion("loop-body");
+  const skipIterationSetupLocal = allocateTempLocal(binaryen.i32, fnCtx);
+  const iterationSetup = ctx.mod.block(
+    null,
+    [conditionCheck, ctx.mod.local.set(indexLocal.index, cursor()), advance],
+    binaryen.none,
+  );
   const loopBody = ctx.mod.block(
     null,
     [
-      conditionCheck,
-      ctx.mod.local.set(indexLocal.index, cursor()),
-      advance,
+      ctx.mod.if(
+        ctx.mod.i32.eqz(
+          ctx.mod.local.get(skipIterationSetupLocal.index, binaryen.i32),
+        ),
+        iterationSetup,
+      ),
+      ctx.mod.local.set(skipIterationSetupLocal.index, ctx.mod.i32.const(0)),
       body,
       ctx.mod.br(loopLabel),
     ],
@@ -2144,27 +1960,42 @@ const compileRangeForLoop = ({
   return ctx.mod.block(
     breakLabel,
     [
-      ctx.mod.local.set(
-        cursorLocal.index,
-        compileExpr({
-          exprId: analysis.startExpr,
-          ctx,
-          fnCtx,
-          expectedResultTypeId: ctx.program.primitives.i32,
-        }).expr,
+      ctx.mod.if(
+        ctx.mod.i32.or(resumeInEnd(), resumeInBody()),
+        ctx.mod.nop(),
+        ctx.mod.local.set(
+          cursorLocal.index,
+          compileExpr({
+            exprId: analysis.startExpr,
+            ctx,
+            fnCtx,
+            expectedResultTypeId: ctx.program.primitives.i32,
+          }).expr,
+        ),
       ),
-      ctx.mod.local.set(
-        endLocal.index,
-        compileExpr({
-          exprId: analysis.endExpr,
-          ctx,
-          fnCtx,
-          expectedResultTypeId: ctx.program.primitives.i32,
-        }).expr,
+      ctx.mod.if(
+        resumeInBody(),
+        ctx.mod.nop(),
+        ctx.mod.local.set(
+          endLocal.index,
+          compileExpr({
+            exprId: analysis.endExpr,
+            ctx,
+            fnCtx,
+            expectedResultTypeId: ctx.program.primitives.i32,
+          }).expr,
+        ),
       ),
       ...(doneLocal
-        ? [ctx.mod.local.set(doneLocal.index, ctx.mod.i32.const(0))]
+        ? [
+            ctx.mod.if(
+              resumeInBody(),
+              ctx.mod.nop(),
+              ctx.mod.local.set(doneLocal.index, ctx.mod.i32.const(0)),
+            ),
+          ]
         : []),
+      ctx.mod.local.set(skipIterationSetupLocal.index, resumeInBody()),
       ...forwardingStores,
       ctx.mod.loop(loopLabel, loopBody),
     ],
@@ -2187,17 +2018,40 @@ export const tryCompileRangeForStatement = ({
   compileExpr: ExpressionCompiler;
   compileStatement: StatementCompiler;
 }): binaryen.ExpressionRef | undefined => {
-  if (
-    !intrinsicRangeForLoopCandidate({
-      block,
-      statementIndex,
-      ctx,
-      fnCtx,
+  const analysis = tryAnalyzeRangeForLoop({
+    block,
+    statementIndex,
+    ctx,
+    fnCtx,
+  });
+  if (!analysis) return undefined;
+  const candidateState = ctx.effectLowering.generatedStatesByStatement.get(
+    analysis.statementId,
+  );
+  const generatedState =
+    candidateState?.kind === "range-loop" &&
+    generatedRangeLoopStateMatchesShape({
+      state: candidateState,
+      shape: analysis,
+      i32TypeId: ctx.program.primitives.i32,
     })
-  ) {
+      ? candidateState
+      : undefined;
+  const indexBinding = fnCtx.bindings.get(analysis.indexSymbol);
+  const continuationIndexIsCompatible =
+    !indexBinding ||
+    (indexBinding.kind === "local" &&
+      indexBinding.type === binaryen.i32 &&
+      indexBinding.typeId === ctx.program.primitives.i32);
+  if (!continuationIndexIsCompatible) {
+    recordFastPathDecision({
+      prefix: "codegen.intrinsic_range_for",
+      accepted: false,
+      reason: "shape",
+    });
     return undefined;
   }
-  if (fnCtx.effectful) {
+  if (fnCtx.effectful && !generatedState) {
     recordFastPathDecision({
       prefix: "codegen.intrinsic_range_for",
       accepted: false,
@@ -2205,26 +2059,18 @@ export const tryCompileRangeForStatement = ({
     });
     return undefined;
   }
-  const analysis = tryAnalyzeRangeForLoop({
-    block,
-    statementIndex,
-    ctx,
-    fnCtx,
-  });
   recordFastPathDecision({
     prefix: "codegen.intrinsic_range_for",
-    accepted: Boolean(analysis),
-    ...(!analysis ? { reason: "shape" } : {}),
+    accepted: true,
   });
-  return analysis
-    ? compileRangeForLoop({
-        analysis,
-        ctx,
-        fnCtx,
-        compileExpr,
-        compileStatement,
-      })
-    : undefined;
+  return compileRangeForLoop({
+    analysis,
+    generatedState,
+    ctx,
+    fnCtx,
+    compileExpr,
+    compileStatement,
+  });
 };
 
 const activeSafeArrayLoopScope = ({

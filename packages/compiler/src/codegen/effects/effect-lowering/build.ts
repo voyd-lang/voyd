@@ -24,6 +24,10 @@ import {
   sanitizeIdentifier,
 } from "./layout.js";
 import { wasmSymbolName } from "../../symbol-names.js";
+import {
+  collectGeneratedRangeLoopShapes,
+  describeGeneratedRangeLoopState,
+} from "../../generated-state.js";
 
 type TempCaptureKey = string;
 
@@ -199,6 +203,10 @@ export const buildEffectLoweringEir = ({
       bindingKind?: import("../../../semantics/hir/index.js").HirBindingKind;
     }
   >();
+  const generatedStatesByStatement = new Map<
+    number,
+    import("../../generated-state.js").CompilerGeneratedState
+  >();
   const tempIdByKey = new Map<string, number>();
   let tempCounter = 0;
 
@@ -238,6 +246,107 @@ export const buildEffectLoweringEir = ({
     return next;
   };
 
+  const appendExtraCaptureFields = ({
+    siteExprId,
+    fields,
+    into,
+  }: {
+    siteExprId: HirExprId;
+    fields: readonly ContinuationCaptureField[];
+    into: Map<HirExprId, readonly ContinuationCaptureField[]>;
+  }): void => {
+    const existing = into.get(siteExprId) ?? [];
+    const tempIds = new Set(existing.map((field) => field.tempId));
+    into.set(siteExprId, [
+      ...existing,
+      ...fields.filter(
+        (field) =>
+          typeof field.tempId !== "number" || !tempIds.has(field.tempId),
+      ),
+    ]);
+  };
+
+  const addGeneratedStateCaptures = ({
+    rootExprId,
+    analysisSites,
+    extraCaptureFieldsBySite,
+    excludedSymbolsBySite,
+    excludedTempOwnersBySite,
+  }: {
+    rootExprId: HirExprId;
+    analysisSites: readonly { exprId: HirExprId }[];
+    extraCaptureFieldsBySite: Map<
+      HirExprId,
+      readonly ContinuationCaptureField[]
+    >;
+    excludedSymbolsBySite: Map<HirExprId, ReadonlySet<SymbolId>>;
+    excludedTempOwnersBySite: Map<HirExprId, ReadonlySet<HirExprId>>;
+  }): void => {
+    const siteExprIds = new Set(analysisSites.map((site) => site.exprId));
+    collectGeneratedRangeLoopShapes({ rootExprId, ctx }).forEach((shape) => {
+      const state = describeGeneratedRangeLoopState({
+        shape,
+        i32TypeId: ctx.program.primitives.i32,
+        allocateTempId: (fieldName, typeId) =>
+          allocateTempId({
+            key: `generatedState:range:${shape.statementId}:${fieldName}`,
+            typeId,
+          }),
+      });
+      generatedStatesByStatement.set(shape.statementId, state);
+      const fieldsByName = new Map(
+        state.fields.map((field) => [field.name, field] as const),
+      );
+      state.resumeRegions.forEach((region) => {
+        const regionSiteExprIds = new Set<HirExprId>();
+        walkHirExpression({
+          exprId: region.exprId,
+          ctx,
+          visitLambdaBodies: false,
+          visitor: {
+            onExpr: (exprId) => {
+              if (siteExprIds.has(exprId)) regionSiteExprIds.add(exprId);
+            },
+          },
+        });
+        const captureFields = region.captureFields.map((fieldName) => {
+          const field = fieldsByName.get(fieldName);
+          if (!field) {
+            throw new Error(
+              `generated state region references missing field ${fieldName}`,
+            );
+          }
+          return {
+            sourceKind: "temp" as const,
+            tempId: field.tempId,
+            typeId: field.typeId,
+          };
+        });
+        regionSiteExprIds.forEach((siteExprId) => {
+          appendExtraCaptureFields({
+            siteExprId,
+            fields: captureFields,
+            into: extraCaptureFieldsBySite,
+          });
+          excludedSymbolsBySite.set(
+            siteExprId,
+            new Set([
+              ...(excludedSymbolsBySite.get(siteExprId) ?? []),
+              ...region.replacedSymbols,
+            ]),
+          );
+          excludedTempOwnersBySite.set(
+            siteExprId,
+            new Set([
+              ...(excludedTempOwnersBySite.get(siteExprId) ?? []),
+              ...region.replacedTempOwners,
+            ]),
+          );
+        });
+      });
+    });
+  };
+
   const emitSitesFor = ({
     analysisSites,
     owner,
@@ -247,6 +356,8 @@ export const buildEffectLoweringEir = ({
     handlerAtSite,
     symbolTypes,
     extraCaptureFieldsBySite = new Map(),
+    excludedSymbolsBySite = new Map(),
+    excludedTempOwnersBySite = new Map(),
   }: {
     analysisSites: readonly {
       kind: "perform" | "call";
@@ -270,17 +381,26 @@ export const buildEffectLoweringEir = ({
       HirExprId,
       readonly ContinuationCaptureField[]
     >;
+    excludedSymbolsBySite?: ReadonlyMap<HirExprId, ReadonlySet<SymbolId>>;
+    excludedTempOwnersBySite?: ReadonlyMap<HirExprId, ReadonlySet<HirExprId>>;
   }): void => {
     analysisSites.forEach((site) => {
       const resumeValueTypeId = resumeValueTypeIdForSite({ site, ctx });
-      const tempCaptures = uniqueTempCaptures(site.tempCaptures ?? []).map(
-        (capture) => ({
-          tempId: ensureTempId(capture),
-          typeId: capture.typeId,
-        }),
-      );
+      const excludedTempOwners = excludedTempOwnersBySite.get(site.exprId);
+      const tempCaptures = uniqueTempCaptures(
+        (site.tempCaptures ?? []).filter(
+          (capture) => !excludedTempOwners?.has(capture.callExprId),
+        ),
+      ).map((capture) => ({
+        tempId: ensureTempId(capture),
+        typeId: capture.typeId,
+      }));
       const captureFields = captureFieldsForSite({
-        liveSymbols: site.liveAfter,
+        liveSymbols: new Set(
+          [...site.liveAfter].filter(
+            (symbol) => !excludedSymbolsBySite.get(site.exprId)?.has(symbol),
+          ),
+        ),
         params,
         ordering,
         tempCaptures,
@@ -396,6 +516,11 @@ export const buildEffectLoweringEir = ({
       HirExprId,
       readonly ContinuationCaptureField[]
     >();
+    const excludedSymbolsBySite = new Map<HirExprId, ReadonlySet<SymbolId>>();
+    const excludedTempOwnersBySite = new Map<
+      HirExprId,
+      ReadonlySet<HirExprId>
+    >();
     for (let index = defaultParameters.length - 1; index >= 0; index -= 1) {
       const current = defaultParameters[index]!;
       const defaultLiveAfter = new Set(live);
@@ -431,6 +556,13 @@ export const buildEffectLoweringEir = ({
       live = defaultAnalysis.live;
       analysisSites = [...defaultAnalysis.sites, ...analysisSites];
     }
+    addGeneratedStateCaptures({
+      rootExprId: item.body,
+      analysisSites,
+      extraCaptureFieldsBySite,
+      excludedSymbolsBySite,
+      excludedTempOwnersBySite,
+    });
     const symbolId = ctx.program.symbols.idOf({
       moduleId: ctx.moduleId,
       symbol: item.symbol,
@@ -449,6 +581,8 @@ export const buildEffectLoweringEir = ({
       handlerAtSite: true,
       symbolTypes,
       extraCaptureFieldsBySite,
+      excludedSymbolsBySite,
+      excludedTempOwnersBySite,
     });
     if (
       typeof process !== "undefined" &&
@@ -487,6 +621,22 @@ export const buildEffectLoweringEir = ({
       liveAfter: new Set(),
       ctx,
     });
+    const extraCaptureFieldsBySite = new Map<
+      HirExprId,
+      readonly ContinuationCaptureField[]
+    >();
+    const excludedSymbolsBySite = new Map<HirExprId, ReadonlySet<SymbolId>>();
+    const excludedTempOwnersBySite = new Map<
+      HirExprId,
+      ReadonlySet<HirExprId>
+    >();
+    addGeneratedStateCaptures({
+      rootExprId: expr.body,
+      analysisSites: analysis.sites,
+      extraCaptureFieldsBySite,
+      excludedSymbolsBySite,
+      excludedTempOwnersBySite,
+    });
 
     emitSitesFor({
       analysisSites: analysis.sites,
@@ -496,6 +646,9 @@ export const buildEffectLoweringEir = ({
       params,
       handlerAtSite: true,
       symbolTypes,
+      extraCaptureFieldsBySite,
+      excludedSymbolsBySite,
+      excludedTempOwnersBySite,
     });
   });
 
@@ -518,6 +671,22 @@ export const buildEffectLoweringEir = ({
         ctx,
         skipCalleeSymbols,
       });
+      const extraCaptureFieldsBySite = new Map<
+        HirExprId,
+        readonly ContinuationCaptureField[]
+      >();
+      const excludedSymbolsBySite = new Map<HirExprId, ReadonlySet<SymbolId>>();
+      const excludedTempOwnersBySite = new Map<
+        HirExprId,
+        ReadonlySet<HirExprId>
+      >();
+      addGeneratedStateCaptures({
+        rootExprId: clause.body,
+        analysisSites: analysis.sites,
+        extraCaptureFieldsBySite,
+        excludedSymbolsBySite,
+        excludedTempOwnersBySite,
+      });
       const fnName = `handler_${expr.id}_${clauseIndex}`;
       const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}`;
 
@@ -529,6 +698,9 @@ export const buildEffectLoweringEir = ({
         params,
         handlerAtSite: true,
         symbolTypes,
+        extraCaptureFieldsBySite,
+        excludedSymbolsBySite,
+        excludedTempOwnersBySite,
       });
     });
   });
@@ -549,5 +721,6 @@ export const buildEffectLoweringEir = ({
     callArgTemps,
     tempTypeIds,
     defaultParamTemps,
+    generatedStatesByStatement,
   };
 };

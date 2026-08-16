@@ -7,6 +7,7 @@ import type {
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
 import type { HirBindingKind } from "../../../semantics/hir/index.js";
+import type { CompilerGeneratedState } from "../../generated-state.js";
 
 export type ContinuationFieldSource = "param" | "local" | "handler" | "site";
 
@@ -101,6 +102,7 @@ export interface EffectLoweringResult {
       bindingKind?: HirBindingKind;
     }
   >;
+  generatedStatesByStatement: Map<number, CompilerGeneratedState>;
 }
 
 export interface EffectLoweringEirResult {
@@ -121,6 +123,7 @@ export interface EffectLoweringEirResult {
       bindingKind?: HirBindingKind;
     }
   >;
+  generatedStatesByStatement: Map<number, CompilerGeneratedState>;
 }
 
 export type ContinuationSiteOwner =
