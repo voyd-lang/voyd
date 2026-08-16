@@ -25,6 +25,7 @@ describe("program helper registry", () => {
         callArgTemps: new Map(),
         tempTypeIds: new Map(),
         defaultParamTemps: new Map(),
+        generatedStatesByStatement: new Map(),
       },
     };
 

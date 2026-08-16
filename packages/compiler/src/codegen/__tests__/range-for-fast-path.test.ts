@@ -22,18 +22,26 @@ const fixturePath = resolve(
 );
 
 const watForExport = (wat: string, exportName: string): string => {
+  return watForFunctionName(wat, functionNameForExport(wat, exportName));
+};
+
+const functionNameForExport = (wat: string, exportName: string): string => {
   const exportMatch = wat.match(
     new RegExp(`\\(export "${exportName}" \\(func \\$([^\\s\\)]+)\\)\\)`),
   );
   expect(exportMatch).not.toBeNull();
-  const start = wat.indexOf(`(func $${exportMatch?.[1]} `);
+  return exportMatch![1]!;
+};
+
+const watForFunctionName = (wat: string, functionName: string): string => {
+  const start = wat.indexOf(`(func $${functionName} `);
   let depth = 0;
   for (let index = start; index < wat.length; index += 1) {
     if (wat[index] === "(") depth += 1;
     if (wat[index] === ")") depth -= 1;
     if (depth === 0) return wat.slice(start, index + 1);
   }
-  throw new Error(`unterminated function for export ${exportName}`);
+  throw new Error(`unterminated function ${functionName}`);
 };
 
 const compileFixture = async () => {
@@ -101,5 +109,80 @@ describe("intrinsic Range<i32> for-loop fast path", () => {
     expect(recordedCounters()).toContain(
       "codegen.intrinsic_range_for.accepted",
     );
+  });
+
+  it("restores generated range state across effects", async () => {
+    const { generated, baseline } = await compileFixture();
+    const optimizedHost = await createVoydHost({ wasm: generated.wasm! });
+    const baselineHost = await createVoydHost({ wasm: baseline.wasm! });
+    const cases = [
+      ["effectful_range_bounds_and_progress", 60123245],
+      ["effectful_range_work_around_suspension", 812424],
+      ["effectful_range_multiple_suspensions", 3224],
+      ["effectful_range_nested_suspending_statement", 42345],
+      ["effectful_nested_range_control", 244],
+      ["effectful_inclusive_max_tail", 1],
+      ["effectful_handler_inside_loop", 5],
+      ["effectful_range_checked_array_access", 12],
+      ["effectful_range_checked_array_get", 12],
+    ] as const;
+
+    for (const [exportName, expected] of cases) {
+      const optimizedValue = await optimizedHost
+        .run<number>(exportName)
+        .catch((error: unknown) => {
+          throw new Error(`optimized ${exportName} failed`, { cause: error });
+        });
+      const baselineValue = await baselineHost
+        .run<number>(exportName)
+        .catch((error: unknown) => {
+          throw new Error(`baseline ${exportName} failed`, { cause: error });
+        });
+      expect(optimizedValue).toBe(expected);
+      expect(baselineValue).toBe(expected);
+    }
+
+    const generatedModuleWat = generated.module.emitText();
+    const baselineModuleWat = baseline.module.emitText();
+    const effectfulExport = "effectful_range_bounds_and_progress";
+    const generatedWat = watForFunctionName(
+      generatedModuleWat,
+      `${functionNameForExport(generatedModuleWat, effectfulExport)}__effectful_impl`,
+    );
+    const baselineWat = watForFunctionName(
+      baselineModuleWat,
+      `${functionNameForExport(baselineModuleWat, effectfulExport)}__effectful_impl`,
+    );
+    expect(generatedWat).toContain("range_for_loop");
+    expect(generatedWat).not.toContain("$std__range__RangeIterator");
+    expect(baselineWat).toContain("range_for_loop");
+    expect(baselineWat).not.toContain("$std__range__RangeIterator");
+
+    const statementRoutingExports = [
+      "effectful_range_work_around_suspension",
+      "effectful_range_multiple_suspensions",
+      "effectful_range_nested_suspending_statement",
+    ];
+    for (const exportName of statementRoutingExports) {
+      const wat = watForFunctionName(
+        generatedModuleWat,
+        `${functionNameForExport(generatedModuleWat, exportName)}__effectful_impl`,
+      );
+      expect(wat).toContain("range_for_loop");
+      expect(wat).not.toContain("$std__range__RangeIterator");
+    }
+
+    const checkedArrayExport = "effectful_range_checked_array_access";
+    const checkedArrayWat = watForFunctionName(
+      generatedModuleWat,
+      `${functionNameForExport(generatedModuleWat, checkedArrayExport)}__effectful_impl`,
+    );
+    expect(checkedArrayWat).toContain("array.get");
+    expect(checkedArrayWat).toContain("unreachable");
+    expect(
+      recordedCounters().some((name) =>
+        name.startsWith("codegen.range_array_safe_scope.fallback."),
+      ),
+    ).toBe(true);
   });
 });

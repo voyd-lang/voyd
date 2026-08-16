@@ -214,6 +214,7 @@ export const createTestCodegenContext = (): {
       callArgTemps: new Map(),
       tempTypeIds: new Map(),
       defaultParamTemps: new Map(),
+      generatedStatesByStatement: new Map(),
     },
     outcomeValueTypes: new Map(),
     specializationPolicy: specializationPolicyForOptimizationLevel("none"),
