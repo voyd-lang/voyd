@@ -159,32 +159,35 @@ export type PackageCallableSignature = {
 export const cloneModuleExportTable = (
   table: ModuleExportTable,
 ): ModuleExportTable => {
-  const cloned: ModuleExportTable = new Map(table);
+  const cloned: ModuleExportTable = new Map(
+    Array.from(table, ([name, entry]) => [name, cloneExportData(entry)]),
+  );
   if (table.packageSemanticInterface) {
-    cloned.packageSemanticInterface = {
-      ...table.packageSemanticInterface,
-      ordinaryMutationSummaries:
-        table.packageSemanticInterface.ordinaryMutationSummaries.map(
-          (entry) => ({
-            ...entry,
-            summary: {
-              ...entry.summary,
-              directAccesses: [...entry.summary.directAccesses],
-              reachableAccesses: [...entry.summary.reachableAccesses],
-            },
-          }),
-        ),
-      exports: table.packageSemanticInterface.exports.map((entry) => ({
-        ...entry,
-        declarations: entry.declarations.map((declaration) => ({
-          ...declaration,
-        })),
-        members: entry.members.map((member) => ({ ...member })),
-      })),
-      types: [...table.packageSemanticInterface.types],
-    };
+    cloned.packageSemanticInterface = cloneExportData(
+      table.packageSemanticInterface,
+    );
   }
   return cloned;
+};
+
+const cloneExportData = <T>(value: T): T => {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(cloneExportData) as T;
+  }
+  if (value instanceof Map) {
+    return new Map(
+      Array.from(value, ([key, entry]) => [key, cloneExportData(entry)]),
+    ) as T;
+  }
+  if (value instanceof Set) {
+    return new Set(Array.from(value, cloneExportData)) as T;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, cloneExportData(entry)]),
+  ) as T;
 };
 
 export interface ModuleExportSurfaceEntry {

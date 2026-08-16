@@ -26,6 +26,7 @@ type CompileRow = {
   wasmBytes: number;
   gzipBytes: number;
   heapUsedBytes: number;
+  rssBytes: number;
   wasmSha256: string;
   runtimeMedianMs?: number;
   runtimeSamplesMs: readonly number[];
@@ -198,7 +199,7 @@ const runScenario = async ({
       scenario.name,
     );
     const compileMs = performance.now() - startedAt;
-    const heapUsedBytes = process.memoryUsage().heapUsed;
+    const { heapUsed: heapUsedBytes, rss: rssBytes } = process.memoryUsage();
     const runtimeSamplesMs =
       compileIndex === 0
         ? await runRuntimeSamples({ wasm: compiled.wasm, scenario })
@@ -214,6 +215,7 @@ const runScenario = async ({
       wasmBytes: compiled.wasm.byteLength,
       gzipBytes: gzipSync(compiled.wasm).byteLength,
       heapUsedBytes,
+      rssBytes,
       wasmSha256: createHash("sha256").update(compiled.wasm).digest("hex"),
       runtimeMedianMs: median(runtimeSamplesMs),
       runtimeSamplesMs,
@@ -244,6 +246,7 @@ const printRows = (rows: readonly CompileRow[]): void => {
       "wasmBytes",
       "gzipBytes",
       "heapUsedBytes",
+      "rssBytes",
       "wasmSha256",
       "runtimeMedianMs",
       "runtimeSamplesMs",
@@ -261,6 +264,7 @@ const printRows = (rows: readonly CompileRow[]): void => {
         row.wasmBytes.toString(),
         row.gzipBytes.toString(),
         row.heapUsedBytes.toString(),
+        row.rssBytes.toString(),
         row.wasmSha256,
         row.runtimeMedianMs === undefined ? "" : row.runtimeMedianMs.toFixed(3),
         row.runtimeSamplesMs.map((sample) => sample.toFixed(3)).join("|"),

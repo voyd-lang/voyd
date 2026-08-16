@@ -30,14 +30,53 @@ const symbolUsesTypeNamespace = (kind: SymbolKind): boolean =>
 
 const cloneScopeInfo = (info: ScopeInfo): ScopeInfo => ({ ...info });
 
-const cloneSymbolRecord = (symbol: SymbolRecord): SymbolRecord => ({
+const copySymbolRecord = (symbol: SymbolRecord): SymbolRecord => ({ ...symbol });
+
+const cloneSymbolRecordForOwnershipBoundary = (
+  symbol: SymbolRecord,
+): SymbolRecord => ({
   ...symbol,
-  metadata: symbol.metadata ? { ...symbol.metadata } : undefined,
+  metadata: symbol.metadata
+    ? cloneSymbolMetadataValue(symbol.metadata)
+    : undefined,
 });
+
+const cloneSymbolMetadataValue = <T>(value: T): T => {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(cloneSymbolMetadataValue) as T;
+  }
+  if (value instanceof Map) {
+    return new Map(
+      Array.from(value, ([key, entry]) => [
+        key,
+        cloneSymbolMetadataValue(entry),
+      ]),
+    ) as T;
+  }
+  if (value instanceof Set) {
+    return new Set(Array.from(value, cloneSymbolMetadataValue)) as T;
+  }
+  if (value instanceof Uint8Array) {
+    return value.slice() as T;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      cloneSymbolMetadataValue(entry),
+    ]),
+  ) as T;
+};
 
 const ensureScopeExists = (
   bucket: ScopeBucket | undefined,
-  scope: ScopeId
+  scope: ScopeId,
 ): ScopeBucket => {
   if (!bucket) {
     throw new Error(`symbol table scope ${scope} does not exist`);
@@ -74,7 +113,7 @@ export class SymbolTable {
   private createBucket(info: Omit<ScopeInfo, "id">): ScopeId {
     if (typeof info.parent === "number" && !this.scopeBuckets[info.parent]) {
       throw new Error(
-        `cannot create scope without registering parent ${info.parent}`
+        `cannot create scope without registering parent ${info.parent}`,
       );
     }
 
@@ -118,7 +157,7 @@ export class SymbolTable {
 
   declare(
     symbol: Omit<SymbolRecord, "id" | "scope">,
-    scope: ScopeId = this.currentScope()
+    scope: ScopeId = this.currentScope(),
   ): SymbolId {
     if (
       RESERVED_SYMBOL_NAMES.has(symbol.name) ||
@@ -128,7 +167,14 @@ export class SymbolTable {
       throw new Error(`cannot declare reserved identifier ${symbol.name}`);
     }
     const id = this.nextSymbol++;
-    const record: SymbolRecord = { ...symbol, id, scope };
+    const record: SymbolRecord = {
+      ...symbol,
+      id,
+      scope,
+      metadata: symbol.metadata
+        ? cloneSymbolMetadataValue(symbol.metadata)
+        : undefined,
+    };
     this.symbolRecords[id] = record;
 
     const bucket = ensureScopeExists(this.scopeBuckets[scope], scope);
@@ -159,7 +205,7 @@ export class SymbolTable {
       symbol,
       bindingIdentity,
     }: Pick<SymbolAliasBinding, "name" | "symbol" | "bindingIdentity">,
-    scope: ScopeId = this.currentScope()
+    scope: ScopeId = this.currentScope(),
   ): void {
     const aliasedSymbol = this.symbolRecords[symbol];
     if (
@@ -199,9 +245,7 @@ export class SymbolTable {
   }
 
   getScope(id: ScopeId): Readonly<ScopeInfo> {
-    return cloneScopeInfo(
-      ensureScopeExists(this.scopeBuckets[id], id).info
-    );
+    return cloneScopeInfo(ensureScopeExists(this.scopeBuckets[id], id).info);
   }
 
   getSymbol(id: SymbolId): Readonly<SymbolRecord> {
@@ -210,7 +254,7 @@ export class SymbolTable {
       throw new Error(`symbol ${id} does not exist`);
     }
 
-    return cloneSymbolRecord(record);
+    return copySymbolRecord(record);
   }
 
   hasSymbol(id: SymbolId): boolean {
@@ -257,7 +301,7 @@ export class SymbolTable {
   resolveWhere(
     name: string,
     fromScope: ScopeId,
-    predicate: SymbolPredicate
+    predicate: SymbolPredicate,
   ): SymbolId | undefined {
     return this.resolveInternal(
       name,
@@ -269,7 +313,7 @@ export class SymbolTable {
   resolveAllWhere(
     name: string,
     fromScope: ScopeId,
-    predicate: SymbolPredicate
+    predicate: SymbolPredicate,
   ): readonly SymbolId[] {
     return this.resolveAllInternal(
       name,
@@ -281,35 +325,35 @@ export class SymbolTable {
   resolveByKinds(
     name: string,
     fromScope: ScopeId,
-    kinds: readonly SymbolKind[]
+    kinds: readonly SymbolKind[],
   ): SymbolId | undefined {
     const allowedKinds = new Set(kinds);
     return this.resolveInternal(
       name,
       fromScope,
       (record) =>
-        record.bindingIdentity === undefined && allowedKinds.has(record.kind)
+        record.bindingIdentity === undefined && allowedKinds.has(record.kind),
     );
   }
 
   resolveAllByKinds(
     name: string,
     fromScope: ScopeId,
-    kinds: readonly SymbolKind[]
+    kinds: readonly SymbolKind[],
   ): readonly SymbolId[] {
     const allowedKinds = new Set(kinds);
     return this.resolveAllInternal(
       name,
       fromScope,
       (record) =>
-        record.bindingIdentity === undefined && allowedKinds.has(record.kind)
+        record.bindingIdentity === undefined && allowedKinds.has(record.kind),
     );
   }
 
   private resolveInternal(
     name: string,
     fromScope: ScopeId,
-    predicate?: SymbolPredicate
+    predicate?: SymbolPredicate,
   ): SymbolId | undefined {
     let scope: ScopeId | null = fromScope;
     let importedFallback: SymbolId | undefined;
@@ -323,9 +367,7 @@ export class SymbolTable {
           if (!record || isImportedSymbolRecord(record)) {
             continue;
           }
-          const resolvedRecord = bucket.surfaceAliases
-            .get(name)
-            ?.has(candidate)
+          const resolvedRecord = bucket.surfaceAliases.get(name)?.has(candidate)
             ? { ...record, bindingIdentity: undefined }
             : record;
           if (!predicate || predicate(resolvedRecord)) {
@@ -388,7 +430,7 @@ export class SymbolTable {
   private resolveAllInternal(
     name: string,
     fromScope: ScopeId,
-    predicate?: SymbolPredicate
+    predicate?: SymbolPredicate,
   ): readonly SymbolId[] {
     const resolved: SymbolId[] = [];
     let scope: ScopeId | null = fromScope;
@@ -423,15 +465,15 @@ export class SymbolTable {
     return resolved;
   }
 
-  setSymbolMetadata(
-    id: SymbolId,
-    metadata: Record<string, unknown>
-  ): void {
+  setSymbolMetadata(id: SymbolId, metadata: Record<string, unknown>): void {
     const record = this.symbolRecords[id];
     if (!record) {
       throw new Error(`symbol ${id} does not exist`);
     }
-    record.metadata = { ...(record.metadata ?? {}), ...metadata };
+    record.metadata = cloneSymbolMetadataValue({
+      ...(record.metadata ?? {}),
+      ...metadata,
+    });
   }
 
   *symbolsInScope(scope: ScopeId): IterableIterator<SymbolId> {
@@ -464,11 +506,11 @@ export class SymbolTable {
       nextScope: this.nextScope,
       nextSymbol: this.nextSymbol,
       scopes: this.scopeBuckets.map((bucket) => cloneScopeInfo(bucket.info)),
-      symbols: this.symbolRecords.map(cloneSymbolRecord),
+      symbols: this.symbolRecords.map(cloneSymbolRecordForOwnershipBoundary),
       ...(this.aliasBindings.length > 0
         ? { aliases: this.aliasBindings.map((alias) => ({ ...alias })) }
         : {}),
-      payload,
+      payload: payload ? cloneSymbolMetadataValue(payload) : undefined,
     };
   }
 
@@ -489,12 +531,12 @@ export class SymbolTable {
 
     this.symbolRecords.length = 0;
     snap.symbols.forEach((symbol) => {
-      const record = cloneSymbolRecord(symbol);
+      const record = cloneSymbolRecordForOwnershipBoundary(symbol);
       this.symbolRecords[record.id] = record;
 
       const bucket = ensureScopeExists(
         this.scopeBuckets[record.scope],
-        record.scope
+        record.scope,
       );
       bucket.locals.push(record.id);
       const hits = bucket.nameIndex.get(record.name);
@@ -518,7 +560,7 @@ export class SymbolTable {
     (snap.aliases ?? []).forEach((alias) => {
       const bucket = ensureScopeExists(
         this.scopeBuckets[alias.scope],
-        alias.scope
+        alias.scope,
       );
       if (alias.bindingIdentity) {
         const key = bindingIndexKey(alias.name, alias.bindingIdentity);

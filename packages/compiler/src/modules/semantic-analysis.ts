@@ -14,18 +14,21 @@ import type {
 import {
   createTypeArena,
   type TypeArena,
-  type TypeArenaSnapshot,
 } from "../semantics/typing/type-arena.js";
 import {
   createEffectInterner,
   createEffectTable,
   type EffectInterner,
-  type EffectInternerSnapshot,
 } from "../semantics/effects/effect-table.js";
 import { getModuleSccGroups } from "./scc.js";
 import { collectCyclicModuleExportSurfaces } from "./cyclic-export-surfaces.js";
-import { cloneSemanticsMapForTypingState } from "./semantic-snapshot.js";
+import {
+  createReusableDependencySemanticsSnapshot,
+  type ReusableDependencySemanticsSnapshot,
+} from "./semantic-snapshot.js";
 import { incrementCompilerPerfCounter } from "../perf.js";
+
+export type { ReusableDependencySemanticsSnapshot } from "./semantic-snapshot.js";
 
 export type SemanticsTypingState = {
   arena: TypeArena;
@@ -41,13 +44,6 @@ export type AnalyzeModuleSemanticsOptions = {
   changedModuleIds?: ReadonlySet<string>;
   typingState?: SemanticsTypingState;
   isCancelled?: () => boolean;
-};
-
-export type ReusableDependencySemanticsSnapshot = {
-  moduleIds: readonly string[];
-  semantics: ReadonlyMap<string, SemanticsPipelineResult>;
-  arena: TypeArenaSnapshot;
-  effectInterner: EffectInternerSnapshot;
 };
 
 export type AnalyzeModuleSemanticsResult = {
@@ -373,22 +369,12 @@ const captureReusableDependencySnapshot = ({
     return undefined;
   }
 
-  const arenaSnapshot = arena.snapshot();
-  const effectInternerSnapshot = effectInterner.snapshotInterner();
-  const snapshotArena = createTypeArena(arenaSnapshot);
-  const snapshotEffectInterner = createEffectInterner(effectInternerSnapshot);
-  const semanticsSnapshot = cloneSemanticsMapForTypingState({
-    semantics: new Map(entries),
-    arena: snapshotArena,
-    effectInterner: snapshotEffectInterner,
-  });
-
-  return {
+  return createReusableDependencySemanticsSnapshot({
     moduleIds: entries.map(([moduleId]) => moduleId),
-    semantics: semanticsSnapshot,
-    arena: arenaSnapshot,
-    effectInterner: effectInternerSnapshot,
-  };
+    semantics: new Map(entries),
+    arena: arena.snapshot(),
+    effectInterner: effectInterner.snapshotInterner(),
+  });
 };
 
 const analyzeCyclicScc = ({
